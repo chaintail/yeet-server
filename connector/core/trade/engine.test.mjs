@@ -93,7 +93,7 @@ test('B-1 REQUOTE when a live leg is under the preview minimum: new revision and
 test('B-1 REQUOTE when the preview is over 60 s old and the live output is worse (still above the minimum)',async()=>{
  const {engine,oneclick,now}=await fakeEngine();
  const fresh=await engine.propose(alice,basket);
- oneclick.liveRatio=0.995;// worse than the estimate, above min_out (99%)
+ oneclick.liveRatio=0.996;// 40 bps worse than the estimate: within YEET_REQUOTE_TOLERANCE_BPS (50), above min_out (99%)
  assert.equal((await exec(engine,alice,fresh)).status,'submitted','a fresh preview tolerates a small move');
  const old=await engine.propose(alice,{request_id:'r2',amount_usdc:'10',legs:[{symbol:'WIF',parts:10}]});
  now.advance(61_000);// preview 61 s old, code (120 s) still valid

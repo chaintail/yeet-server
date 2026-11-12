@@ -3,15 +3,18 @@
 //  2. kill switch and YEET_LIVE (unset: TRADING_PAUSED, the code stays unused)
 //  3. signer state and balance through the wallet adapter
 //  4. live plan through the router with dry:false (one deposit address per leg)
-//  5. REQUOTE when a live leg's amountOut is under the preview's min_out, or the preview is over 60 s old and a live
-//     leg is under the preview's estimate: the code is used, a new revision is stored and a new code goes to `_meta`
-//  6. one transfer per leg for the exact amountIn through the signer, then 1Click submitDeposit
-//  7. persist trade and legs, answer `submitted` inside the time budget; the tracker takes over
-import {buildYeetPlan,buildSkeetPlan,formatUnits} from './router.mjs';
+//  5. the live plan is checked leg by leg against the proposal and the person's own wallets (assertLivePlan); any
+//     mismatch refuses the whole trade before anything is committed or signed
+//  6. REQUOTE when a live leg's amountOut is more than YEET_REQUOTE_TOLERANCE_BPS (default 50) under the previewed
+//     estimate or under the preview's min_out, or the preview is over 60 s old and a live leg is under the estimate:
+//     the code is used, a new revision is stored and a new code goes to `_meta`
+//  7. one transfer per leg for the exact amountIn through the signer, then 1Click submitDeposit
+//  8. persist trade and legs, answer `submitted` inside the time budget; the tracker takes over
+import {buildYeetPlan,buildSkeetPlan,formatUnits,FUNDING,CATALOG,isEvmAddress,isSolanaAddress} from './router.mjs';
 import {checkKillSwitch,checkBasket,checkDaily,checkCost,recordSpend} from './limits.mjs';
 import {routed,quoteHash} from './proposals.mjs';
 import {receiptLeg} from './tracker.mjs';
-import {legIdempotencyKey} from './signer.mjs';
+import {legIdempotencyKey,USDC_BASE} from './signer.mjs';
 import {refuse,newId,iso,TradeError} from './util.mjs';
 import {tx} from './db.mjs';
 
@@ -28,6 +31,48 @@ const codeOf=e=>e instanceof TradeError?e.code:'TEMPORARILY_UNAVAILABLE';
 /** execute_trade leg status (contract enum sent|failed|not_sent): an attempted transfer that is not confirmed yet may
  * have moved funds, so it is reported as sent (without a hash), never as failed. */
 const ANSWER_STATUS={queued:'not_sent',sending:'sent',sent:'sent',failed:'failed',not_sent:'not_sent'};
+
+const SOLANA_ZERO='11111111111111111111111111111111';// the all-zero key (also the System Program)
+const EVM_ZERO='0x'+'0'.repeat(40);
+const sameAddress=(chain,a,b)=>typeof a==='string'&&typeof b==='string'&&(chain==='base'?a.toLowerCase()===b.toLowerCase():a===b);
+
+/**
+ * The live plan must be exactly what the person approved, sent to 1Click and nowhere else (review M2/M3). Per leg:
+ * same coin and order, origin asset USDC on Base (YEET) or the coin on Solana (SKEET), live amountIn equal to the
+ * proposal's amount_in_raw, destination the coin (YEET) or USDC on Base (SKEET), recipient the person's own wallet on
+ * the destination chain, refund address their own origin-chain wallet, and a well-formed deposit address on the origin
+ * chain that is not one of their wallets, not the token contract or mint, not the zero address and not shared with
+ * another leg. Any mismatch is TEMPORARILY_UNAVAILABLE, logged with the 1Click correlationId; nothing is signed.
+ */
+export function assertLivePlan({direction,live,legs,w,log=console.error}){
+ const fail=(why,l)=>{
+  log(JSON.stringify({event:'trade_plan_refused',reason:why,leg:l?.index??null,symbol:l?.symbol??null,correlationId:l?.correlationId??null}));
+  refuse('TEMPORARILY_UNAVAILABLE',`live plan: ${why}`);
+ };
+ const origin=direction==='yeet'?'base':'solana',dest=direction==='yeet'?'solana':'base';
+ if(live?.direction!==undefined&&live.direction!==direction)fail('direction');
+ if(!Array.isArray(live?.legs)||live.legs.length!==legs.length||!legs.length)fail('leg count');
+ if(!sameAddress(dest,live.recipient,w[dest].address))fail('recipient is not the own wallet');
+ if(!sameAddress(origin,live.refundTo,w[origin].address))fail('refund address is not the own wallet');
+ const seen=new Set();
+ for(const [i,l] of live.legs.entries()){
+  const p=legs[i];
+  if(l.index!==i||l.symbol!==p.symbol)fail('leg order or coin',l);
+  if(l.amountIn!==p.amount_in_raw)fail('amountIn differs from the proposal',l);
+  const coin=CATALOG.find(c=>c.assetId===p.asset_id&&c.chain==='solana');
+  if(!coin)fail('coin not in catalogue',l);
+  const [wantOrigin,wantDest]=direction==='yeet'?[FUNDING.assetId,p.asset_id]:[p.asset_id,FUNDING.assetId];
+  if(l.origin?.assetId!==wantOrigin)fail('origin asset',l);
+  if(l.destination?.assetId!==wantDest)fail('destination asset',l);
+  const dep=l.depositAddress;
+  if(typeof dep!=='string'||!(origin==='base'?isEvmAddress(dep):isSolanaAddress(dep)))fail('deposit address malformed',l);
+  const forbidden=origin==='base'?[w.base.address,USDC_BASE,EVM_ZERO]:[w.solana.address,coin.address,SOLANA_ZERO];
+  if(forbidden.some(a=>sameAddress(origin,dep,a))||dep===w.solana.address||sameAddress('base',dep,w.base.address))fail('deposit address is a known non-deposit address',l);
+  const key=origin==='base'?dep.toLowerCase():dep;
+  if(seen.has(key))fail('deposit address repeated',l);
+  seen.add(key);
+ }
+}
 
 export function createExecutor({db,client,limits,wallets,signer,codes,proposals,tracker,now=Date.now,budgetMs=EXECUTE_BUDGET_MS,hooks={}}){
  const trade=id=>db.prepare('SELECT * FROM trades WHERE id=?').get(id);
@@ -232,6 +277,7 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
     held=await wallets.holdings(w.solana.address);
    }
    const live=await livePlan(p,legs,w);
+   assertLivePlan({direction:p.direction,live,legs,w});
    if(p.direction==='skeet'){
     for(const [i,l] of live.legs.entries()){
      const src=held.find(h=>h.mint===proposals.mintOf(l.origin.symbol));
@@ -240,8 +286,11 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
    }
    // Requote rule (plan 2.3 / risk 2).
    const previewAge=now()-Math.min(...legs.map(l=>l.quoted_at));
-   const worse=live.legs.length!==legs.length||live.legs.some((l,i)=>l.amountIn!==legs[i].amount_in_raw||BigInt(l.amountOut)<BigInt(legs[i].dry_min_out_raw)
-    ||(previewAge>PREVIEW_STALE_MS&&BigInt(l.amountOut)<BigInt(legs[i].dry_out_raw)));
+   const tol=BigInt(limits.requoteToleranceBps);
+   const worse=live.legs.some((l,i)=>{
+    const out=BigInt(l.amountOut),est=BigInt(legs[i].dry_out_raw);
+    return out<BigInt(legs[i].dry_min_out_raw)||out*10_000n<est*(10_000n-tol)||(previewAge>PREVIEW_STALE_MS&&out<est);
+   });
    if(worse){
     const r=await requote(ctx,{p,legs,live,confirm});
     if(r)return r;

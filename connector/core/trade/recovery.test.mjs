@@ -183,3 +183,60 @@ test('fix 3: INCOMPLETE_DEPOSIT is not final while the deposit deadline is open,
  assert.equal(s.status,'refunded');
  assert.equal(await engine.tracker.pollOnce(),0,'final: no longer polled');
 });
+
+test('fix 4: a live leg more than YEET_REQUOTE_TOLERANCE_BPS under the previewed estimate is a REQUOTE, even above min_out',async()=>{
+ const {engine,oneclick,signer}=await fakeEngine();
+ const p=await engine.propose(alice,basket);
+ oneclick.liveRatio=0.993;// 70 bps under the estimate, above min_out (99%)
+ const r=await exec(engine,alice,p);
+ assert.equal(r.status,'requote_required');assert.equal(r.requote.revision,2);assert.equal(signer.sent.length,0);
+ const {engine:loose,oneclick:o2,signer:s2}=await fakeEngine({env:{YEET_LIVE:'1',YEET_REQUOTE_TOLERANCE_BPS:'100'}});
+ const q=await loose.propose(alice,basket);
+ o2.liveRatio=0.993;
+ assert.equal((await exec(loose,alice,q)).status,'submitted');assert.equal(s2.sent.length,3);
+ await assert.rejects(fakeEngine({env:{YEET_REQUOTE_TOLERANCE_BPS:'-1'}}),/Invalid YEET_REQUOTE_TOLERANCE_BPS/);
+});
+
+test('fix 4: a deposit address that is the own wallet, the USDC contract, zero, malformed or repeated refuses the whole trade before any send',async()=>{
+ const {BASE_WALLET}=await import('./fakes.mjs');
+ const {USDC_BASE}=await import('./signer.mjs');
+ const bad=[()=>BASE_WALLET,()=>USDC_BASE.toLowerCase(),()=>'0x'+'0'.repeat(40),()=>'0x1234',()=>'0x'+'22'.repeat(20)];
+ for(const depositFor of bad){
+  const {engine,oneclick,signer,db}=await fakeEngine();
+  const p=await engine.propose(alice,basket);
+  oneclick.depositFor=n=>n===2||depositFor===bad[4]?depositFor():undefined;// second leg only; the last case: every leg the same
+  await assert.rejects(exec(engine,alice,p),e=>e.code==='TEMPORARILY_UNAVAILABLE',String(depositFor));
+  assert.equal(signer.sent.length,0);
+  assert.equal(db.prepare('SELECT count(*) n FROM trades').get().n,0,'nothing committed');
+  assert.equal(spent(db),undefined,'no spend recorded');
+ }
+});
+
+test('fix 4: assertLivePlan checks origin asset, exact amountIn, destination coin, recipient and refund address per leg',async()=>{
+ const {assertLivePlan}=await import('./executor.mjs');
+ const {FUNDING,CATALOG}=await import('./router.mjs');
+ const {BASE_WALLET,SOL_WALLET}=await import('./fakes.mjs');
+ const wif=CATALOG.find(c=>c.symbol==='WIF'&&c.chain==='solana');
+ const w={base:{address:BASE_WALLET},solana:{address:SOL_WALLET}};
+ const legs=[{symbol:'WIF',asset_id:wif.assetId,amount_in_raw:'10000000'}];
+ const leg={index:0,symbol:'WIF',origin:{assetId:FUNDING.assetId,chain:'base',symbol:'USDC'},destination:{assetId:wif.assetId,chain:'solana',symbol:'WIF'},amountIn:'10000000',depositAddress:'0x'+'33'.repeat(20),correlationId:'cid-x'};
+ const plan={direction:'yeet',recipient:SOL_WALLET,refundTo:BASE_WALLET,legs:[leg]};
+ assert.doesNotThrow(()=>assertLivePlan({direction:'yeet',live:plan,legs,w}));
+ const variants=[
+  {legs:[{...leg,origin:{...leg.origin,assetId:'nep141:eth.omft.near'}}]},
+  {legs:[{...leg,amountIn:'10000001'}]},
+  {legs:[{...leg,destination:{...leg.destination,assetId:'nep141:other.near'}}]},
+  {recipient:'7'.repeat(44)},
+  {refundTo:'0x'+'44'.repeat(20)},
+  {legs:[{...leg,depositAddress:SOL_WALLET}]},
+  {legs:[]},
+ ];
+ for(const v of variants)assert.throws(()=>assertLivePlan({direction:'yeet',live:{...plan,...v},legs,w}),e=>e.code==='TEMPORARILY_UNAVAILABLE',JSON.stringify(v));
+ // SKEET: origin is the coin on Solana, destination USDC on Base; the deposit address must not be the coin's mint.
+ const {base58Encode}=await import('./router.mjs');
+ const skeetLeg={...leg,origin:{assetId:wif.assetId,chain:'solana',symbol:'WIF'},destination:{assetId:FUNDING.assetId,chain:'base',symbol:'USDC'},depositAddress:base58Encode(Buffer.alloc(32,9))};
+ const skeet={direction:'skeet',recipient:BASE_WALLET,refundTo:SOL_WALLET,legs:[skeetLeg]};
+ assert.doesNotThrow(()=>assertLivePlan({direction:'skeet',live:skeet,legs,w}));
+ for(const v of [{legs:[{...skeetLeg,depositAddress:wif.address}]},{legs:[{...skeetLeg,depositAddress:'11111111111111111111111111111111'}]},{legs:[{...skeetLeg,origin:{...skeetLeg.origin,assetId:FUNDING.assetId}}]},{recipient:'0x'+'55'.repeat(20)}])
+  assert.throws(()=>assertLivePlan({direction:'skeet',live:{...skeet,...v},legs,w}),e=>e.code==='TEMPORARILY_UNAVAILABLE',JSON.stringify(v));
+});
