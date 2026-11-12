@@ -5,11 +5,11 @@ import Provider from 'oidc-provider';
 import {allScopes,baseScopes} from '../../scope-catalog.mjs';
 import {resourceUserinfo} from '../userinfo.mjs';
 
-// Retry 4-6 (2026-10-29): every ChatGPT connection got a token, then GET /me answered
-// 403 insufficient_scope and ChatGPT showed "Reauthentication required". Folio access tokens
-// are bound to RESOURCE (aud set, openid not in the token scope), which oidc-provider's own
-// userinfo always rejects, so /me must accept the resource-bound token on the grant's openid.
-const RESOURCE='https://chatgpt.tryfolio.io';
+// Every ChatGPT connection gets a token, then calls GET /me. Access tokens are bound to RESOURCE
+// (aud set, openid not in the token scope), which oidc-provider's own userinfo always rejects
+// (403 insufficient_scope, "Reauthentication required"), so /me must accept the resource-bound
+// token on the grant's openid.
+const RESOURCE='https://chatgpt.yeet.win';
 const CLIENT='https://chatgpt.com/oauth/client.json';
 const provider=new Provider('https://as.test',{
  scopes:['openid','offline_access',...allScopes],
@@ -17,7 +17,7 @@ const provider=new Provider('https://as.test',{
  features:{resourceIndicators:{enabled:true,defaultResource:()=>RESOURCE,useGrantedResource:()=>true,
   getResourceServerInfo:()=>({scope:allScopes.join(' '),audience:RESOURCE,accessTokenFormat:'opaque'})}},
 });
-async function mint({openid=true,account='folio-privy-alice',audience=RESOURCE,ttl,grantExpired=false}={}){
+async function mint({openid=true,account='yeet-privy-alice',audience=RESOURCE,ttl,grantExpired=false}={}){
  const client=await provider.Client.find(CLIENT);
  const grant=new provider.Grant({accountId:account,clientId:CLIENT});
  if(openid)grant.addOIDCScope('openid');
@@ -44,7 +44,7 @@ const handler=resourceUserinfo({
  findAccessToken:v=>provider.AccessToken.find(v),
  findGrant:id=>{seen.push('grant');return provider.Grant.find(id)},
  findClient:async id=>{seen.push('client');return deletedClients.has(id)?undefined:provider.Client.find(id)},
- findAccount:async(id,token)=>{seen.push('account');return id.startsWith('folio-privy-')&&token.clientId===CLIENT?{accountId:id}:undefined},
+ findAccount:async(id,token)=>{seen.push('account');return id.startsWith('yeet-privy-')&&token.clientId===CLIENT?{accountId:id}:undefined},
 });
 const bearer=t=>`Bearer ${t.value}`;
 function assertInvalid(out){
@@ -69,7 +69,7 @@ test('/me answers sub for a resource-bound token whose grant consented to openid
  for(const method of ['GET','POST']){
   const out=await call(handler,bearer(await mint()),method);
   assert.equal(out.status,200);
-  assert.deepEqual(out.body,{sub:'folio-privy-alice'});
+  assert.deepEqual(out.body,{sub:'yeet-privy-alice'});
   assert.equal(out.headers['cache-control'],'no-store');
  }
 });
@@ -110,7 +110,7 @@ test('/me refuses a token whose grant belongs to another client',async()=>{
 
 test('/me refuses a token whose grant belongs to another account',async()=>{
  const t=await mint();
- await retarget(t.grantId,{accountId:'folio-privy-bob'});
+ await retarget(t.grantId,{accountId:'yeet-privy-bob'});
  seen=[];
  assertInvalid(await call(handler,bearer(t)));
  assert.deepEqual(seen,['grant']);
@@ -138,7 +138,7 @@ test('/me leaves other methods, audiences and non-header requests to oidc-provid
  assert.deepEqual(await call(handler,undefined),{next:true});
  const t=await mint();
  for(const method of ['PUT','DELETE','OPTIONS'])assert.deepEqual(await call(handler,bearer(t),method),{next:true});
- const other=await mint({audience:'https://other.example/mcp'});
+ const other=await mint({audience:'https://other.example/resource'});
  assert.deepEqual(await call(handler,bearer(other)),{next:true});
 });
 

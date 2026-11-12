@@ -1,5 +1,5 @@
 import {readFileSync} from 'node:fs';
-export const contract=JSON.parse(readFileSync(new URL('../../contracts/dual-account.json',import.meta.url),'utf8'));
+export const contract=JSON.parse(readFileSync(new URL('../contracts/yeet-tools.json',import.meta.url),'utf8'));
 export function resolveSchema(schema){
  if(Array.isArray(schema))return schema.map(resolveSchema);
  if(!schema||typeof schema!=='object')return schema;

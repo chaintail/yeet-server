@@ -1,6 +1,6 @@
 import {allScopes} from '#scope-catalog';
 import { request } from "node:http";
-import { AS, AS_INTERNAL, RESOURCE, users, secret } from "./common.mjs";
+import { AS, AS_INTERNAL, RESOURCE, secret } from "./common.mjs";
 // One absolute deadline covers connect, headers and the full body: a trickling AS cannot extend it
 // (ClientRequest.setTimeout only measures inactivity). Exported for the deadline regression.
 export const INTROSPECTION_DEADLINE_MS = 2000;
@@ -56,7 +56,8 @@ export async function introspectBearer(bearer, client, credential) {
     "content-length": Buffer.byteLength(body),
   }, body);
 }
-export function validatePrincipal(token, { realApp = false } = {}) {
+export const SUBJECT = /^yeet-privy-[a-zA-Z0-9_-]{1,80}$/;
+export function validatePrincipal(token) {
   if (
     token?.active !== true ||
     token.iss !== AS ||
@@ -64,14 +65,10 @@ export function validatePrincipal(token, { realApp = false } = {}) {
     !Number.isFinite(token.exp) ||
     token.exp <= Date.now() / 1000 ||
     typeof token.sub !== "string" ||
-    (realApp
-      ? !/^folio-privy-[a-f0-9]{64}$/.test(token.sub)
-      : process.env.PRIVY_LOGIN === "1"
-      ? !/^folio-privy-[a-zA-Z0-9_-]{1,80}$/.test(token.sub)
-      : !users[token.sub]) ||
+    !SUBJECT.test(token.sub) ||
     typeof token.client_id !== "string" ||
     !token.client_id ||
-    (realApp && token.client_id.length > 2048) ||
+    token.client_id.length > 2048 ||
     typeof token.scope !== "string"
   )
     throw Error("Invalid delegated principal");

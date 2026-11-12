@@ -8,12 +8,13 @@ export function stable(value) {
 export const fingerprint = value => createHash('sha256').update(JSON.stringify(stable(value))).digest('hex');
 export function createRequestLedger(path, {now=Date.now, leaseMs=30_000}={}) {
  const db=new DatabaseSync(path);db.exec(`PRAGMA busy_timeout=1000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
- CREATE TABLE IF NOT EXISTS request_ledger(subject TEXT,client TEXT,request_id TEXT,account TEXT NOT NULL CHECK(account IN ('trial','real')),hash TEXT NOT NULL,owner TEXT NOT NULL,expires INTEGER NOT NULL,result TEXT,PRIMARY KEY(subject,client,request_id));`);
+ CREATE TABLE IF NOT EXISTS request_ledger(subject TEXT,client TEXT,request_id TEXT,hash TEXT NOT NULL,owner TEXT NOT NULL,expires INTEGER NOT NULL,result TEXT,PRIMARY KEY(subject,client,request_id));`);
  db.exec('CREATE TABLE IF NOT EXISTS connector_identities(subject TEXT PRIMARY KEY,did TEXT NOT NULL)');
- const conflict=()=>{throw Object.assign(Error('RESEARCH_REQUEST_CONFLICT'),{code:'RESEARCH_REQUEST_CONFLICT',status:409})};
+ // Same request_id with a different payload: the caller reused an id for a new request.
+ const conflict=()=>{throw Object.assign(Error('INVALID_ARGUMENT'),{code:'INVALID_ARGUMENT',status:409})};
  function lookup(subject,client,payload){
   const row=db.prepare('SELECT * FROM request_ledger WHERE subject=? AND client=? AND request_id=?').get(subject,client,payload.request_id);
-  if(row && (row.account!==payload.account || row.hash!==fingerprint(payload)))conflict();
+  if(row && row.hash!==fingerprint(payload))conflict();
   return row;
  }
  return {
@@ -27,7 +28,7 @@ export function createRequestLedger(path, {now=Date.now, leaseMs=30_000}={}) {
     if(row?.result){db.exec('COMMIT');return {result:JSON.parse(row.result)}}
     if(row && row.expires>now()){db.exec('COMMIT');return {pending:true}}
     if(row)db.prepare('UPDATE request_ledger SET owner=?,expires=? WHERE subject=? AND client=? AND request_id=?').run(owner,now()+leaseMs,subject,client,payload.request_id);
-    else db.prepare('INSERT INTO request_ledger VALUES(?,?,?,?,?,?,?,NULL)').run(subject,client,payload.request_id,payload.account,fingerprint(payload),owner,now()+leaseMs);
+    else db.prepare('INSERT INTO request_ledger VALUES(?,?,?,?,?,?,NULL)').run(subject,client,payload.request_id,fingerprint(payload),owner,now()+leaseMs);
     db.exec('COMMIT');return {owner};
    }catch(e){db.exec('ROLLBACK');throw e}
   },

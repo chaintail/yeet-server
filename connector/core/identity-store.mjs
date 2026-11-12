@@ -1,9 +1,16 @@
 import { DatabaseSync } from "node:sqlite";
-import fs from "node:fs";
 import path from "node:path";
+import { randomBytes } from "node:crypto";
 let db;
-const validAccount = (id) =>
-  typeof id === "string" && /^folio-privy-[a-zA-Z0-9_-]{1,80}$/.test(id);
+export const validAccount = (id) =>
+  typeof id === "string" && /^yeet-privy-[a-zA-Z0-9_-]{1,80}$/.test(id);
+/** Account cap: YEET creates an account on the first verified sign-in, never past this many. */
+export function maxAccounts(value = process.env.YEET_MAX_ACCOUNTS) {
+  const n = value === undefined || value === "" ? 200 : Number(value);
+  if (!Number.isSafeInteger(n) || n < 1 || n > 1_000_000)
+    throw Error("Invalid YEET_MAX_ACCOUNTS");
+  return n;
+}
 function database() {
   if (db) return db;
   db = new DatabaseSync(
@@ -11,115 +18,70 @@ function database() {
     { defensive: true, allowExtension: false, timeout: 2000 },
   );
   db.exec(
-    "PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY,portfolio TEXT NOT NULL) STRICT; CREATE TABLE IF NOT EXISTS identity_links(provider TEXT NOT NULL,app_id TEXT NOT NULL,did TEXT NOT NULL,account_id TEXT NOT NULL REFERENCES accounts(id),PRIMARY KEY(provider,app_id,did)) STRICT;",
+    "PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY,created_at INTEGER NOT NULL) STRICT; CREATE TABLE IF NOT EXISTS identity_links(provider TEXT NOT NULL,app_id TEXT NOT NULL,did TEXT NOT NULL,account_id TEXT NOT NULL REFERENCES accounts(id),PRIMARY KEY(provider,app_id,did)) STRICT; CREATE UNIQUE INDEX IF NOT EXISTS identity_account_unique ON identity_links(account_id);",
   );
   return db;
 }
-export function provisionIdentities() {
-  const entries = JSON.parse(
-    fs.readFileSync(
-      process.env.PRIVY_ELIGIBLE_FILE || "/config/eligible-identities.json",
-      "utf8",
-    ),
+let appId;
+/** appId: the only identity app whose verified logins may create or reach accounts. */
+export function initializeIdentityStore({ app } = {}) {
+  if (typeof app !== "string" || !/^[a-zA-Z0-9_-]{8,128}$/.test(app))
+    throw Error("Missing identity app configuration");
+  maxAccounts();
+  database();
+  appId = app;
+}
+function validIdentity(value) {
+  return (
+    !!value &&
+    value.provider === "privy.io" &&
+    value.app_id === appId &&
+    typeof value.did === "string" &&
+    /^did:privy:[a-zA-Z0-9_-]{1,128}$/.test(value.did)
   );
-  if (!Array.isArray(entries) || entries.length > 20)
-    throw Error("Invalid eligible identity configuration");
+}
+/** Verified identity -> stable account id. Creates the account on first sign-in while under the cap. */
+export function resolveIdentity(value, { now = Date.now() } = {}) {
+  if (!appId || !validIdentity(value)) return undefined;
   const conn = database();
   conn.exec("BEGIN IMMEDIATE");
   try {
-    const ambiguous = conn
+    const prior = conn
       .prepare(
-        "SELECT account_id FROM identity_links GROUP BY account_id HAVING COUNT(*)>1",
+        "SELECT account_id FROM identity_links WHERE provider=? AND app_id=? AND did=?",
       )
-      .get();
-    if (ambiguous) throw Error("Ambiguous identity account linkage");
-    conn.exec(
-      "CREATE UNIQUE INDEX IF NOT EXISTS identity_account_unique ON identity_links(account_id)",
-    );
-    const tuples = new Set(),
-      accounts = new Set();
-    for (const e of entries) {
-      if (
-        e.provider !== "privy.io" ||
-        typeof e.app_id !== "string" ||
-        !/^[a-zA-Z0-9_-]{8,128}$/.test(e.app_id) ||
-        !/^did:privy:[a-zA-Z0-9_-]{1,128}$/.test(e.did) ||
-        !validAccount(e.account_id) ||
-        !Array.isArray(e.portfolio) ||
-        e.portfolio.length > 20 ||
-        e.portfolio.some(
-          (p) =>
-            !p ||
-            typeof p.symbol !== "string" ||
-            !/^[A-Z0-9.-]{1,16}$/.test(p.symbol) ||
-            !Number.isFinite(p.quantity) ||
-            p.quantity < 0,
-        )
-      )
-        throw Error("Invalid eligible identity entry");
-      const tuple = JSON.stringify([e.provider, e.app_id, e.did]);
-      if (tuples.has(tuple) || accounts.has(e.account_id))
-        throw Error("Duplicate identity or account linkage");
-      tuples.add(tuple);
-      accounts.add(e.account_id);
-      const prior = conn
-        .prepare(
-          "SELECT account_id FROM identity_links WHERE provider=? AND app_id=? AND did=?",
-        )
-        .get(e.provider, e.app_id, e.did);
-      if (prior && prior.account_id !== e.account_id)
-        throw Error("Identity remapping forbidden");
-      conn
-        .prepare("INSERT INTO accounts VALUES(?,?) ON CONFLICT(id) DO NOTHING")
-        .run(e.account_id, JSON.stringify(e.portfolio));
-      conn
-        .prepare(
-          "INSERT INTO identity_links VALUES(?,?,?,?) ON CONFLICT DO NOTHING",
-        )
-        .run(e.provider, e.app_id, e.did, e.account_id);
+      .get(value.provider, value.app_id, value.did);
+    if (prior) {
+      conn.exec("COMMIT");
+      return prior.account_id;
     }
+    const { n } = conn.prepare("SELECT COUNT(*) n FROM accounts").get();
+    if (n >= maxAccounts()) {
+      conn.exec("COMMIT");
+      return undefined;
+    }
+    const id = `yeet-privy-${randomBytes(16).toString("base64url")}`;
+    conn.prepare("INSERT INTO accounts VALUES(?,?)").run(id, now);
+    conn
+      .prepare("INSERT INTO identity_links VALUES(?,?,?,?)")
+      .run(value.provider, value.app_id, value.did, id);
     conn.exec("COMMIT");
+    return id;
   } catch (e) {
     conn.exec("ROLLBACK");
     throw e;
   }
-  // Eligibility is current operator config, separate from retained stable links.
-  return new Set(
-    entries.map((e) => JSON.stringify([e.provider, e.app_id, e.did])),
-  );
 }
-let eligible;
-export function initializeIdentityStore() {
-  eligible = provisionIdentities();
-}
-export function resolveIdentity(value) {
-  if (
-    !value ||
-    !eligible?.has(JSON.stringify([value.provider, value.app_id, value.did]))
-  )
-    return undefined;
-  return database()
-    .prepare(
-      "SELECT account_id FROM identity_links WHERE provider=? AND app_id=? AND did=?",
-    )
-    .get(value.provider, value.app_id, value.did)?.account_id;
-}
+/** An existing account reached through a link for the configured app; undefined otherwise. */
 export function account(id) {
-  if (!eligible) return undefined;
+  if (!appId || !validAccount(id)) return undefined;
   const row = database()
-    .prepare("SELECT id,portfolio FROM accounts WHERE id=?")
-    .get(id);
-  if (!row) return undefined;
-  const links = database()
     .prepare(
-      "SELECT provider,app_id,did FROM identity_links WHERE account_id=?",
+      "SELECT a.id,a.created_at FROM accounts a JOIN identity_links l ON l.account_id=a.id WHERE a.id=? AND l.app_id=?",
     )
-    .all(id);
-  if (
-    !links.some((l) =>
-      eligible.has(JSON.stringify([l.provider, l.app_id, l.did])),
-    )
-  )
-    return undefined;
-  return { id: row.id, portfolio: JSON.parse(row.portfolio) };
+    .get(id, appId);
+  return row ? { id: row.id, created_at: row.created_at } : undefined;
+}
+export function accountCount() {
+  return database().prepare("SELECT COUNT(*) n FROM accounts").get().n;
 }

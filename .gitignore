@@ -1,0 +1,25 @@
+# dependencies and build output
+node_modules/
+dist/
+connector/login/dist/
+
+# runtime state (never commit)
+.runtime/
+state/
+*-state/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# secrets and env files
+.env
+*.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+
+# editor / OS
+.DS_Store
+*.swp

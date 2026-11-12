@@ -2,12 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import Provider from 'oidc-provider';
-import {allScopes,baseScopes,realScope} from '#scope-catalog';
+import {allScopes,baseScopes} from '#scope-catalog';
 import {applyConsentScopes,submittedScopes} from '../consent-selection.mjs';
 
-// as.mjs configures the provider with the folio scopes as OP scopes, so oidc-provider's
+// as.mjs configures the provider with the yeet scopes as OP scopes, so oidc-provider's
 // consent prompt (op_scopes_missing) checks them against grant.getOIDCScopeEncountered().
-const RESOURCE='https://chatgpt.tryfolio.io';
+const RESOURCE='https://chatgpt.yeet.win';
 const opScopes=['openid','offline_access',...allScopes];
 const provider=new Provider('https://as.test',{scopes:opScopes});
 // Mirrors oidc-provider 9 lib/helpers/interaction_policy/prompts/consent.js op_scopes_missing / rs_scopes_missing.
@@ -16,28 +16,24 @@ const missing=(grant,requested)=>({
  rs:requested.filter(s=>allScopes.includes(s)&&!grant.getResourceScopeEncountered(RESOURCE).split(' ').includes(s)),
 });
 const consent=(requested,body)=>{
- const grant=new provider.Grant({accountId:'folio-alice',clientId:'https://chatgpt.com/oauth/client.json'});
- applyConsentScopes(grant,{requested,granted:submittedScopes(requested,body,['openid','offline_access',...allScopes]),resource:RESOURCE,opScopes,resourceScopes:allScopes});
+ const grant=new provider.Grant({accountId:'yeet-privy-alice',clientId:'https://chatgpt.com/oauth/client.json'});
+ applyConsentScopes(grant,{requested,granted:submittedScopes(requested,body),resource:RESOURCE,opScopes,resourceScopes:allScopes});
  return grant;
 };
 
-test('consent loop: a Trial consent satisfies the provider consent prompt (no op_scopes_missing re-prompt)',()=>{
- // Exactly the scope ChatGPT sent on 2026-10-29 after the provider dropped offline_access.
- const requested=['openid','folio:research:write','folio:profile:read','folio:portfolio:read'];
+test('consent loop: a consent without offline_access satisfies the provider consent prompt (no op_scopes_missing re-prompt)',()=>{
+ const requested=['openid','yeet:write','yeet:read','yeet:trade'];
  const grant=consent(requested,{consent:'yes'});
  assert.deepEqual(missing(grant,requested),{op:[],rs:[]});
  assert.deepEqual(grant.getResourceScope(RESOURCE).split(' ').sort(),[...baseScopes].sort());
 });
 
-test('consent loop: Real left unticked is rejected, not granted, and does not re-prompt',()=>{
- const requested=['openid','offline_access',...allScopes];
+test('consent loop: unknown requested scopes are rejected, not granted, and do not re-prompt',()=>{
+ const requested=['openid','offline_access',...allScopes,'other:scope'];
  const grant=consent(requested,{consent:'yes'});
- assert.deepEqual(missing(grant,requested),{op:[],rs:[]});
- assert.equal(grant.getResourceScope(RESOURCE).split(' ').includes(realScope),false);
- assert.equal(grant.getOIDCScope().split(' ').includes(realScope),false);
- const ticked=consent(requested,{consent:'yes',real_consent:'yes'});
- assert.equal(ticked.getResourceScope(RESOURCE).split(' ').includes(realScope),true);
- assert.deepEqual(missing(ticked,requested),{op:[],rs:[]});
+ assert.deepEqual(missing(grant,requested.filter(s=>s!=='other:scope')),{op:[],rs:[]});
+ assert.equal(grant.getResourceScope(RESOURCE).split(' ').includes('other:scope'),false);
+ assert.throws(()=>consent(requested,{}),/Explicit consent/);
 });
 
 test('as.mjs records consent through applyConsentScopes with the provider OP scope list',()=>{

@@ -1,13 +1,11 @@
-/** The sole catalog used by AS, core, MCP, renewable grants and introspection. */
-export const baseScopes = Object.freeze(['folio:profile:read','folio:portfolio:read','folio:research:write']);
-export const realScope = 'folio:real:read';
-export const allScopes = Object.freeze([...baseScopes, realScope]);
+/** The sole catalog used by AS, core, connector, renewable grants and introspection. */
+// yeet:read  home, coins, trade status, portfolio, leaderboard
+// yeet:write proposals, quotes, daily spin
+// yeet:trade money movement (execute_trade)
+export const baseScopes = Object.freeze(['yeet:read','yeet:write','yeet:trade']);
+export const allScopes = baseScopes;
 export const consentScopes = Object.freeze(['openid','offline_access',...allScopes]);
-// Real is advertised only when FOLIO_ADVERTISE_REAL=1; it is off by default.
-export function realAdvertised(env = process.env) {
- return env.FOLIO_ADVERTISE_REAL === '1';
-}
-export const advertisedScopes = () => ['openid','offline_access',...(realAdvertised() ? allScopes : baseScopes)];
-export const grantedSubset = (requested, realConsent) => [...new Set(requested)].filter(s => consentScopes.includes(s) && (s !== realScope || realConsent));
+export const advertisedScopes = () => ['openid','offline_access',...allScopes];
+export const grantedSubset = requested => [...new Set(requested)].filter(s => consentScopes.includes(s));
 // Refresh can only repeat the immutable consent. Requested extras never widen it.
 export const refreshScopes = stored => [...new Set(stored)].filter(s => consentScopes.includes(s));

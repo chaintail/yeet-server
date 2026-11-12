@@ -6,23 +6,19 @@ const token = {
   iss: AS,
   aud: RESOURCE,
   exp: Date.now() / 1000 + 300,
-  sub: "folio-privy-synthetic",
+  sub: "yeet-privy-synthetic",
   client_id: "client",
-  scope: "folio:profile:read",
+  scope: "yeet:read yeet:trade other:scope",
 };
-process.env.PRIVY_LOGIN = "0";
-assert.throws(() => validatePrincipal(token));
-assert.equal(
-  validatePrincipal({ ...token, sub: "folio-alice" }).subject,
-  "folio-alice",
-);
-process.env.PRIVY_LOGIN = "1";
-assert.equal(validatePrincipal(token).subject, token.sub);
+const principal = validatePrincipal(token);
+assert.equal(principal.subject, token.sub);
+assert.deepEqual([...principal.scopes], ["yeet:read", "yeet:trade"]);
 for (const delta of [
-  { sub: "folio-alice" },
+  { sub: "folio-privy-synthetic" },
   { sub: "arbitrary" },
-  { sub: "folio-privy-" },
-  { sub: "folio-privy-" + "x".repeat(81) },
+  { sub: "yeet-privy-" },
+  { sub: "yeet-privy-" + "x".repeat(81) },
+  { client_id: "x".repeat(2049) },
   { active: false },
   { iss: "wrong" },
   { aud: "wrong" },
@@ -31,5 +27,5 @@ for (const delta of [
 ])
   assert.throws(() => validatePrincipal({ ...token, ...delta }));
 console.log(
-  "PASS isolated Privy principal shape, tenant/issuer/audience/expiry negatives; authoritative core eligibility remains separately required",
+  "PASS yeet-privy principal shape, scope filter, tenant/issuer/audience/expiry negatives; authoritative core eligibility remains separately required",
 );

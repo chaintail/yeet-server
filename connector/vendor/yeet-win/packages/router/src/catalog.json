@@ -1,0 +1,123 @@
+[
+  {
+    "symbol": "USDC",
+    "name": "USD Coin (Base)",
+    "chain": "base",
+    "assetId": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+    "decimals": 6,
+    "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+    "kind": "funding",
+    "coingeckoId": "usd-coin"
+  },
+  {
+    "symbol": "USDC",
+    "name": "USD Coin (Solana)",
+    "chain": "solana",
+    "assetId": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+    "decimals": 6,
+    "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "kind": "major",
+    "coingeckoId": "usd-coin"
+  },
+  {
+    "symbol": "SOL",
+    "name": "Solana",
+    "chain": "solana",
+    "assetId": "nep141:sol.omft.near",
+    "decimals": 9,
+    "address": null,
+    "kind": "major",
+    "coingeckoId": "solana"
+  },
+  {
+    "symbol": "WIF",
+    "name": "dogwifhat",
+    "chain": "solana",
+    "assetId": "nep141:sol-b9c68f94ec8fd160137af8cdfe5e61cd68e2afba.omft.near",
+    "decimals": 6,
+    "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+    "kind": "meme",
+    "listedSymbol": "$WIF",
+    "coingeckoId": "dogwifcoin"
+  },
+  {
+    "symbol": "BOME",
+    "name": "BOOK OF MEME",
+    "chain": "solana",
+    "assetId": "nep141:sol-57d087fd8c460f612f8701f5499ad8b2eec5ab68.omft.near",
+    "decimals": 6,
+    "address": "ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82",
+    "kind": "meme",
+    "coingeckoId": "book-of-meme"
+  },
+  {
+    "symbol": "TRUMP",
+    "name": "Official Trump",
+    "chain": "solana",
+    "assetId": "nep141:sol-c58e6539c2f2e097c251f8edf11f9c03e581f8d4.omft.near",
+    "decimals": 6,
+    "address": "6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN",
+    "kind": "meme",
+    "coingeckoId": "official-trump"
+  },
+  {
+    "symbol": "PENGU",
+    "name": "Pudgy Penguins",
+    "chain": "solana",
+    "assetId": "nep141:sol-0xaad74c68eecfc9f8c5bdcea614f6167048c795ef.omdep.near",
+    "decimals": 6,
+    "address": "2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv",
+    "kind": "meme",
+    "coingeckoId": "pudgy-penguins"
+  },
+  {
+    "symbol": "MELANIA",
+    "name": "Official Melania Meme",
+    "chain": "solana",
+    "assetId": "nep141:sol-d600e625449a4d9380eaf5e3265e54c90d34e260.omft.near",
+    "decimals": 6,
+    "address": "FUAfBo2jgks6gB4Z4LfZkqSZgzNucisEHqnNebaRxM1P",
+    "kind": "meme",
+    "coingeckoId": "melania-meme"
+  },
+  {
+    "symbol": "SPX",
+    "name": "SPX6900",
+    "chain": "solana",
+    "assetId": "nep141:sol-c634d063ceff771aff0c972ec396fd915a6bbd0e.omft.near",
+    "decimals": 8,
+    "address": "J3NKxxXZcnNiMjKw9hYb2K4LUxgwB6t1FtPtQVsv3KFr",
+    "kind": "meme",
+    "coingeckoId": "spx6900"
+  },
+  {
+    "symbol": "TURBO",
+    "name": "Turbo",
+    "chain": "solana",
+    "assetId": "nep141:sol-df27d7abcc1c656d4ac3b1399bbfbba1994e6d8c.omft.near",
+    "decimals": 8,
+    "address": "2Dyzu65QA9zdX1UeE7Gx71k7fiwyUK6sZdrvJ7auq5wm",
+    "kind": "meme",
+    "coingeckoId": "turbo"
+  },
+  {
+    "symbol": "LOUD",
+    "name": "Loud",
+    "chain": "solana",
+    "assetId": "nep141:sol-bb27241c87aa401cc963c360c175dd7ca7035873.omft.near",
+    "decimals": 6,
+    "address": "EJZJpNa4tDZ3kYdcRZgaAtaKm3fLJ5akmyPkCaKmfWvd",
+    "kind": "meme",
+    "coingeckoId": "loud"
+  },
+  {
+    "symbol": "NEARKAT",
+    "name": "NearKat",
+    "chain": "solana",
+    "assetId": "nep141:sol-0x4629c2e57ccb57f0a21e04f5b5449ef251932cec.omdep.near",
+    "decimals": 6,
+    "address": "6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr",
+    "kind": "meme",
+    "coingeckoId": "nearkat-2"
+  }
+]

@@ -1,5 +1,5 @@
 // oidc-provider's userinfo rejects every access token that has an audience or lacks the
-// openid scope. Folio access tokens are always bound to RESOURCE (aud set, openid kept on
+// openid scope. YEET access tokens are always bound to RESOURCE (aud set, openid kept on
 // the grant only), so ChatGPT's post-token GET /me failed with 403 and the connector went
 // straight to "Reauthentication required". This answers /me for those tokens from the
 // grant's consented openid scope and returns only `sub`; other audiences and

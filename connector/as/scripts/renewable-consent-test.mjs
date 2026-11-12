@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 process.env.STATE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "renewable-"));
-process.env.RESOURCE = "https://resource.example/mcp";
+process.env.RESOURCE = "https://chatgpt.yeet.win";
 process.env.TEST_PROFILE = "1";
 process.env.REFRESH_CONSENT_COMPAT = "1";
 const { recordConsent, renewableHooks } =
@@ -15,10 +15,10 @@ const client = {
 const ctx = { oidc: { client } };
 const source = {
   clientId: client.clientId,
-  accountId: "folio-a",
+  accountId: "yeet-privy-a",
   grantId: "grant-a",
   resource: process.env.RESOURCE,
-  scopes: new Set(["openid", "folio:profile:read"]),
+  scopes: new Set(["openid", "yeet:read"]),
 };
 let active = true;
 const hooks = renewableHooks({
@@ -38,8 +38,8 @@ assert.equal(await hooks.issueRefreshToken(ctx, client, source), true);
 assert.equal(await hooks.expiresWithSession(ctx, source), false);
 for (const delta of [
   { accountId: "other" },
-  { resource: "https://wrong/mcp" },
-  { scopes: new Set(["folio:research:write"]) },
+  { resource: "https://wrong.example" },
+  { scopes: new Set(["yeet:trade"]) },
   { grantId: "missing" },
   { clientId: "other" },
 ])

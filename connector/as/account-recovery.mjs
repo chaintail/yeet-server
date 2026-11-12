@@ -4,7 +4,7 @@ import {boundBrowser,requireFreshBinding} from './security-policy.mjs';
 export function accountInteractionPolicy(){
  const policy=interactionPolicy.base();
  policy.get('consent').checks.add(new interactionPolicy.Check(
-  'folio_explicit_consent','Folio access requires explicit consent','consent_required',
+  'yeet_explicit_consent','YEET access requires explicit consent','consent_required',
   ({oidc})=>!oidc.result?.consent,
  ));
  policy.get('login').checks.add(new interactionPolicy.Check(

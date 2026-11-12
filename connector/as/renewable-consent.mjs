@@ -29,7 +29,7 @@ function validScopes(scopes) {
     Array.isArray(scopes) &&
     scopes.length > 0 &&
     scopes.every((s) => permitted.has(s)) &&
-    scopes.some((s) => s.startsWith("folio:"))
+    scopes.some((s) => s.startsWith("yeet:"))
   );
 }
 export function recordConsent({

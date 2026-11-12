@@ -1,6 +1,5 @@
 import { fileURLToPath } from "node:url";
-import {applyConsentScopes,consentSelection,consentForm,submittedScopes,ignoreRefreshScope,isRealStepUp,STEP_UP_PARAM} from './consent-selection.mjs';
-import {realScope,baseScopes} from '#scope-catalog';
+import {applyConsentScopes,consentSelection,consentForm,submittedScopes,ignoreRefreshScope} from './consent-selection.mjs';
 import {
   observeAuthorization,
   observeAuthorizationRejected,
@@ -44,14 +43,13 @@ import {
   RESOURCE,
   read,
   write,
-  users,
   verifyIdentity,
   secret,
   coreCall,
   equal,
+  port,
   TEST,
   PUBLIC,
-  preloadMockPasswords,
 } from "#shared/common.mjs";
 import { issuableScopes } from "./scopes.mjs";
 configuredRefreshWindow();
@@ -70,11 +68,9 @@ if (
     process.env.CIMD_TEST_FIXTURES === "1")
 )
   throw Error("Invalid public demo configuration");
-if (
-  process.env.PRIVY_LOGIN === "1" &&
-  (process.env.MOCK_PASSWORD_LOGIN === "1" ||
-    process.env.DEV_IDENTITY_STUB === "1")
-)
+if (process.env.MOCK_PASSWORD_LOGIN === "1")
+  throw Error("Password sign-in is not available");
+if (process.env.PRIVY_LOGIN === "1" && process.env.DEV_IDENTITY_STUB === "1")
   throw Error("Identity modes must be separate");
 if (process.env.PRIVY_LOGIN === "1") {
   const { privyConfig } = await import("#shared/privy-identity.mjs");
@@ -82,11 +78,9 @@ if (process.env.PRIVY_LOGIN === "1") {
 }
 if (
   process.env.PRIVY_LOGIN !== "1" &&
-  process.env.DEV_IDENTITY_STUB !== "1" &&
-  process.env.MOCK_PASSWORD_LOGIN !== "1"
+  !(TEST && process.env.DEV_IDENTITY_STUB === "1")
 )
-  throw Error("No real identity verifier; explicit mock login required");
-if (process.env.MOCK_PASSWORD_LOGIN === "1") preloadMockPasswords();
+  throw Error("No identity verifier configured");
 let jwks = read("keys.json", null);
 if (!jwks) {
   const { privateKey } = await generateKeyPair("RS256", { extractable: true });
@@ -112,15 +106,15 @@ const client = {
 };
 const cookies = read("cookies.json", null) || [randomBytes(32).toString("hex")];
 write("cookies.json", cookies);
-async function policy(id,includeReal=true) {
-  return coreCall(includeReal?"/policy":"/policy?account=trial", id, secret("core-as"));
+// Every account comes from core's identity store (created on first verified sign-in), so eligibility is core's answer.
+async function policy(id) {
+  return coreCall("/policy", id, secret("core-as"));
 }
-async function findAccount(ctx, id, token) {
-  const p = await policy(id, token ? token.scopes?.has(realScope) === true : true);
+async function findAccount(ctx, id) {
+  const p = await policy(id);
   if (
     !allowedAccount(p, {
-      privy: process.env.PRIVY_LOGIN === "1",
-      known: !!users[id],
+      privy: true,
       client: ctx.oidc?.client?.clientId,
     })
   )
@@ -129,8 +123,6 @@ async function findAccount(ctx, id, token) {
 }
 const provider = new Provider(AS, {
   adapter: Adapter,
-  // Explicit Real step-up marker; only preselects the consent checkbox, never grants.
-  extraParams: [STEP_UP_PARAM],
   jwks,
   ...renewableHooks({
     eligible,
@@ -190,7 +182,7 @@ const provider = new Provider(AS, {
       defaultResource: () => RESOURCE,
       useGrantedResource: () => true,
       getResourceServerInfo: (_ctx, r) => {
-        if (r !== RESOURCE && !(TEST && r === "https://other.example/mcp"))
+        if (r !== RESOURCE && !(TEST && r === "https://other.example/resource"))
           throw new errors.InvalidTarget("Unknown resource");
         return {
           scope: issuableScopes.join(" "),
@@ -320,7 +312,8 @@ function authDocument(res, title, body) {
   const nonce = randomBytes(24).toString("base64");
   res.set(
     "Content-Security-Policy",
-    `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'nonce-${nonce}'; connect-src 'self' https://auth.privy.io; frame-src https://auth.privy.io; img-src 'self' data:; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self' https://chatgpt.com; frame-ancestors 'none'`,
+    // Privy sign-in plus embedded wallets: auth API, wallet RPC hosts, the wallet iframe and the Turnstile challenge.
+    `default-src 'self'; script-src 'self' 'nonce-${nonce}' https://challenges.cloudflare.com; style-src 'self' 'nonce-${nonce}'; connect-src 'self' https://auth.privy.io https://*.rpc.privy.systems; frame-src https://auth.privy.io https://challenges.cloudflare.com; child-src https://auth.privy.io https://challenges.cloudflare.com; img-src 'self' data: blob:; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self' https://chatgpt.com; frame-ancestors 'none'`,
   );
   return document(title, body, nonce);
 }
@@ -328,9 +321,21 @@ const loginFields = () =>
   process.env.PRIVY_LOGIN === "1"
     ? '<div id="privy-login"><p role="status">Loading secure sign in…</p></div><script type="module" src="/demo/privy-login/login.js"></script>'
     : credentials();
+// Public values only: the sign-in page needs the app id, and the signer step needs the YEET signer and policy ids.
+const publicId = (name) => {
+  const value = process.env[name];
+  return typeof value === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(value) ? value : null;
+};
 app.get("/demo/identity-config", (_q, r) =>
   process.env.PRIVY_LOGIN === "1"
-    ? r.json({ appId: process.env.PRIVY_APP_ID })
+    ? r.set("Cache-Control", "no-store").json({
+        appId: process.env.PRIVY_APP_ID,
+        signerId: publicId("YEET_SIGNER_ID"),
+        policyIds: {
+          base: publicId("YEET_BASE_POLICY_ID"),
+          solana: publicId("YEET_SOLANA_POLICY_ID"),
+        },
+      })
     : r.sendStatus(404),
 );
 const csrf = (uid) =>
@@ -339,8 +344,8 @@ function session(req) {
   const token = req.headers.cookie
     ?.split(";")
     .map((x) => x.trim())
-    .find((x) => x.startsWith("folio_demo="))
-    ?.slice(11);
+    .find((x) => x.startsWith("yeet_session="))
+    ?.slice(13);
   const row = read("sessions.json")[token];
   return row && row.expires > Date.now() ? { ...row, token } : null;
 }
@@ -354,15 +359,14 @@ function retireDemoSession(current,res){
   const sessions=read('sessions.json');
   delete sessions[current.token];
   write('sessions.json',sessions);
-  cookie(res,'folio_demo','',0);
+  cookie(res,'yeet_session','',0);
 }
 function originOK(req) {
   return exactOrigin(req.headers.origin, publicBase);
 }
-async function eligible(id, client, granted) {
-  return allowedAccount(await policy(id, granted ? granted.includes(realScope) : true), {
-    privy: process.env.PRIVY_LOGIN === "1",
-    known: !!users[id],
+async function eligible(id, client) {
+  return allowedAccount(await policy(id), {
+    privy: true,
     client,
   });
 }
@@ -374,12 +378,12 @@ function interactionBinding(d, s) {
 }
 app.get("/demo/login", (q, r) => {
   const c = randomBytes(24).toString("hex");
-  cookie(r, "folio_login", c, 300);
+  cookie(r, "yeet_login", c, 300);
   r.type("html").send(
     authDocument(
       r,
       promptTitle("login"),
-      `<form method="POST" data-folio-prompt="login"><input type="hidden" name="csrf" value="${c}">${loginFields()}${process.env.PRIVY_LOGIN === "1" ? "" : '<button type="submit">Sign in</button>'}</form>`,
+      `<form method="POST" data-yeet-prompt="login"><input type="hidden" name="csrf" value="${c}">${loginFields()}${process.env.PRIVY_LOGIN === "1" ? "" : '<button type="submit">Sign in</button>'}</form>`,
     ),
   );
 });
@@ -388,8 +392,8 @@ app.post("/demo/login", async (q, r) => {
     const c = q.headers.cookie
       ?.split(";")
       .map((x) => x.trim())
-      .find((x) => x.startsWith("folio_login="))
-      ?.slice(12);
+      .find((x) => x.startsWith("yeet_login="))
+      ?.slice(11);
     if (!c || !equal(c, q.body.csrf) || !originOK(q)) return r.sendStatus(403);
     const id = await verifyIdentity(q.body);
     if (!sameOwner(session(q), id) || !(await eligible(id)))
@@ -402,43 +406,11 @@ app.post("/demo/login", async (q, r) => {
       expires: Date.now() + 3600000,
     };
     write("sessions.json", db);
-    cookie(r, "folio_demo", token);
-    cookie(r, "folio_login", "", 0);
+    cookie(r, "yeet_session", token);
+    cookie(r, "yeet_login", "", 0);
     r.redirect("/demo/");
   } catch {
-    r.status(401).json({ error: "invalid development credentials" });
-  }
-});
-app.get("/demo/api/:name", async (q, r) => {
-  const s = session(q);
-  if (!s) return r.sendStatus(401);
-  if (
-    Object.keys(q.query).length ||
-    !["profile", "portfolio", "research"].includes(q.params.name)
-  )
-    return r.sendStatus(400);
-  try {
-    const value = await coreCall("/" + q.params.name, s.id, secret("core-as"));
-    r.json(
-      q.params.name === "profile"
-        ? {
-            id: value.id,
-            name:
-              process.env.PRIVY_LOGIN === "1"
-                ? "Folio account"
-                : value.id === "folio-alice"
-                  ? "Alice"
-                  : "Bob",
-            identity_mode:
-              process.env.PRIVY_LOGIN === "1" ? "privy" : "development_mock",
-            csrf_token: s.csrf,
-          }
-        : q.params.name === "portfolio"
-          ? { portfolio: value }
-          : value,
-    );
-  } catch {
-    r.sendStatus(403);
+    r.status(401).json({ error: "sign in failed" });
   }
 });
 app.post("/demo/logout", (q, r) => {
@@ -448,7 +420,7 @@ app.post("/demo/logout", (q, r) => {
   const db = read("sessions.json");
   delete db[s.token];
   write("sessions.json", db);
-  cookie(r, "folio_demo", "", 0);
+  cookie(r, "yeet_session", "", 0);
   r.json(
     process.env.PRIVY_LOGIN === "1"
       ? { ok: true, identity_logout: true }
@@ -465,21 +437,21 @@ app.get("/demo/logout-identity", (_q, r) => {
     ),
   );
 });
-// Repo viewer files first (they used to overwrite the base's /app/viewer copies), then the base image's built
-// privy-login bundle, which only the pinned base carries under /app/viewer.
+// Page styles, then the sign-in bundle built from ../login (npm run build:login writes login/dist/login.js).
 app.use("/demo", express.static(fileURLToPath(new URL("./viewer/", import.meta.url)), { fallthrough: true }));
-app.use("/demo", express.static("/app/viewer", { fallthrough: true }));
+app.use("/demo/privy-login", express.static(fileURLToPath(new URL("../login/dist/", import.meta.url)), { fallthrough: true }));
 app.get("/demo/", (_q, r) =>
   r
     .type("html")
     .send(
       authDocument(
         r,
-        "Folio",
-        '<p>Shared viewer assets pending coordinator. <a href="/demo/login">Sign in</a></p>',
+        "YEET",
+        '<p>You are signed in to YEET. Go back to ChatGPT to keep going.</p>',
       ),
     ),
 );
+app.get("/", (_q, r) => r.redirect("https://yeet.win"));
 function interactionError(e, r, next) {
   if (e instanceof AuthorizationExpired || e instanceof errors.SessionNotFound)
     return r.status(400).type("html").send(authDocument(r,
@@ -503,14 +475,13 @@ app.get("/interaction/:uid", async (q, r, next) => {
       uid: d.uid,
       prompt: d.prompt.name,
       csrf: csrf(d.uid),
-      identity: "Folio",
+      identity: "YEET",
     };
     const requestedScopes = (d.params.scope || "").split(" ").filter(Boolean);
     const prior = d.grantId ? await provider.Grant.find(d.grantId) : undefined;
     const priorScopes = prior?.getResourceScope(RESOURCE).split(" ").filter(Boolean) || [];
-    const stepUp = isRealStepUp(d.params);
     if (TEST) {
-      data.consent_selection = consentSelection(requestedScopes, priorScopes, { stepUp });
+      data.consent_selection = consentSelection(requestedScopes, priorScopes);
       data.client_auth_method = (
         await provider.Client.find(d.params.client_id)
       ).tokenEndpointAuthMethod;
@@ -524,7 +495,7 @@ app.get("/interaction/:uid", async (q, r, next) => {
       r.type("html").send(
         authDocument(r, promptTitle(d.prompt.name), consentForm({
           csrf: data.csrf, accountId: d.session.accountId, clientId: d.params.client_id,
-          resource: d.params.resource || RESOURCE, requested: requestedScopes, priorGranted: priorScopes, stepUp, renewal,
+          resource: d.params.resource || RESOURCE, requested: requestedScopes, priorGranted: priorScopes, renewal,
         })),
       );
       return;
@@ -537,7 +508,7 @@ app.get("/interaction/:uid", async (q, r, next) => {
       authDocument(
         r,
         promptTitle(d.prompt.name),
-        `<form method="POST" data-folio-prompt="login"><input type="hidden" name="csrf" value="${data.csrf}">${identity}${(!s || recoveringAccount(d)) && process.env.PRIVY_LOGIN === "1" ? "" : `<button type="submit">${action}</button>`}</form>`,
+        `<form method="POST" data-yeet-prompt="login"><input type="hidden" name="csrf" value="${data.csrf}">${identity}${(!s || recoveringAccount(d)) && process.env.PRIVY_LOGIN === "1" ? "" : `<button type="submit">${action}</button>`}</form>`,
       ),
     );
   } catch (e) {
@@ -578,7 +549,7 @@ app.post("/interaction/:uid", async (q, r, next) => {
         throw Error("Browser identity or eligibility changed");
       const requested = (d.params.scope || "").split(" ").filter(Boolean);
       const granted = submittedScopes(requested, q.body);
-      // Every authorization gets a new grant: a second ChatGPT login never inherits Real.
+      // Every authorization gets a new grant: a second ChatGPT login never inherits an older one.
       const grant = new provider.Grant({ accountId: d.session.accountId, clientId: d.params.client_id });
       if ((d.params.resource || RESOURCE) !== RESOURCE) throw Error("Invalid resource");
       applyConsentScopes(grant, { requested, granted, resource: RESOURCE, opScopes: ["openid", "offline_access", ...issuableScopes], resourceScopes: issuableScopes });
@@ -594,7 +565,6 @@ app.post("/interaction/:uid", async (q, r, next) => {
           resource: d.params.resource || RESOURCE,
           scopes: [...grant.getOIDCScope().split(" "), ...grant.getResourceScope(RESOURCE).split(" ")].filter(Boolean),
         });
-      void coreCall("/authorization", d.session.accountId, secret("core-as"), {}).catch(() => {});
       await provider.interactionFinished(
         q,
         r,
@@ -614,7 +584,7 @@ app.use((e, _q, r, _n) => {
   observeServerError(null, e);
   return r.status(400).json({ error: "request rejected" });
 });
-app.listen(38312, "0.0.0.0");
+export const server = app.listen(port("AS_PORT", 38312), process.env.LISTEN_HOST || "0.0.0.0");
 const admin = express();
 admin.use(express.json({ limit: "8kb" }));
 admin.use((q, r, next) => {
@@ -630,11 +600,7 @@ admin.post("/policy", async (q, r) => {
       test: TEST,
     });
     if (!client) return r.sendStatus(400);
-    if (
-      process.env.PRIVY_LOGIN === "1"
-        ? !operatorAccountExists(await policy(account))
-        : !users[account]
-    )
+    if (!operatorAccountExists(await policy(account)))
       return r.sendStatus(400);
     await coreCall("/policy", account, secret("core-operator"), {
       account,
@@ -654,4 +620,4 @@ admin.post("/policy", async (q, r) => {
     r.sendStatus(503);
   }
 });
-admin.listen(38317, "0.0.0.0");
+export const adminServer = admin.listen(port("ADMIN_PORT", 38317), process.env.LISTEN_HOST || "0.0.0.0");
