@@ -4,7 +4,14 @@ import {
   PrivyProvider,
   usePrivy,
   useLoginWithOAuth,
+  useSigners,
 } from "@privy-io/react-auth";
+const PROVIDERS = [
+  ["google", "Google"],
+  ["apple", "Apple"],
+  ["telegram", "Telegram"],
+  ["twitter", "X"],
+];
 function EndSession() {
   const { ready, logout } = usePrivy();
   const [busy, setBusy] = useState(false),
@@ -20,33 +27,78 @@ function EndSession() {
             await logout();
             location.assign("/demo/login");
           } catch {
-            setError("Privy sign out could not finish. Please try again.");
+            setError("Sign out could not finish. Please try again.");
             setBusy(false);
           }
         }}
       >
-        Sign out of Privy
+        Sign out
       </button>
       <p role="status">{error}</p>
     </>
   );
 }
-function SignIn() {
-  const { ready, authenticated, getAccessToken, logout } = usePrivy();
+/** The person's YEET embedded wallets (created on login), one per chain. */
+function embeddedWallets(user) {
+  const wallets = (user?.linkedAccounts || []).filter(
+    (a) =>
+      a.type === "wallet" &&
+      (a.walletClientType === "privy" || a.walletClientType === "privy-v2") &&
+      !a.imported,
+  );
+  return {
+    base: wallets.find((w) => w.chainType === "ethereum"),
+    solana: wallets.find((w) => w.chainType === "solana"),
+  };
+}
+/**
+ * Lets the YEET server sign for both embedded wallets, within the YEET policies. Runs only when
+ * /demo/identity-config returns a signer id, so sign-in keeps working before the signer is registered.
+ * A wallet that already has a delegated signer is left as it is.
+ */
+async function attachYeetSignerIfConfigured({ config, user, addSigners }) {
+  if (!config.signerId) return;
+  const wallets = embeddedWallets(user);
+  if (!wallets.base || !wallets.solana) throw Error("wallets-not-ready");
+  for (const [chain, wallet] of Object.entries(wallets)) {
+    if (wallet.delegated) continue;
+    const policy = config.policyIds?.[chain];
+    await addSigners({
+      address: wallet.address,
+      signers: [{ signerId: config.signerId, ...(policy ? { policyIds: [policy] } : {}) }],
+    });
+  }
+}
+function SignIn({ config }) {
+  const { ready, authenticated, user, getAccessToken, logout } = usePrivy();
+  const { addSigners } = useSigners();
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const { initOAuth, loading } = useLoginWithOAuth();
+  const wallets = embeddedWallets(user);
+  const walletsPending = !!config.signerId && (!wallets.base || !wallets.solana);
   async function social(provider) {
     setError("");
     try {
-      await initOAuth({ provider, disableSignup: true });
+      await initOAuth({ provider, disableSignup: false });
     } catch {
-      setError("Existing-account sign in could not start. Please try again.");
+      setError("Sign in could not start. Please try again.");
     }
   }
   async function continueLogin() {
     setBusy(true);
     setError("");
+    try {
+      await attachYeetSignerIfConfigured({ config, user, addSigners });
+    } catch (e) {
+      setError(
+        e?.message === "wallets-not-ready"
+          ? "Your YEET wallets are still being set up. Try again in a moment."
+          : "YEET could not finish setting up your wallets. Please try again.",
+      );
+      setBusy(false);
+      return;
+    }
     try {
       const token = await getAccessToken();
       if (!token) throw Error();
@@ -65,32 +117,35 @@ function SignIn() {
   return (
     <>
       <p>
-        Sign in to your existing Privy profile using a method already linked to
-        it. Creating or linking accounts is unavailable in this lab. Portfolio
-        and research data are mock data.
+        Sign in with Google, Apple, Telegram or X. New here? Signing in creates
+        your YEET account and your YEET wallets.
       </p>
       {authenticated ? (
         <>
           <button
             type="button"
-            disabled={!ready || busy}
+            disabled={!ready || busy || walletsPending}
             onClick={continueLogin}
           >
-            {busy ? "Continuing…" : "Continue with signed-in identity"}
+            {busy
+              ? "Continuing…"
+              : walletsPending
+                ? "Setting up your YEET wallets…"
+                : "Continue to YEET"}
           </button>
           <button type="button" disabled={busy} onClick={logout}>
-            Use another identity
+            Use another account
           </button>
         </>
       ) : (
-        ["google", "apple", "telegram"].map((provider) => (
+        PROVIDERS.map(([provider, label]) => (
           <button
             key={provider}
             type="button"
             disabled={!ready || busy || loading}
             onClick={() => social(provider)}
           >
-            Continue with {provider[0].toUpperCase() + provider.slice(1)}
+            Continue with {label}
           </button>
         ))
       )}
@@ -103,19 +158,24 @@ try {
     credentials: "same-origin",
   });
   if (!response.ok) throw Error();
-  const { appId } = await response.json();
+  const config = await response.json();
   createRoot(document.getElementById("privy-login")).render(
     <PrivyProvider
-      appId={appId}
+      appId={config.appId}
       config={{
         scriptNonce: document.querySelector('meta[property="csp-nonce"]')
           ?.content,
-        appearance: { logo: <strong>Folio</strong>, walletList: [] },
-        loginMethods: ["google", "apple", "telegram"],
+        appearance: {
+          logo: <strong>YEET</strong>,
+          theme: "dark",
+          accentColor: "#ffe14d",
+          walletList: [],
+        },
+        loginMethods: PROVIDERS.map(([provider]) => provider),
         embeddedWallets: {
           disableAutomaticMigration: true,
-          ethereum: { createOnLogin: "off" },
-          solana: { createOnLogin: "off" },
+          ethereum: { createOnLogin: "all-users" },
+          solana: { createOnLogin: "all-users" },
         },
         externalWallets: { walletConnect: { enabled: false } },
       }}
@@ -123,7 +183,7 @@ try {
       {document.getElementById("privy-login").dataset.mode === "logout" ? (
         <EndSession />
       ) : (
-        <SignIn />
+        <SignIn config={config} />
       )}
     </PrivyProvider>,
   );
