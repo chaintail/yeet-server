@@ -1,0 +1,117 @@
+# YEET connector stack (port plan section 5). Written for Lane A; not started by Lane A.
+# Values: non-secret settings come from ops/.env (copy env/compose.env.example; .env is git-ignored).
+# Secret values live only in /var/lib/yeet-connector/config/<role>.env (see env/*.env.example for the names).
+name: yeet-connector
+x-runtime: &runtime
+  image: yeet-connector:${YEET_IMAGE_TAG:-local}
+  pull_policy: never
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  tmpfs: [/tmp]
+  mem_limit: 256m
+  pids_limit: 64
+services:
+  bootstrap:
+    <<: *runtime
+    build: {context: .., dockerfile: ops/Dockerfile}
+    pull_policy: build
+    command: [as/bootstrap.mjs]
+    network_mode: none
+    volumes: ['/var/lib/yeet-connector/secrets:/secrets']
+  as:
+    <<: *runtime
+    restart: unless-stopped
+    command: [as/server.mjs, as]
+    environment:
+      ISSUER: ${ISSUER:-}
+      RESOURCE: ${RESOURCE:-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      PUBLIC_MODE: ${PUBLIC_MODE:-}
+      COOKIE_SECURE: ${COOKIE_SECURE:-}
+      TRUST_PROXY: ${TRUST_PROXY:-}
+      ACCESS_TTL: ${ACCESS_TTL:-}
+      REFRESH_FAMILY_TTL: ${REFRESH_FAMILY_TTL:-}
+      TEST_PROFILE: ${TEST_PROFILE:-}
+      DEV_IDENTITY_STUB: ${DEV_IDENTITY_STUB:-}
+      MOCK_PASSWORD_LOGIN: ${MOCK_PASSWORD_LOGIN:-}
+      PRIVY_LOGIN: ${PRIVY_LOGIN:-}
+      REFRESH_CONSENT_COMPAT: ${REFRESH_CONSENT_COMPAT:-}
+      REFRESH_DIAGNOSTICS: ${REFRESH_DIAGNOSTICS:-}
+      CIMD_TEST_FIXTURES: ${CIMD_TEST_FIXTURES:-}
+      PRIVY_APP_ID: ${PRIVY_APP_ID:-}
+      PRIVY_JWKS_URL: ${PRIVY_JWKS_URL:-}
+      STATE_DIR: /state
+      CORE_INTERNAL: ${CORE_INTERNAL:-}
+      YEET_SIGNER_ID: ${YEET_SIGNER_ID:-}
+      YEET_BASE_POLICY_ID: ${YEET_BASE_POLICY_ID:-}
+      YEET_SOLANA_POLICY_ID: ${YEET_SOLANA_POLICY_ID:-}
+      YEET_DAILY_CAP_USDC: ${YEET_DAILY_CAP_USDC:-}
+    env_file: [{path: /var/lib/yeet-connector/config/as.env, required: false}]
+    ports: ['127.0.0.1:38860:38312']
+    volumes: ['/var/lib/yeet-connector/as-state:/state', '/var/lib/yeet-connector/secrets/as:/secrets:ro']
+    networks: [oauth, core]
+    depends_on: {bootstrap: {condition: service_completed_successfully}, core: {condition: service_healthy}}
+    healthcheck: {test: [CMD, node, -e, "require('http').get({hostname:'127.0.0.1',port:38312,path:'/.well-known/openid-configuration',headers:{host:new URL(process.env.ISSUER).host}},r=>{r.resume();process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"], interval: 2s, timeout: 2s, retries: 20}
+  mcp:
+    <<: *runtime
+    restart: unless-stopped
+    command: [mcp/server.mjs, mcp]
+    environment:
+      ISSUER: ${ISSUER:-}
+      RESOURCE: ${RESOURCE:-}
+      PUBLIC_MODE: ${PUBLIC_MODE:-}
+      PRIVY_LOGIN: ${PRIVY_LOGIN:-}
+      AS_INTERNAL: ${AS_INTERNAL:-}
+      CORE_INTERNAL: ${CORE_INTERNAL:-}
+    env_file: [{path: /var/lib/yeet-connector/config/connector.env, required: false}]
+    ports: ['127.0.0.1:38861:38313']
+    volumes: ['/var/lib/yeet-connector/secrets/mcp:/secrets:ro']
+    networks: [oauth, core]
+    depends_on: {as: {condition: service_healthy}}
+    healthcheck: {test: [CMD, node, -e, "require('http').get({hostname:'127.0.0.1',port:38313,path:'/.well-known/oauth-protected-resource',headers:{host:new URL(process.env.RESOURCE).host}},r=>{r.resume();process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"], interval: 2s, timeout: 2s, retries: 20}
+  core:
+    <<: *runtime
+    restart: unless-stopped
+    command: [core/server.mjs, core]
+    environment:
+      ISSUER: ${ISSUER:-}
+      RESOURCE: ${RESOURCE:-}
+      PRIVY_LOGIN: ${PRIVY_LOGIN:-}
+      PRIVY_APP_ID: ${PRIVY_APP_ID:-}
+      PRIVY_JWKS_URL: ${PRIVY_JWKS_URL:-}
+      AS_INTERNAL: ${AS_INTERNAL:-}
+      YEET_PRIVY_KEY_QUORUM_ID: ${YEET_PRIVY_KEY_QUORUM_ID:-}
+      YEET_BASE_POLICY_ID: ${YEET_BASE_POLICY_ID:-}
+      YEET_SOLANA_POLICY_ID: ${YEET_SOLANA_POLICY_ID:-}
+      YEET_SIGNER: ${YEET_SIGNER:-}
+      YEET_GAS_WALLET_ID: ${YEET_GAS_WALLET_ID:-}
+      YEET_SOL_FEE_PAYER_ID: ${YEET_SOL_FEE_PAYER_ID:-}
+      BASE_RPC_URL: ${BASE_RPC_URL:-}
+      SOLANA_RPC_URL: ${SOLANA_RPC_URL:-}
+      YEET_LIVE: ${YEET_LIVE:-}
+      YEET_KILL_SWITCH: ${YEET_KILL_SWITCH:-}
+      YEET_MAX_TRADE_USDC: ${YEET_MAX_TRADE_USDC:-}
+      YEET_DAILY_CAP_USDC: ${YEET_DAILY_CAP_USDC:-}
+      YEET_MIN_LEG_USDC: ${YEET_MIN_LEG_USDC:-}
+      YEET_MAX_COST_BPS: ${YEET_MAX_COST_BPS:-}
+      YEET_MAX_ACCOUNTS: ${YEET_MAX_ACCOUNTS:-}
+      STATE_DIR: /state
+    # Secret values (PRIVY_APP_SECRET, YEET_PRIVY_AUTHORIZATION_KEY, ONECLICK_JWT, YEET_XP_SECRET) only from this file.
+    env_file: [{path: /var/lib/yeet-connector/config/core.env, required: false}]
+    volumes: ['/var/lib/yeet-connector/core-state:/state', '/var/lib/yeet-connector/secrets/core:/secrets:ro']
+    networks:
+      core: {ipv4_address: 10.233.49.2}
+      egress: {}
+    depends_on: {bootstrap: {condition: service_completed_successfully}}
+    healthcheck: {test: [CMD, node, -e, "fetch('http://127.0.0.1:38316/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"], interval: 2s, timeout: 2s, retries: 20}
+networks:
+  oauth:
+    ipam:
+      config: [{subnet: 10.233.48.0/24, gateway: 10.233.48.1}]
+  core:
+    internal: true
+    ipam:
+      config: [{subnet: 10.233.49.0/24, gateway: 10.233.49.1}]
+  # Core needs outbound HTTPS (1Click, Privy API, Base and Solana RPC); the AS reaches JWKS/CIMD over oauth.
+  egress: {}

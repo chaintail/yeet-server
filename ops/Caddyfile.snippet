@@ -1,0 +1,48 @@
+# Import inside the existing loopback Cloudflare-origin server block (the :18080 server).
+# cf_https_proto must keep the existing trusted Cloudflare HTTPS behaviour.
+# Route table: port plan section 1.7. AS on 127.0.0.1:38860, connector on 127.0.0.1:38861.
+@yeet_conn host chatgpt.yeet.win
+handle @yeet_conn {
+	header {
+		Cache-Control "no-store"
+		X-Robots-Tag "noindex, nofollow"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		?Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://chatgpt.com"
+	}
+	@yeet_private path /policy /policy/* /admin /admin/* /operator /operator/* /dev /dev/* /test /test/* /core /core/*
+	handle @yeet_private {
+		respond 404
+	}
+	@yeet_protocol {
+		method POST
+		path /
+	}
+	handle @yeet_protocol {
+		reverse_proxy 127.0.0.1:38861 {
+			import cf_https_proto
+		}
+	}
+	@yeet_connector_get {
+		method GET HEAD
+		path /.well-known/oauth-protected-resource /health
+	}
+	handle @yeet_connector_get {
+		reverse_proxy 127.0.0.1:38861 {
+			import cf_https_proto
+		}
+	}
+	# Everything else, including GET /, goes to the sign-in server: OAuth/OIDC endpoints, /me, /interaction/*, /demo/*.
+	handle {
+		reverse_proxy 127.0.0.1:38860 {
+			import cf_https_proto
+		}
+	}
+}
+
+# Landing page (built yeet-win apps/landing).
+@yeet_landing host yeet.win www.yeet.win
+handle @yeet_landing {
+	root * /srv/yeet-win/apps/landing
+	file_server
+}
