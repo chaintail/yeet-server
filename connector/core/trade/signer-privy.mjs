@@ -107,6 +107,6 @@ export function createDelegatedSigner({env=process.env,fetch=globalThis.fetch,ba
   const no=async()=>refuse('WALLET_NOT_READY','Privy credentials not configured');
   return {kind:'delegated',configured:false,directory:notReady,transferUsdcBase:no,transferSpl:no};
  }
- const api=createPrivyApi({config,fetch});
+ const api=createPrivyApi({config,fetch,timeoutMs:8000});
  return {kind:'delegated',configured:true,directory:privyDirectory({api,didFor,keyQuorumId:config.keyQuorumId}),...privyTransfers({api,env,balances})};
 }

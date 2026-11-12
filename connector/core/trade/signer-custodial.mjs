@@ -32,6 +32,6 @@ export function createCustodialSigner({env=process.env,fetch=globalThis.fetch,ba
   const no=async()=>refuse('WALLET_NOT_READY','Privy credentials not configured');
   return {kind:'custodial',configured:false,directory:{stable:true,lookup:no},transferUsdcBase:no,transferSpl:no};
  }
- const api=createPrivyApi({config,fetch});
+ const api=createPrivyApi({config,fetch,timeoutMs:8000});
  return {kind:'custodial',configured:true,directory:custodialDirectory({api,config}),...privyTransfers({api,env,balances})};
 }

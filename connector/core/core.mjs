@@ -3,7 +3,10 @@ import express from 'express';
 import {introspectBearer,validatePrincipal} from '#shared/introspection.mjs';
 import {secret,equal,read,write,port,TEST,DEV_APP_ID} from '#shared/common.mjs';
 import {coins} from './coins.mjs';
-import {unavailable} from './failure.mjs';
+import {unavailable,failure} from './failure.mjs';
+import {tradeEngine} from './trade/runtime.mjs';
+import {z} from 'zod';
+import {toolSchemas,zodSchema} from '../mcp/tool-contract.mjs';
 // Accounts are created on the first verified sign-in (identity-store.mjs). The identity app is Privy in
 // production and the development stub only under TEST_PROFILE=1 with DEV_IDENTITY_STUB=1.
 const devStub=TEST&&process.env.DEV_IDENTITY_STUB==='1';
@@ -35,8 +38,33 @@ export const ROUTE_SCOPES=Object.freeze([
 export const routeScope=(method,path)=>ROUTE_SCOPES.find(([m,p])=>m===method&&p.test(path))?.[2]??null;
 app.use((q,r,next)=>{if(q.role==='mcp'){const needed=routeScope(q.method,q.path);if(!needed||!q.principal.scopes.has(needed))return r.sendStatus(403)}next()});
 app.get('/coins',(_q,r)=>r.json(coins()));
-// Trade engine, XP and portfolio arrive in lanes B and E; until then each answers a typed retryable failure.
-for(const [method,path] of [['get','/home'],['post','/proposals'],['post','/proposals/skeet'],['post','/proposals/:id/quote'],['post','/trades'],['get','/trades/:id'],['get','/portfolio'],['get','/leaderboard/:board'],['post','/spin']])
+// Trade engine (lane B). Only the connector reaches these routes; each answer is the tool's structuredContent, plus
+// `confirm` for the card-only `_meta` where the contract has one. A refusal is the contract `failure` shape.
+const inputs=Object.fromEntries(Object.entries(toolSchemas).map(([n,s])=>[n,zodSchema(z,s.input)]));
+const CODE_STATUS={TEMPORARILY_UNAVAILABLE:503,TRADING_PAUSED:503,REAUTH_REQUIRED:401};
+function trade(tool,fn){
+ return async(q,r)=>{
+  if(q.role!=='mcp')return r.sendStatus(403);
+  const ctx={accountId:q.subject,clientId:q.principal.client};
+  const args=tool?inputs[tool].safeParse(q.method==='GET'?{}:q.body??{}):{success:true,data:{}};
+  if(!args.success)return r.status(400).json(failure('INVALID_ARGUMENT'));
+  try{r.json(await fn(await tradeEngine(),ctx,args.data,q))}
+  catch(e){
+   if(e?.name==='TradeError')return r.status(CODE_STATUS[e.code]??409).json(failure(e.code));
+   console.error(JSON.stringify({event:'trade_route_failed',route:q.route?.path,error:String(e?.message??e).slice(0,200)}));
+   unavailable(r);
+  }
+ };
+}
+app.get('/home',trade('yeet_home',(e,ctx)=>e.home(ctx)));
+app.post('/proposals',trade('yeet_propose',(e,ctx,a)=>e.propose(ctx,a)));
+app.post('/proposals/skeet',trade('skeet_propose',(e,ctx,a)=>e.skeet(ctx,a)));
+app.post('/proposals/:id/quote',trade(null,(e,ctx,_a,q)=>{const a=inputs.yeet_quote.safeParse({...q.body,proposal_id:q.params.id});if(!a.success)throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});return e.quote(ctx,a.data)}));
+app.post('/trades',trade('execute_trade',(e,ctx,a)=>e.execute(ctx,a)));
+app.get('/trades/:id',trade(null,(e,ctx,_a,q)=>e.status(ctx,q.params.id)));
+app.get('/portfolio',trade('yeet_portfolio',(e,ctx)=>e.portfolio(ctx)));
+// XP, leaderboard and spin arrive in lane E; until then each answers a typed retryable failure.
+for(const [method,path] of [['get','/leaderboard/:board'],['post','/spin']])
  app[method](path,(_q,r)=>unavailable(r));
 app.use((_e,_q,r,_n)=>r.status(400).json({error:'invalid request'}));
 export const server=app.listen(port('CORE_PORT',38316),process.env.LISTEN_HOST||'0.0.0.0');

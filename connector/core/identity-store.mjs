@@ -85,3 +85,10 @@ export function account(id) {
 export function accountCount() {
   return database().prepare("SELECT COUNT(*) n FROM accounts").get().n;
 }
+/** The Privy DID linked to an account for the configured app (the trade engine's wallet lookup); undefined otherwise. */
+export function didFor(id) {
+  if (!appId || !validAccount(id)) return undefined;
+  return database()
+    .prepare("SELECT did FROM identity_links WHERE account_id=? AND app_id=?")
+    .get(id, appId)?.did;
+}

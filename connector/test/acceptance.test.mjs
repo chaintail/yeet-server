@@ -117,10 +117,11 @@ test('A-4: a signed-in, consented token lists the P0 and P1 tools over HTTP, exe
  const call=async(name,args)=>(await (await rpc({jsonrpc:'2.0',id:3,method:'tools/call',params:{name,arguments:args}},token.access_token)).json()).result;
  const coins=await call('yeet_coins',{});
  assert.equal(coins.isError,undefined);assert.ok(coins.structuredContent.coins.some(c=>c.symbol==='WIF'));
+ // No Privy credentials in this process: the default delegated adapter cannot find wallets.
  const home=await call('yeet_home',{});
- assert.equal(home.isError,true);assert.equal(JSON.parse(home.content[0].text).error,'TEMPORARILY_UNAVAILABLE');
+ assert.equal(home.isError,true);assert.equal(JSON.parse(home.content[0].text).error,'WALLET_NOT_READY');
  const trade=await call('execute_trade',{proposal_id:'p_abcdefghij0123456789',revision:1,confirm:'a'.repeat(43)});
- assert.equal(JSON.parse(trade.content[0].text).error,'TEMPORARILY_UNAVAILABLE');
+ assert.equal(JSON.parse(trade.content[0].text).error,'CONFIRMATION_REQUIRED');
  const templates=await (await rpc({jsonrpc:'2.0',id:4,method:'resources/list'},token.access_token)).json();
  assert.deepEqual(templates.result.resources.map(x=>x.uri).sort(),['ui://yeet/basket-v1.html','ui://yeet/home-v1.html','ui://yeet/leaderboard-v1.html','ui://yeet/portfolio-v1.html','ui://yeet/receipt-v1.html']);
 });
