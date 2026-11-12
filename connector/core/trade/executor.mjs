@@ -17,6 +17,8 @@ import {receiptLeg} from './tracker.mjs';
 import {legIdempotencyKey,USDC_BASE} from './signer.mjs';
 import {refuse,newId,iso,TradeError} from './util.mjs';
 import {tx} from './db.mjs';
+import {transitionLeg,appendEvent} from './audit.mjs';
+import {USDC_KEY} from './accounting.mjs';
 
 export const PREVIEW_STALE_MS=60_000;
 export const EXECUTE_BUDGET_MS=20_000;
@@ -74,7 +76,7 @@ export function assertLivePlan({direction,live,legs,w,log=console.error}){
  }
 }
 
-export function createExecutor({db,client,limits,wallets,signer,codes,proposals,tracker,now=Date.now,budgetMs=EXECUTE_BUDGET_MS,hooks={}}){
+export function createExecutor({db,client,limits,wallets,signer,codes,proposals,tracker,accounting,now=Date.now,budgetMs=EXECUTE_BUDGET_MS,hooks={}}){
  const trade=id=>db.prepare('SELECT * FROM trades WHERE id=?').get(id);
  const legsOf=id=>db.prepare('SELECT * FROM trade_legs WHERE trade_id=? ORDER BY idx').all(id);
  const legOf=(id,idx)=>db.prepare('SELECT * FROM trade_legs WHERE trade_id=? AND idx=?').get(id,idx);
@@ -93,12 +95,12 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
  }
 
  /** A leg that never moved funds (`failed`: the signer says nothing was broadcast; `not_sent`: never attempted) goes
-  * back to the daily cap, once: the state change and the refund are one transaction. */
- function release(t,idx,state){
+  * back to the daily cap, once: the state change, its audit row and the refund are one transaction. */
+ function release(t,idx,state,evidence){
   return tx(db,()=>{
    const l=legOf(t.id,idx);
    if(!l||!['queued','sending'].includes(l.send_status))return false;
-   db.prepare('UPDATE trade_legs SET send_status=?,updated_at=? WHERE trade_id=? AND idx=?').run(state,now(),t.id,idx);
+   if(!transitionLeg(db,{tradeId:t.id,idx,from:l.send_status,to:state,evidence,set:{updated_at:now()},at:now()}))return false;
    if(t.direction==='yeet')recordSpend(db,t.account_id,t.created_at,-BigInt(l.amount_in_raw));
    return true;
   });
@@ -121,8 +123,8 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
   const l=legOf(t.id,idx),key=legIdempotencyKey(wallet.walletId,t.id,idx);
   if(l.send_status==='queued'){
    let call;
-   try{call=prepare(t,{...l,idempotency_key:key},wallet,held)}catch(e){release(t,idx,'failed');return codeOf(e)}
-   if(db.prepare("UPDATE trade_legs SET send_status='sending',idempotency_key=?,send_attempts=send_attempts+1,updated_at=? WHERE trade_id=? AND idx=? AND send_status='queued'").run(key,now(),t.id,idx).changes!==1)return;
+   try{call=prepare(t,{...l,idempotency_key:key},wallet,held)}catch(e){release(t,idx,'failed',{reason:codeOf(e),stage:'prepare'});return codeOf(e)}
+   if(!transitionLeg(db,{tradeId:t.id,idx,from:'queued',to:'sending',evidence:{idempotency_key:key},set:{idempotency_key:key,send_attempts:l.send_attempts+1,updated_at:now()},at:now()}))return;
    return finish(t,idx,call,true);
   }
   if(l.send_status!=='sending')return;
@@ -137,12 +139,12 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
   try{({txHash}=await call())}
   catch(e){
    // A re-issue's refusal says nothing about the first attempt, so only a first attempt can be released.
-   if(first&&e?.notSent===true){release(t,idx,'failed');return codeOf(e)}
+   if(first&&e?.notSent===true){release(t,idx,'failed',{reason:codeOf(e),stage:'signer',not_sent:true});return codeOf(e)}
    note(t.id,`leg ${idx}: ${e?.detail??e?.message??'send not confirmed'}`);
    return codeOf(e);
   }
   if(typeof txHash!=='string'||!TX_HASH.test(txHash)){note(t.id,`leg ${idx}: signer answered no hash`);return 'TEMPORARILY_UNAVAILABLE'}
-  db.prepare("UPDATE trade_legs SET send_status='sent',tx_hash=?,updated_at=? WHERE trade_id=? AND idx=? AND send_status='sending'").run(txHash,now(),t.id,idx);
+  transitionLeg(db,{tradeId:t.id,idx,from:'sending',to:'sent',evidence:{tx_hash:txHash,source:'signer'},set:{tx_hash:txHash,updated_at:now()},at:now()});
   await submit(t,idx);
  }
  /** 1Click /deposit/submit for a sent leg, until accepted; not needed once 1Click has found the deposit itself. */
@@ -161,7 +163,9 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
   try{st=await client.status(l.deposit_address,l.deposit_memo??undefined)}catch(e){note(t.id,`leg ${l.idx}: status: ${e?.message}`);return false}
   if(!st?.status||st.status==='PENDING_DEPOSIT')return false;
   const hash=(st.swapDetails?.originChainTxHashes??[]).map(h=>h?.hash).find(h=>typeof h==='string'&&TX_HASH.test(h))??null;
-  db.prepare("UPDATE trade_legs SET send_status='sent',tx_hash=COALESCE(tx_hash,?),deposit_submitted=1,updated_at=? WHERE trade_id=? AND idx=? AND send_status='sending'").run(hash,now(),t.id,l.idx);
+  const txHash=l.tx_hash??hash;
+  transitionLeg(db,{tradeId:t.id,idx:l.idx,from:'sending',to:'sent',evidence:{tx_hash:txHash,oneclick_status:st.status,correlation_id:st.correlationId??null,source:'1click_status'},
+   set:{tx_hash:txHash,deposit_submitted:1,updated_at:now()},at:now()});
   tracker.apply(t.id,l.idx,st);
   return true;
  }
@@ -201,7 +205,7 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
     if(l.send_status==='sent'){await submit(t,l.idx);continue}
     const deadline=Date.parse(JSON.parse(l.live_quote_json).deadline);
     if(l.send_status==='queued'){
-     if(!(now()+SEND_MARGIN_MS<deadline)){release(t,l.idx,'not_sent');continue}
+     if(!(now()+SEND_MARGIN_MS<deadline)){release(t,l.idx,'not_sent',{reason:'deposit deadline too close',deadline:iso(deadline)});continue}
      try{const {wallet,held}=await walletCtx();await attempt(t,l.idx,wallet,held)}
      catch(e){note(tradeId,`leg ${l.idx}: ${e?.detail??e?.message}`)}// stays queued; retried next tick
      continue;
@@ -243,6 +247,7 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
    proposals.insertRevision(p.id,revision,rows);
    db.prepare('INSERT INTO trades(id,proposal_id,revision,account_id,direction,status,created_at,updated_at,receipt_json,result_json) VALUES(?,?,?,?,?,?,?,?,NULL,NULL)')
     .run(tradeId,p.id,p.revision,ctx.accountId,p.direction,'requote_required',t,t);
+   appendEvent(db,{tradeId,kind:'trade',from:null,to:'requote_required',evidence:{reason:'live quote worse than the preview',revision:p.revision,new_revision:revision},at:t});
    return true;
   });
   if(!done)return null;
@@ -297,6 +302,9 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
     return replay(codes.check({code:confirm,accountId:ctx.accountId,clientId:ctx.clientId,proposalId:proposal_id,revision}).trade_id);
    }
    checkCost(limits,proposals.legsCost(proposals.legRows(live)));
+   // Source balance before anything is signed (accounting.mjs); a failed read never blocks the trade.
+   const legAssets=Object.fromEntries(live.legs.map(l=>[l.index,p.direction==='yeet'?USDC_KEY:proposals.mintOf(l.origin.symbol)]));
+   const snapshot=accounting?await accounting.readBefore({chain,address:w[chain].address,legAssets}):null;
 
    // Commit: the code, the proposal, the trade and its legs, and today's spend, in one transaction.
    const tradeId=newId('t'),t=now();
@@ -308,8 +316,13 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
      trackingStartedAt:iso(t),writtenAt:iso(t),complete:false,timedOut:false,legs:[]};
     db.prepare('INSERT INTO trades(id,proposal_id,revision,account_id,direction,status,created_at,updated_at,receipt_json,result_json) VALUES(?,?,?,?,?,?,?,?,?,NULL)')
      .run(tradeId,p.id,revision,ctx.accountId,p.direction,'signing',t,t,JSON.stringify(receipt));
+    appendEvent(db,{tradeId,kind:'trade',from:null,to:'signing',evidence:{proposal_id:p.id,revision,plan_id:live.id,legs:live.legs.length},at:t});
     const ins=db.prepare('INSERT INTO trade_legs(trade_id,idx,symbol,amount_in_raw,deposit_address,deposit_memo,live_quote_json,send_status,tx_hash,oneclick_status,settled_out_raw,refund_reason,receipt_leg_json,updated_at) VALUES(?,?,?,?,?,?,?,?,NULL,NULL,NULL,NULL,?,?)');
-    for(const l of live.legs)ins.run(tradeId,l.index,l.symbol,l.amountIn,l.depositAddress,l.depositMemo??null,JSON.stringify(l),'queued',JSON.stringify(receiptLeg(l)),t);
+    for(const l of live.legs){
+     ins.run(tradeId,l.index,l.symbol,l.amountIn,l.depositAddress,l.depositMemo??null,JSON.stringify(l),'queued',JSON.stringify(receiptLeg(l)),t);
+     appendEvent(db,{tradeId,legIdx:l.index,kind:'leg',from:null,to:'queued',evidence:{amount_in_raw:l.amountIn,deposit_address:l.depositAddress,correlation_id:l.correlationId??null},at:t});
+    }
+    if(snapshot)accounting.recordSnapshot(tradeId,snapshot);
     return true;
    });
    if(!committed)return replay(codes.check({code:confirm,accountId:ctx.accountId,clientId:ctx.clientId,proposalId:proposal_id,revision}).trade_id);
@@ -326,7 +339,7 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
      if(failed)lastError=failed;
     }
     // Legs the budget left unattempted never moved funds.
-    for(const l of legsOf(tradeId))if(l.send_status==='queued')release(tRow,l.idx,'not_sent');
+    for(const l of legsOf(tradeId))if(l.send_status==='queued')release(tRow,l.idx,'not_sent',{reason:'execute time budget spent'});
    }finally{inFlight.delete(tradeId)}
    settle(tradeId,lastError);
    try{tracker.refresh(tradeId)}catch(e){note(tradeId,`refresh: ${e?.message}`)}

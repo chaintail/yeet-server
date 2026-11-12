@@ -8,6 +8,8 @@
 // stops the others: the error is kept in trades.last_error.
 import {applyStatus,ReceiptSchema,isTerminal,formatUnits} from './router.mjs';
 import {refuse,iso} from './util.mjs';
+import {transitionTrade,TransitionRefused} from './audit.mjs';
+import {destinationAmounts} from './accounting.mjs';
 
 export const TRACK_MAX_HOURS=24;
 
@@ -51,7 +53,9 @@ export function foldStatus(legs,nowMs=Date.now()){
 /** A stale trade's status: the closest contract value, the detail is in each unfinished leg's refund_reason. */
 export const staleStatus=legs=>legs.some(l=>l.send_status==='sent'&&l.oneclick_status==='SUCCESS')?'partial':'failed';
 
-export function createTracker({db,client,now=Date.now,onSettled=()=>{},intervalMs=5000,trackMaxHours=TRACK_MAX_HOURS}){
+const NO_ACCOUNTING={raiseAlert(){return false},async tick(){}};
+
+export function createTracker({db,client,now=Date.now,onSettled=()=>{},intervalMs=5000,trackMaxHours=TRACK_MAX_HOURS,accounting=NO_ACCOUNTING}){
  const legsOf=id=>db.prepare('SELECT * FROM trade_legs WHERE trade_id=? ORDER BY idx').all(id);
  const tradeRow=id=>db.prepare('SELECT * FROM trades WHERE id=?').get(id);
  const graceMs=trackMaxHours*3600_000;
@@ -64,8 +68,20 @@ export function createTracker({db,client,now=Date.now,onSettled=()=>{},intervalM
   const complete=sent.length>0&&legs.every(l=>!['queued','sending'].includes(l.send_status))&&sent.every(l=>legFinal(l,at));
   const receipt=ReceiptSchema.parse({...prior,writtenAt:iso(at),legs:sent.map(l=>JSON.parse(l.receipt_leg_json)),
    complete,timedOut:!!prior?.timedOut||(t.stale_at!==null&&!complete)});
+  // Beside the router receipt: destination amounts from 1Click /status, and the source movement once checked.
+  receipt.accounting={destination:destinationAmounts(sent),...(prior?.accounting?.source?{source:prior.accounting.source}:{})};
   const status=t.stale_at!==null&&!complete?staleStatus(legs):foldStatus(legs,at);
-  db.prepare('UPDATE trades SET status=?,receipt_json=?,updated_at=? WHERE id=?').run(status,JSON.stringify(receipt),at,tradeId);
+  const set={receipt_json:JSON.stringify(receipt),updated_at:at};
+  if(status===t.status){
+   if(db.prepare('UPDATE trades SET receipt_json=?,updated_at=? WHERE id=? AND status=?').run(set.receipt_json,at,tradeId,t.status).changes!==1)
+    throw new TransitionRefused(`trade ${tradeId} changed meanwhile`);
+  }else{
+   const evidence={legs:legs.map(l=>({idx:l.idx,send_status:l.send_status,oneclick_status:l.oneclick_status,tx_hash:l.tx_hash,settled_out_raw:l.settled_out_raw})),
+    complete,stale:t.stale_at!==null};
+   if(!transitionTrade(db,{tradeId,from:t.status,to:status,evidence,set,at}))throw new TransitionRefused(`trade ${tradeId} changed meanwhile`);
+  }
+  if(status==='partial'&&(complete||t.stale_at!==null))
+   accounting.raiseAlert({key:`partial:${tradeId}`,tradeId,kind:'partial',detail:{legs:legs.map(l=>({idx:l.idx,send_status:l.send_status,oneclick_status:l.oneclick_status}))}});
   if(receipt.complete&&!prior?.complete){
    try{onSettled({tradeId,accountId:t.account_id,proposalId:t.proposal_id,direction:t.direction,status,receipt})}catch{}
   }
@@ -93,6 +109,8 @@ export function createTracker({db,client,now=Date.now,onSettled=()=>{},intervalM
   }
   const t=tradeRow(tradeId);
   db.prepare('UPDATE trades SET stale_at=? WHERE id=?').run(at,tradeId);
+  accounting.raiseAlert({key:`stale:${tradeId}`,tradeId,kind:'stale',detail:{status:t.status,hours,last_error:t.last_error??null,
+   legs:legsOf(tradeId).map(l=>({idx:l.idx,send_status:l.send_status,oneclick_status:l.oneclick_status}))}});
   db.prepare("UPDATE proposals SET status='executed',updated_at=? WHERE id=? AND status='executing'").run(at,t.proposal_id);
   refresh(tradeId);
  }
@@ -120,6 +138,7 @@ export function createTracker({db,client,now=Date.now,onSettled=()=>{},intervalM
     try{await pollTrade(t.id)}
     catch(e){try{noteTrade(t.id,e?.message??'refresh failed')}catch{}}
    }
+   try{await accounting.tick()}catch{}
    return open.length;
   }finally{running=false}
  }

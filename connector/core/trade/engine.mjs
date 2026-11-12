@@ -2,6 +2,7 @@
 //   client    1Click (router OneClickClient or a fake with quote/submitDeposit/status/getTokens)
 //   signer    signer.mjs interface (delegated or custodial Privy adapter, or a fake); its directory finds wallets
 //   balances  wallets.mjs balances interface (JSON-RPC or a fake)
+//   chain     accounting.mjs chain reader for the before/after balance check (default: over `balances`)
 import {OneClickClient,formatUnits,findToken,CATALOG} from './router.mjs';
 import {limitsFromEnv} from './limits.mjs';
 import {createConfirmCodes} from './nonce.mjs';
@@ -9,12 +10,13 @@ import {createWallets,createRpcBalances} from './wallets.mjs';
 import {createProposals} from './proposals.mjs';
 import {createExecutor} from './executor.mjs';
 import {createTracker} from './tracker.mjs';
+import {createAccounting,accountingFromEnv,balanceReader} from './accounting.mjs';
 import {createSigner} from './signer.mjs';
 import {iso,usd,refuse} from './util.mjs';
 
 export const PRICE_TTL_MS=5*60_000;
 
-export async function createEngine({db,env=process.env,client,signer,balances,didFor,now=Date.now,onSettled,trackerIntervalMs=5000,budgetMs,hooks,catalog=CATALOG,fetch=globalThis.fetch}){
+export async function createEngine({db,env=process.env,client,signer,balances,chain,didFor,now=Date.now,onSettled,trackerIntervalMs=5000,budgetMs,hooks,catalog=CATALOG,fetch=globalThis.fetch}){
  const limits=limitsFromEnv(env);
  client??=new OneClickClient({jwt:env.ONECLICK_JWT||undefined,timeoutMs:6000,retryDelayMs:500});
  balances??=createRpcBalances({baseRpcUrl:env.BASE_RPC_URL,solanaRpcUrl:env.SOLANA_RPC_URL,fetch});
@@ -22,8 +24,9 @@ export async function createEngine({db,env=process.env,client,signer,balances,di
  const codes=createConfirmCodes({db,now,mintLimit:limits.codeMintLimit});
  const wallets=createWallets({db,directory:signer.directory,balances,now});
  const proposals=createProposals({db,client,limits,wallets,codes,now,catalog});
- const tracker=createTracker({db,client,now,onSettled,intervalMs:trackerIntervalMs,trackMaxHours:limits.trackMaxHours});
- const executor=createExecutor({db,client,limits,wallets,signer,codes,proposals,tracker,now,hooks,...(budgetMs?{budgetMs}:{})});
+ const accounting=createAccounting({db,chain:chain??balanceReader(balances),now,...accountingFromEnv(env)});
+ const tracker=createTracker({db,client,now,onSettled,intervalMs:trackerIntervalMs,trackMaxHours:limits.trackMaxHours,accounting});
+ const executor=createExecutor({db,client,limits,wallets,signer,codes,proposals,tracker,accounting,now,hooks,...(budgetMs?{budgetMs}:{})});
  tracker.useRecovery(id=>executor.recover(id));
 
  let prices={at:0,bySymbol:new Map()};
@@ -39,7 +42,7 @@ export async function createEngine({db,env=process.env,client,signer,balances,di
  }
 
  return {
-  limits,signer,wallets,proposals,executor,tracker,codes,
+  limits,signer,wallets,proposals,executor,tracker,codes,accounting,
   /** yeet_home: wallets, readiness and (until lane E) no XP. */
   async home(ctx){
    const w=await wallets.require(ctx.accountId,{refresh:true});
