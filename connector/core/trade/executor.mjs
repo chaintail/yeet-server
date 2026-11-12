@@ -19,10 +19,24 @@ export const PREVIEW_STALE_MS=60_000;
 export const EXECUTE_BUDGET_MS=20_000;
 const explorer=(direction,hash)=>hash?(direction==='yeet'?`https://basescan.org/tx/${hash}`:`https://solscan.io/tx/${hash}`):null;
 
+/** No transfer is started or re-issued when the leg's 1Click deposit deadline is closer than this. */
+export const SEND_MARGIN_MS=120_000;
+/** A leg left `sending` is re-issued (same idempotency key) at most this often. */
+export const RESEND_AFTER_MS=15_000;
+const TX_HASH=/^(0x[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{43,90})$/;
+const codeOf=e=>e instanceof TradeError?e.code:'TEMPORARILY_UNAVAILABLE';
+/** execute_trade leg status (contract enum sent|failed|not_sent): an attempted transfer that is not confirmed yet may
+ * have moved funds, so it is reported as sent (without a hash), never as failed. */
+const ANSWER_STATUS={queued:'not_sent',sending:'sent',sent:'sent',failed:'failed',not_sent:'not_sent'};
+
 export function createExecutor({db,client,limits,wallets,signer,codes,proposals,tracker,now=Date.now,budgetMs=EXECUTE_BUDGET_MS}){
  const trade=id=>db.prepare('SELECT * FROM trades WHERE id=?').get(id);
  const legsOf=id=>db.prepare('SELECT * FROM trade_legs WHERE trade_id=? ORDER BY idx').all(id);
+ const legOf=(id,idx)=>db.prepare('SELECT * FROM trade_legs WHERE trade_id=? AND idx=?').get(id,idx);
  const deps=()=>({client,now:()=>new Date(now())});
+ /** Trades whose legs this process is sending right now; recovery leaves them alone. */
+ const inFlight=new Set();
+ const note=(tradeId,message)=>db.prepare('UPDATE trades SET last_error=? WHERE id=?').run(String(message).slice(0,300),tradeId);
 
  /** The execute_trade answer for a stored trade (also what a replayed code gets). */
  function answer(tradeId){
@@ -30,7 +44,124 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
   if(!t)refuse('TEMPORARILY_UNAVAILABLE','trade missing');
   if(t.result_json){const r=JSON.parse(t.result_json);if(r.error)throw new TradeError(r.error,'replayed failure');return r}
   return {trade_id:t.id,proposal_id:t.proposal_id,direction:t.direction,status:'submitted',
-   legs:legsOf(t.id).map(l=>({symbol:l.symbol,deposit_address:l.deposit_address,tx_hash:l.tx_hash??null,explorer_url:explorer(t.direction,l.tx_hash),status:l.send_status}))};
+   legs:legsOf(t.id).map(l=>({symbol:l.symbol,deposit_address:l.deposit_address,tx_hash:l.tx_hash??null,explorer_url:explorer(t.direction,l.tx_hash),status:ANSWER_STATUS[l.send_status]}))};
+ }
+
+ /** A leg that never moved funds (`failed`: the signer says nothing was broadcast; `not_sent`: never attempted) goes
+  * back to the daily cap, once: the state change and the refund are one transaction. */
+ function release(t,idx,state){
+  return tx(db,()=>{
+   const l=legOf(t.id,idx);
+   if(!l||!['queued','sending'].includes(l.send_status))return false;
+   db.prepare('UPDATE trade_legs SET send_status=?,updated_at=? WHERE trade_id=? AND idx=?').run(state,now(),t.id,idx);
+   if(t.direction==='yeet')recordSpend(db,t.account_id,t.created_at,-BigInt(l.amount_in_raw));
+   return true;
+  });
+ }
+ /** The signer call for a leg; throws before anything is broadcast when the call cannot be built. */
+ function prepare(t,l,wallet,held){
+  const q=JSON.parse(l.live_quote_json);
+  if(t.direction==='yeet')return ()=>signer.transferUsdcBase({walletId:wallet.walletId,from:wallet.address,to:l.deposit_address,amountRaw:l.amount_in_raw,idempotencyKey:l.idempotency_key});
+  const mint=proposals.mintOf(q.origin.symbol),src=held?.find(h=>h.mint===mint);
+  if(!src)refuse('BALANCE_LOW','token account not found');
+  return ()=>signer.transferSpl({walletId:wallet.walletId,owner:wallet.address,source:src.tokenAccount,destinationOwner:l.deposit_address,mint,decimals:q.origin.decimals,amountRaw:l.amount_in_raw,tokenProgram:src.tokenProgram,idempotencyKey:l.idempotency_key});
+ }
+ /**
+  * One transfer attempt for a `queued` leg, or a re-issue of a `sending` leg with its stored idempotency key. The leg is
+  * `sending` (key stored) before the signer is called. Only a first attempt the signer refuses with `notSent` becomes
+  * `failed`; any other failure (timeout, missing hash, crash) leaves the leg `sending`, still counted as spent.
+  * Returns the catalogue code of a failure, or undefined.
+  */
+ async function attempt(t,idx,wallet,held){
+  const l=legOf(t.id,idx),key=legIdempotencyKey(wallet.walletId,t.id,idx);
+  if(l.send_status==='queued'){
+   let call;
+   try{call=prepare(t,{...l,idempotency_key:key},wallet,held)}catch(e){release(t,idx,'failed');return codeOf(e)}
+   if(db.prepare("UPDATE trade_legs SET send_status='sending',idempotency_key=?,send_attempts=send_attempts+1,updated_at=? WHERE trade_id=? AND idx=? AND send_status='queued'").run(key,now(),t.id,idx).changes!==1)return;
+   return finish(t,idx,call,true);
+  }
+  if(l.send_status!=='sending')return;
+  if(l.idempotency_key!==key){note(t.id,`leg ${idx}: wallet changed since the first attempt, not re-issued`);return}
+  let call;
+  try{call=prepare(t,l,wallet,held)}catch(e){note(t.id,`leg ${idx}: ${e?.detail??e?.message}`);return codeOf(e)}
+  db.prepare('UPDATE trade_legs SET send_attempts=send_attempts+1,updated_at=? WHERE trade_id=? AND idx=?').run(now(),t.id,idx);
+  return finish(t,idx,call,false);
+ }
+ async function finish(t,idx,call,first){
+  let txHash;
+  try{({txHash}=await call())}
+  catch(e){
+   // A re-issue's refusal says nothing about the first attempt, so only a first attempt can be released.
+   if(first&&e?.notSent===true){release(t,idx,'failed');return codeOf(e)}
+   note(t.id,`leg ${idx}: ${e?.detail??e?.message??'send not confirmed'}`);
+   return codeOf(e);
+  }
+  if(typeof txHash!=='string'||!TX_HASH.test(txHash)){note(t.id,`leg ${idx}: signer answered no hash`);return 'TEMPORARILY_UNAVAILABLE'}
+  db.prepare("UPDATE trade_legs SET send_status='sent',tx_hash=?,updated_at=? WHERE trade_id=? AND idx=? AND send_status='sending'").run(txHash,now(),t.id,idx);
+  await submit(t,idx);
+ }
+ /** 1Click /deposit/submit for a sent leg, until accepted; not needed once 1Click has found the deposit itself. */
+ async function submit(t,idx){
+  const l=legOf(t.id,idx);
+  if(l.send_status!=='sent'||l.deposit_submitted)return;
+  const done=()=>db.prepare('UPDATE trade_legs SET deposit_submitted=1 WHERE trade_id=? AND idx=?').run(t.id,idx);
+  if(l.oneclick_status&&l.oneclick_status!=='PENDING_DEPOSIT'){done();return}
+  if(!l.tx_hash)return;
+  try{tracker.apply(t.id,idx,await client.submitDeposit(l.deposit_address,l.tx_hash,l.deposit_memo??undefined));done()}
+  catch(e){note(t.id,`leg ${idx}: deposit/submit: ${e?.message}`)}
+ }
+ /** A `sending` leg 1Click already sees a deposit for is sent (the deposit address is unique to this leg). */
+ async function lookup(t,l){
+  let st;
+  try{st=await client.status(l.deposit_address,l.deposit_memo??undefined)}catch(e){note(t.id,`leg ${l.idx}: status: ${e?.message}`);return false}
+  if(!st?.status||st.status==='PENDING_DEPOSIT')return false;
+  const hash=(st.swapDetails?.originChainTxHashes??[]).map(h=>h?.hash).find(h=>typeof h==='string'&&TX_HASH.test(h))??null;
+  db.prepare("UPDATE trade_legs SET send_status='sent',tx_hash=COALESCE(tx_hash,?),deposit_submitted=1,updated_at=? WHERE trade_id=? AND idx=? AND send_status='sending'").run(hash,now(),t.id,l.idx);
+  tracker.apply(t.id,l.idx,st);
+  return true;
+ }
+ /** Once no leg is queued or sending: the proposal's final status, and the stored failure when nothing was sent. */
+ function settle(tradeId,lastError){
+  const t=trade(tradeId),legs=legsOf(tradeId);
+  if(legs.some(l=>l.send_status==='queued'||l.send_status==='sending'))return;
+  const anySent=legs.some(l=>l.send_status==='sent');
+  db.prepare("UPDATE proposals SET status=?,updated_at=? WHERE id=? AND status='executing'").run(anySent?'executed':'failed',now(),t.proposal_id);
+  if(!anySent&&!t.result_json)db.prepare('UPDATE trades SET result_json=? WHERE id=?').run(JSON.stringify({error:lastError??'TEMPORARILY_UNAVAILABLE'}),tradeId);
+ }
+
+ /**
+  * Recovery for one trade, run by the tracker on start and every tick (and before a replayed code is answered):
+  * `sending` legs are looked up at 1Click by deposit address, else re-issued with the same idempotency key while the
+  * deposit deadline is open; sent legs whose deposit/submit failed are submitted again.
+  */
+ async function recover(tradeId){
+  if(inFlight.has(tradeId))return false;
+  const t=trade(tradeId);if(!t)return false;
+  const open=legsOf(tradeId).filter(l=>l.send_status==='sending'||(l.send_status==='sent'&&!l.deposit_submitted));
+  if(!open.length)return false;
+  inFlight.add(tradeId);
+  try{
+   let ctx;
+   const walletCtx=async()=>{
+    if(ctx)return ctx;
+    const w=await wallets.require(t.account_id,{refresh:!signer.directory.stable});
+    const wallet=w[t.direction==='yeet'?'base':'solana'];
+    return ctx={wallet,held:t.direction==='skeet'?await wallets.holdings(wallet.address):undefined};
+   };
+   for(const l of open){
+    if(l.send_status==='sent'){await submit(t,l.idx);continue}
+    if(await lookup(t,l))continue;
+    const deadline=Date.parse(JSON.parse(l.live_quote_json).deadline);
+    // Never re-issue towards an address that may be inactive: the leg stays `sending` (spent) until 1Click or the
+    // tracker's horizon resolves it.
+    if(!(now()+SEND_MARGIN_MS<deadline))continue;
+    if(now()-l.updated_at<RESEND_AFTER_MS)continue;
+    const {wallet,held}=await walletCtx();
+    await attempt(t,l.idx,wallet,held);
+   }
+   settle(tradeId);
+  }finally{inFlight.delete(tradeId)}
+  return true;
  }
  const existingTrade=(proposalId)=>db.prepare("SELECT id FROM trades WHERE proposal_id=? AND status<>'requote_required' ORDER BY created_at DESC LIMIT 1").get(proposalId)?.id;
 
@@ -60,7 +191,7 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
  }
 
  return {
-  answer,
+  answer,recover,
   async execute(ctx,{proposal_id,revision,confirm}){
    const started=now();
    const code=codes.check({code:confirm,accountId:ctx.accountId,clientId:ctx.clientId,proposalId:proposal_id,revision});
@@ -112,44 +243,27 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
     db.prepare('INSERT INTO trades(id,proposal_id,revision,account_id,direction,status,created_at,updated_at,receipt_json,result_json) VALUES(?,?,?,?,?,?,?,?,?,NULL)')
      .run(tradeId,p.id,revision,ctx.accountId,p.direction,'signing',t,t,JSON.stringify(receipt));
     const ins=db.prepare('INSERT INTO trade_legs(trade_id,idx,symbol,amount_in_raw,deposit_address,deposit_memo,live_quote_json,send_status,tx_hash,oneclick_status,settled_out_raw,refund_reason,receipt_leg_json,updated_at) VALUES(?,?,?,?,?,?,?,?,NULL,NULL,NULL,NULL,?,?)');
-    for(const l of live.legs)ins.run(tradeId,l.index,l.symbol,l.amountIn,l.depositAddress,l.depositMemo??null,JSON.stringify(l),'not_sent',JSON.stringify(receiptLeg(l)),t);
+    for(const l of live.legs)ins.run(tradeId,l.index,l.symbol,l.amountIn,l.depositAddress,l.depositMemo??null,JSON.stringify(l),'queued',JSON.stringify(receiptLeg(l)),t);
     return true;
    });
    if(!committed)return answer(codes.check({code:confirm,accountId:ctx.accountId,clientId:ctx.clientId,proposalId:proposal_id,revision}).trade_id);
 
    // Send: one exact transfer per leg, in order, within the time budget. A failed leg does not stop the others.
+   const tRow=trade(tradeId);
    let lastError;
-   const wallet=w[chain];
-   for(const l of live.legs){
-    if(now()-started>budgetMs)break;
-    try{
-     const idempotencyKey=legIdempotencyKey(wallet.walletId,tradeId,l.index);
-     const {txHash}=p.direction==='yeet'
-      ?await signer.transferUsdcBase({walletId:wallet.walletId,from:wallet.address,to:l.depositAddress,amountRaw:l.amountIn,idempotencyKey})
-      :await (async()=>{const mint=proposals.mintOf(l.origin.symbol),src=held.find(h=>h.mint===mint);
-        return signer.transferSpl({walletId:wallet.walletId,owner:wallet.address,source:src.tokenAccount,destinationOwner:l.depositAddress,mint,decimals:l.origin.decimals,amountRaw:l.amountIn,tokenProgram:src.tokenProgram,idempotencyKey})})();
-     db.prepare("UPDATE trade_legs SET send_status='sent',tx_hash=?,updated_at=? WHERE trade_id=? AND idx=?").run(txHash,now(),tradeId,l.index);
-     try{tracker.apply(tradeId,l.index,await client.submitDeposit(l.depositAddress,txHash,l.depositMemo))}
-     catch{/* the status loop finds the deposit without the hint */}
-    }catch(e){
-     lastError=e instanceof TradeError?e.code:'TEMPORARILY_UNAVAILABLE';
-     db.prepare("UPDATE trade_legs SET send_status='failed',updated_at=? WHERE trade_id=? AND idx=?").run(now(),tradeId,l.index);
+   inFlight.add(tradeId);
+   try{
+    for(const l of live.legs){
+     if(now()-started>budgetMs)break;
+     const failed=await attempt(tRow,l.index,w[chain],held);
+     if(failed)lastError=failed;
     }
-   }
-   // Unsent amounts never left the wallet: give them back to today's allowance.
-   const sentRows=legsOf(tradeId);
-   const unsent=sentRows.filter(l=>l.send_status!=='sent').reduce((a,l)=>a+BigInt(l.amount_in_raw),0n);
-   const anySent=sentRows.some(l=>l.send_status==='sent');
-   tx(db,()=>{
-    if(p.direction==='yeet'&&unsent>0n)recordSpend(db,ctx.accountId,t,-unsent);
-    db.prepare('UPDATE proposals SET status=?,updated_at=? WHERE id=?').run(anySent?'executed':'failed',now(),p.id);
-   });
-   tracker.refresh(tradeId);
-   if(!anySent){
-    const code=lastError??'TEMPORARILY_UNAVAILABLE';
-    db.prepare('UPDATE trades SET result_json=? WHERE id=?').run(JSON.stringify({error:code}),tradeId);
-    refuse(code,'no leg was sent');
-   }
+    // Legs the budget left unattempted never moved funds.
+    for(const l of legsOf(tradeId))if(l.send_status==='queued')release(tRow,l.idx,'not_sent');
+   }finally{inFlight.delete(tradeId)}
+   settle(tradeId,lastError);
+   try{tracker.refresh(tradeId)}catch(e){note(tradeId,`refresh: ${e?.message}`)}
+   if(!legsOf(tradeId).some(l=>l.send_status==='sent'||l.send_status==='sending'))refuse(lastError??'TEMPORARILY_UNAVAILABLE','no leg was sent');
    return answer(tradeId);
   },
  };

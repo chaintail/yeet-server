@@ -17,6 +17,8 @@ export function receiptLeg(l){
 
 /** Trade status from its legs (contract trade_status enum). Unsent or failed sends never settle. */
 export function foldStatus(legs){
+ // A leg still queued or being sent keeps the trade in `signing` (recovery resolves it).
+ if(legs.some(l=>l.send_status==='queued'||l.send_status==='sending'))return 'signing';
  const sent=legs.filter(l=>l.send_status==='sent');
  const missing=legs.length-sent.length;
  if(!sent.length)return 'failed';
@@ -64,12 +66,13 @@ export function createTracker({db,client,now=Date.now,onSettled=()=>{},intervalM
   db.prepare('UPDATE trade_legs SET receipt_leg_json=? WHERE trade_id=? AND idx=?').run(JSON.stringify(r),tradeId,idx);
  }
 
- let running=false,timer;
+ let running=false,timer,recovery=async()=>{};
  async function pollOnce(){
   if(running)return 0;running=true;
   try{
-   const open=db.prepare("SELECT id,created_at FROM trades WHERE status IN('submitted','settling','partial') AND receipt_json IS NOT NULL AND json_extract(receipt_json,'$.complete')=0 AND json_extract(receipt_json,'$.timedOut')=0").all();
+   const open=db.prepare("SELECT id,created_at FROM trades WHERE status IN('signing','submitted','settling','partial') AND receipt_json IS NOT NULL AND json_extract(receipt_json,'$.complete')=0 AND json_extract(receipt_json,'$.timedOut')=0").all();
    for(const t of open){
+    await recovery(t.id);
     const legs=legsOf(t.id).filter(l=>l.send_status==='sent'&&!(l.oneclick_status&&isTerminal(l.oneclick_status)));
     await Promise.all(legs.map(async l=>{
      try{apply(t.id,l.idx,await client.status(l.deposit_address,l.deposit_memo??undefined))}
@@ -83,6 +86,8 @@ export function createTracker({db,client,now=Date.now,onSettled=()=>{},intervalM
 
  return {
   refresh,apply,pollOnce,
+  /** The executor's per-trade send recovery, run before each trade is polled. */
+  useRecovery(fn){recovery=fn},
   start(){if(!timer&&intervalMs>0){timer=setInterval(()=>{pollOnce().catch(()=>{})},intervalMs);timer.unref?.()}},
   stop(){if(timer)clearInterval(timer);timer=undefined},
   /** trade_status for the trade's owner. */
@@ -93,10 +98,11 @@ export function createTracker({db,client,now=Date.now,onSettled=()=>{},intervalM
    const view=legs.map(l=>{
     const q=JSON.parse(l.live_quote_json),r=l.receipt_leg_json?JSON.parse(l.receipt_leg_json):null;
     const out=l.settled_out_raw?formatUnits(BigInt(l.settled_out_raw),q.destination.decimals):null;
-    return {symbol:l.symbol,status:l.send_status==='sent'?l.oneclick_status??'PENDING_DEPOSIT':'FAILED',
+    const moving=['sent','sending','queued'].includes(l.send_status);
+    return {symbol:l.symbol,status:moving?l.oneclick_status??'PENDING_DEPOSIT':'FAILED',
      amount_in:formatUnits(BigInt(l.amount_in_raw),q.origin.decimals),amount_out:out,origin_tx:l.tx_hash??null,
      destination_tx:r?.destinationTxHashes?.[0]??null,
-     refund_reason:l.send_status==='sent'?(l.refund_reason?String(l.refund_reason).slice(0,200):null):(l.send_status==='failed'?'Not sent: the transfer failed':'Not sent'),
+     refund_reason:moving?(l.refund_reason?String(l.refund_reason).slice(0,200):null):(l.send_status==='failed'?'Not sent: the transfer failed':'Not sent'),
      _dest:q.destination.symbol};
    });
    return {trade_id:t.id,direction:t.direction,status:t.status,

@@ -24,6 +24,7 @@ export async function createEngine({db,env=process.env,client,signer,balances,di
  const proposals=createProposals({db,client,limits,wallets,codes,now,catalog});
  const tracker=createTracker({db,client,now,onSettled,intervalMs:trackerIntervalMs});
  const executor=createExecutor({db,client,limits,wallets,signer,codes,proposals,tracker,now,...(budgetMs?{budgetMs}:{})});
+ tracker.useRecovery(id=>executor.recover(id));
 
  let prices={at:0,bySymbol:new Map()};
  async function priceMap(){

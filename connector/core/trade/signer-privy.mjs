@@ -12,7 +12,7 @@
 import {createPrivyApi,privyConfig,PrivyApiError} from './privy-api.mjs';
 import {USDC_BASE,BASE_CAIP2,BASE_CHAIN_ID,erc20TransferData,privyFailure} from './signer.mjs';
 import {splTransferTransaction,SOLANA_MAINNET_CAIP2} from './solana-tx.mjs';
-import {refuse} from './util.mjs';
+import {refuse,TradeError} from './util.mjs';
 import {createHash} from 'node:crypto';
 
 const WALLET_ID=/^[A-Za-z0-9_-]{1,128}$/;
@@ -20,6 +20,20 @@ const EVM_HASH=/^0x[0-9a-fA-F]{64}$/,SOL_SIG=/^[1-9A-HJ-NP-Za-km-z]{64,90}$/;
 /** Gas top-up for a wallet with no ETH when Privy sponsorship is off (pattern of Folio bridge/source-gas.ts). */
 export const GAS_TOPUP_WEI=30_000_000_000_000n;   // 0.00003 ETH
 export const GAS_MIN_WEI=10_000_000_000_000n;     // top up below 0.00001 ETH
+
+/**
+ * Failures carry `notSent: true` only when nothing can have been broadcast: the call was refused before the transfer
+ * request left (bad wallet id, no fee payer, calldata, gas check) or Privy explicitly refused this request (policy
+ * denial, authorization refused). A timeout, a 5xx or an answer without a hash may follow a broadcast and carries no
+ * flag: the engine then keeps the leg `sending` and resolves it with the same idempotency key.
+ */
+export const DEFINITE_REFUSALS=new Set(['PRIVY_POLICY_DENIED','PRIVY_AUTHORIZATION_DENIED','INVALID_PRIVY_PATH','INVALID_IDEMPOTENCY_KEY']);
+const notSent=fn=>{try{return fn()}catch(e){const t=e?.name==='TradeError'?e:new TradeError('TEMPORARILY_UNAVAILABLE',e?.message);t.notSent=true;throw t}};
+const notSentAsync=async fn=>{try{return await fn()}catch(e){const t=e?.name==='TradeError'?e:new TradeError('TEMPORARILY_UNAVAILABLE',e?.message);t.notSent=true;throw t}};
+async function rpc(api,walletId,body,idempotencyKey){
+ try{return await api.signed('POST',`/v1/wallets/${walletId}/rpc`,body,{idempotencyKey})}
+ catch(e){try{privyFailure(e)}catch(t){if(DEFINITE_REFUSALS.has(e?.code))t.notSent=true;throw t}}
+}
 
 /** Base and Solana transfers through Privy wallet RPC; shared by the delegated and custodial adapters. */
 export function privyTransfers({api,env,balances}){
@@ -39,28 +53,28 @@ export function privyTransfers({api,env,balances}){
  return {
   sponsor,
   async transferUsdcBase({walletId,from,to,amountRaw,idempotencyKey}){
-   if(!WALLET_ID.test(walletId??''))refuse('WALLET_NOT_READY','no Base wallet id');
-   await ensureGas(from,idempotencyKey);
-   let res;
-   try{
-    res=await api.signed('POST',`/v1/wallets/${walletId}/rpc`,{method:'eth_sendTransaction',caip2:BASE_CAIP2,chain_type:'ethereum',sponsor,
-     params:{transaction:{to:USDC_BASE,data:erc20TransferData(to,amountRaw),value:'0x0',chain_id:BASE_CHAIN_ID}}},{idempotencyKey});
-   }catch(e){privyFailure(e)}
+   const data=await notSentAsync(async()=>{
+    if(!WALLET_ID.test(walletId??''))refuse('WALLET_NOT_READY','no Base wallet id');
+    const data=erc20TransferData(to,amountRaw);
+    await ensureGas(from,idempotencyKey);
+    return data;
+   });
+   const res=await rpc(api,walletId,{method:'eth_sendTransaction',caip2:BASE_CAIP2,chain_type:'ethereum',sponsor,
+    params:{transaction:{to:USDC_BASE,data,value:'0x0',chain_id:BASE_CHAIN_ID}}},idempotencyKey);
    const hash=res?.data?.hash;
    if(typeof hash!=='string'||!EVM_HASH.test(hash))refuse('TEMPORARILY_UNAVAILABLE','send not confirmed');
    return {txHash:hash};
   },
   async transferSpl({walletId,owner,source,destinationOwner,mint,decimals,amountRaw,tokenProgram,idempotencyKey}){
    // SKEET needs Solana gas: until the fee payer is configured this path answers WALLET_NOT_READY.
-   if(!env.YEET_SOL_FEE_PAYER_ID?.trim())refuse('WALLET_NOT_READY','Solana fee payer not configured');
-   if(!WALLET_ID.test(walletId??''))refuse('WALLET_NOT_READY','no Solana wallet id');
-   if(!balances?.recentBlockhash)refuse('TEMPORARILY_UNAVAILABLE','no Solana RPC');
-   const {transaction}=splTransferTransaction({owner,source,destinationOwner,mint,decimals,amountRaw,tokenProgram,recentBlockhash:await balances.recentBlockhash()});
-   let res;
-   try{
-    res=await api.signed('POST',`/v1/wallets/${walletId}/rpc`,{method:'signAndSendTransaction',caip2:SOLANA_MAINNET_CAIP2,sponsor:true,
-     params:{transaction,encoding:'base64'}},{idempotencyKey});
-   }catch(e){privyFailure(e)}
+   const transaction=await notSentAsync(async()=>{
+    if(!env.YEET_SOL_FEE_PAYER_ID?.trim())refuse('WALLET_NOT_READY','Solana fee payer not configured');
+    if(!WALLET_ID.test(walletId??''))refuse('WALLET_NOT_READY','no Solana wallet id');
+    if(!balances?.recentBlockhash)refuse('TEMPORARILY_UNAVAILABLE','no Solana RPC');
+    return splTransferTransaction({owner,source,destinationOwner,mint,decimals,amountRaw,tokenProgram,recentBlockhash:await balances.recentBlockhash()}).transaction;
+   });
+   const res=await rpc(api,walletId,{method:'signAndSendTransaction',caip2:SOLANA_MAINNET_CAIP2,sponsor:true,
+    params:{transaction,encoding:'base64'}},idempotencyKey);
    const sig=res?.data?.hash;
    if(typeof sig!=='string'||!SOL_SIG.test(sig))refuse('TEMPORARILY_UNAVAILABLE','send not confirmed');
    return {txHash:sig};
@@ -104,7 +118,7 @@ const notReady={stable:false,async lookup(){refuse('WALLET_NOT_READY','Privy cre
 export function createDelegatedSigner({env=process.env,fetch=globalThis.fetch,balances,didFor}={}){
  const config=privyConfig(env);
  if(!config){
-  const no=async()=>refuse('WALLET_NOT_READY','Privy credentials not configured');
+  const no=async()=>notSent(()=>refuse('WALLET_NOT_READY','Privy credentials not configured'));
   return {kind:'delegated',configured:false,directory:notReady,transferUsdcBase:no,transferSpl:no};
  }
  const api=createPrivyApi({config,fetch,timeoutMs:8000});

@@ -18,7 +18,7 @@ const hex=(s,n=64)=>createHash('sha256').update(s).digest('hex').slice(0,n);
  * requested amount, times `ratio.dry` / `ratio.live`, minAmountOut 99% of amountOut. A live quote gets a fresh
  * deposit address. status() walks a per-deposit script of fixture names (default: processing, then success).
  */
-export function fakeOneClick({dryRatio=1,liveRatio=1,cost=0,statuses=['status-processing.json','status-success.json'],tokens}={}){
+export function fakeOneClick({dryRatio=1,liveRatio=1,cost=0,statuses=['status-processing.json','status-success.json'],tokens,depositFor,submitFailures=0,mutate}={}){
  const tpl=fixture('quote2-B-intents-res.json');
  const calls={quote:[],submit:[],status:[]};let n=0;
  const deposits=new Map();
@@ -26,6 +26,7 @@ export function fakeOneClick({dryRatio=1,liveRatio=1,cost=0,statuses=['status-pr
  const client={
   authenticated:false,calls,deposits,
   set dryRatio(v){dryRatio=v},set liveRatio(v){liveRatio=v},set cost(v){cost=v},
+  set depositFor(f){depositFor=f},set submitFailures(v){submitFailures=v},set mutate(f){mutate=f},
   async quote(req){
    calls.quote.push(req);
    const r=Number(req.amount)/Number(tpl.quote.amountIn),k=req.dry?dryRatio:liveRatio;
@@ -34,13 +35,15 @@ export function fakeOneClick({dryRatio=1,liveRatio=1,cost=0,statuses=['status-pr
     minAmountIn:req.amount,amountOut:out.toString(),amountOutFormatted:String(Number(out)/1e6),amountOutUsd:(Number(tpl.quote.amountOutUsd)*r*k*(1-cost)).toFixed(12),
     minAmountOut:(out*99n/100n).toString()};
    if(!req.dry){
-    n++;quote.depositAddress=req.originAsset.includes('base-')?`0x${hex(`deposit-${n}`,40)}`:base58Encode(createHash('sha256').update(`deposit-${n}`).digest());quote.deadline=req.deadline;
+    n++;quote.depositAddress=depositFor?.(n,req)??(req.originAsset.includes('base-')?`0x${hex(`deposit-${n}`,40)}`:base58Encode(createHash('sha256').update(`deposit-${n}`).digest()));quote.deadline=req.deadline;
     deposits.set(quote.depositAddress,{step:0,amountIn:req.amount,amountOut:out.toString()});
    }
-   return {...tpl,quoteRequest:req,quote,correlationId:`cid-${n}-${req.destinationAsset.slice(-8)}`};
+   const res={...tpl,quoteRequest:req,quote,correlationId:`cid-${n}-${req.destinationAsset.slice(-8)}`};
+   return mutate?mutate(res,req)??res:res;
   },
   async submitDeposit(depositAddress,txHash){
    calls.submit.push({depositAddress,txHash});
+   if(submitFailures>0){submitFailures--;throw Error('fake: deposit/submit unavailable')}
    return this.statusFor(depositAddress,'status-pending.json');
   },
   statusFor(depositAddress,name){
@@ -63,25 +66,34 @@ export function fakeOneClick({dryRatio=1,liveRatio=1,cost=0,statuses=['status-pr
  return client;
 }
 
-/** Fake signer adapter: wallets for every account, recorded transfers, and optional failures per leg index. */
-export function fakeSigner({signerState='granted',failLegs=[],failCode='TEMPORARILY_UNAVAILABLE',onSend}={}){
- const sent=[];let leg=0;
+/**
+ * Fake signer adapter: wallets for every account, recorded transfers, and failures per attempt index. It models the
+ * provider's idempotency: a call with an idempotency key already broadcast answers the first transfer's hash and moves
+ * nothing again (`replays` counts those).
+ *   failLegs  refused before anything is broadcast (error carries notSent: true, like a policy denial)
+ *   lostLegs  broadcast (recorded in `sent`), then the answer is lost (timeout, missing hash)
+ *   hangLegs  the call never returns (a process that dies mid-send)
+ */
+export function fakeSigner({signerState='granted',failLegs=[],failCode='TEMPORARILY_UNAVAILABLE',lostLegs=[],hangLegs=[],onSend}={}){
+ const sent=[],byKey=new Map();let leg=0;
  const wallet=chain=>({address:chain==='base'?BASE_WALLET:SOL_WALLET,walletId:`wallet-${chain}`,signerState,policyId:'policy-1'});
- return {
-  kind:'fake',sent,
+ const s={
+  kind:'fake',sent,replays:0,hashes:byKey,
   directory:{stable:false,lookup:async()=>({base:wallet('base'),solana:wallet('solana')})},
   set signerState(v){signerState=v},
-  async transferUsdcBase(args){
-   const i=leg++;onSend?.(i,args);
-   if(failLegs.includes(i))refuse(failCode,'fake failure');
-   sent.push({chain:'base',...args});return {txHash:`0x${hex(`${args.to}:${args.amountRaw}:${args.idempotencyKey}`)}`};
-  },
-  async transferSpl(args){
-   const i=leg++;onSend?.(i,args);
-   if(failLegs.includes(i))refuse(failCode,'fake failure');
-   sent.push({chain:'solana',...args});return {txHash:'4'.repeat(64)};
-  },
+  transferUsdcBase:args=>transfer('base',args,`0x${hex(`${args.to}:${args.amountRaw}:${args.idempotencyKey}`)}`),
+  transferSpl:args=>transfer('solana',args,base58Encode(createHash('sha256').update(`spl:${args.idempotencyKey}`).digest())),
  };
+ async function transfer(chain,args,txHash){
+  if(byKey.has(args.idempotencyKey)){s.replays++;return {txHash:byKey.get(args.idempotencyKey)}}
+  const i=leg++;onSend?.(i,args);
+  if(hangLegs.includes(i))return new Promise(()=>{});
+  if(failLegs.includes(i)){try{refuse(failCode,'fake refusal')}catch(e){e.notSent=true;throw e}}
+  sent.push({chain,...args});byKey.set(args.idempotencyKey,txHash);
+  if(lostLegs.includes(i))refuse('TEMPORARILY_UNAVAILABLE','fake: broadcast, answer lost');
+  return {txHash};
+ }
+ return s;
 }
 
 /** Fake balances: USDC on Base and SPL holdings on Solana. */

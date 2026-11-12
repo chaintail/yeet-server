@@ -92,6 +92,37 @@ export const MIGRATIONS=Object.freeze([
    day TEXT NOT NULL,
    usdc_raw TEXT NOT NULL,
    PRIMARY KEY(account_id,day)) STRICT;`,
+ // 2: send recovery (review H1/H2/M5) and confirm-code minting limits. A leg is `queued` from the commit until its
+ // transfer is attempted, `sending` (idempotency key stored) from just before the signer call until the signer or
+ // 1Click confirms it, then `sent`. Only `failed` (the signer positively reports nothing was broadcast) and `not_sent`
+ // (never attempted) give the amount back to the daily cap.
+ `CREATE TABLE trade_legs_v2(
+   trade_id TEXT NOT NULL REFERENCES trades(id),
+   idx INTEGER NOT NULL,
+   symbol TEXT NOT NULL,
+   amount_in_raw TEXT NOT NULL,
+   deposit_address TEXT NOT NULL,
+   deposit_memo TEXT,
+   live_quote_json TEXT NOT NULL,
+   send_status TEXT NOT NULL CHECK(send_status IN('queued','sending','sent','failed','not_sent')),
+   tx_hash TEXT,
+   oneclick_status TEXT,
+   settled_out_raw TEXT,
+   refund_reason TEXT,
+   receipt_leg_json TEXT,
+   updated_at INTEGER NOT NULL,
+   idempotency_key TEXT,                                           -- (+) signer key, written before the signer call
+   send_attempts INTEGER NOT NULL DEFAULT 0,                       -- (+)
+   deposit_submitted INTEGER NOT NULL DEFAULT 0,                   -- (+) 1Click /deposit/submit accepted (or not needed)
+   PRIMARY KEY(trade_id,idx)) STRICT;
+  INSERT INTO trade_legs_v2(trade_id,idx,symbol,amount_in_raw,deposit_address,deposit_memo,live_quote_json,send_status,tx_hash,oneclick_status,settled_out_raw,refund_reason,receipt_leg_json,updated_at,deposit_submitted)
+   SELECT trade_id,idx,symbol,amount_in_raw,deposit_address,deposit_memo,live_quote_json,send_status,tx_hash,oneclick_status,settled_out_raw,refund_reason,receipt_leg_json,updated_at,1 FROM trade_legs;
+  DROP TABLE trade_legs;
+  ALTER TABLE trade_legs_v2 RENAME TO trade_legs;
+  ALTER TABLE trades ADD COLUMN last_error TEXT;                   -- (+) last refresh or recovery error, for ops
+  ALTER TABLE trades ADD COLUMN stale_at INTEGER;                  -- (+) tracking stopped without a final status
+  ALTER TABLE confirm_codes ADD COLUMN minted_at INTEGER;          -- (+) per-account minting rate limit
+  CREATE INDEX confirm_codes_account ON confirm_codes(account_id,minted_at);`,
 ]);
 
 /** Opens (and migrates) the trade database. `file` defaults to $STATE_DIR/trade.sqlite; ':memory:' for tests. */
