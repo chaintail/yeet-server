@@ -4,6 +4,7 @@
 //   YEET_DAILY_CAP_USDC  USDC per account per UTC day (default 50) -> LIMIT_EXCEEDED
 //   YEET_MAX_COST_BPS    swap cost ceiling in bps (default 800)    -> COST_TOO_HIGH
 //   YEET_KILL_SWITCH     1/true: no new proposals or trades        -> TRADING_PAUSED
+//   YEET_TRACK_MAX_HOURS hours a trade is tracked past its 1Click deposit deadline before it is stale (default 24)
 //   at most 5 legs                                                 -> INVALID_ARGUMENT
 import {parseUnits} from './router.mjs';
 import {refuse,utcDay} from './util.mjs';
@@ -29,6 +30,7 @@ export function limitsFromEnv(env=process.env){
   maxTradeRaw:usdcEnv(env,'YEET_MAX_TRADE_USDC','25'),
   dailyCapRaw:usdcEnv(env,'YEET_DAILY_CAP_USDC','50'),
   maxCostBps:intEnv(env,'YEET_MAX_COST_BPS',800,10_000),
+  trackMaxHours:intEnv(env,'YEET_TRACK_MAX_HOURS',24,24*30),
   killSwitch:['1','true','on','yes'].includes(String(env.YEET_KILL_SWITCH??'').toLowerCase()),
   live:env.YEET_LIVE==='1',
   maxLegs:MAX_LEGS,

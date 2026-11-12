@@ -138,3 +138,48 @@ test('fix 2: crash between commit and send, deadline passed: legs not_sent, cap 
  assert.equal(engine.status(alice,tradeId).status,'failed');
  await assert.rejects(exec(engine,alice,p),e=>e.code==='TEMPORARILY_UNAVAILABLE','replay answers the same');
 });
+
+test('fix 3: one trade failing to refresh does not stop the tick for the others; the error is recorded on that trade',async()=>{
+ const {engine,db}=await fakeEngine();
+ const a=await exec(engine,alice,await engine.propose(alice,{...basket,request_id:'a',legs:[{symbol:'WIF',parts:10}]}));
+ const b=await exec(engine,alice,await engine.propose(alice,{...basket,request_id:'b',legs:[{symbol:'BOME',parts:10}]}));
+ db.prepare('UPDATE trade_legs SET receipt_leg_json=? WHERE trade_id=?').run('{',a.trade_id);// unparsable stored receipt
+ db.prepare('UPDATE trades SET created_at=created_at-1 WHERE id=?').run(a.trade_id);// polled first
+ await engine.tracker.pollOnce();
+ assert.equal(engine.status(alice,b.trade_id).status,'settling','the other trade moved on');
+ assert.match(db.prepare('SELECT last_error FROM trades WHERE id=?').get(a.trade_id).last_error,/JSON/);
+ await engine.tracker.pollOnce();
+ assert.equal(engine.status(alice,b.trade_id).status,'success');
+});
+
+test('fix 3: an unfinished trade is polled until deadline + YEET_TRACK_MAX_HOURS, then marked stale with a reason the card shows',async()=>{
+ const oneclick=fakeOneClick({statuses:['status-processing.json']});
+ const {engine,db,now}=await fakeEngine({oneclick,env:{YEET_LIVE:'1',YEET_TRACK_MAX_HOURS:'2'}});
+ const r=await exec(engine,alice,await engine.propose(alice,{...basket,legs:[{symbol:'WIF',parts:10}]}));
+ now.advance(30*60_000+2*3600_000-60_000);// a minute before the horizon: still tracked (the old 2 h cap would have stopped)
+ assert.equal(await engine.tracker.pollOnce(),1);
+ assert.equal(engine.status(alice,r.trade_id).status,'settling');
+ now.advance(120_000);
+ await engine.tracker.pollOnce();
+ const s=engine.status(alice,r.trade_id);
+ assert.equal(s.status,'failed');assert.equal(s.legs[0].status,'PROCESSING');
+ assert.match(s.legs[0].refund_reason,/^Tracking stopped after 2 h/);
+ assert.ok(db.prepare('SELECT stale_at FROM trades').get().stale_at);
+ const calls=oneclick.calls.status.length;
+ assert.equal(await engine.tracker.pollOnce(),0);assert.equal(oneclick.calls.status.length,calls,'no longer polled');
+ await assert.rejects(fakeEngine({env:{YEET_TRACK_MAX_HOURS:'forever'}}),/Invalid YEET_TRACK_MAX_HOURS/);
+});
+
+test('fix 3: INCOMPLETE_DEPOSIT is not final while the deposit deadline is open, and final (refunded) after it',async()=>{
+ const oneclick=fakeOneClick({statuses:['status-incomplete.json']});
+ const {engine,now}=await fakeEngine({oneclick});
+ const r=await exec(engine,alice,await engine.propose(alice,{...basket,legs:[{symbol:'WIF',parts:10}]}));
+ await engine.tracker.pollOnce();
+ let s=engine.status(alice,r.trade_id);
+ assert.equal(s.legs[0].status,'INCOMPLETE_DEPOSIT');assert.equal(s.status,'settling');
+ now.advance(31*60_000);
+ assert.equal(await engine.tracker.pollOnce(),1);
+ s=engine.status(alice,r.trade_id);
+ assert.equal(s.status,'refunded');
+ assert.equal(await engine.tracker.pollOnce(),0,'final: no longer polled');
+});

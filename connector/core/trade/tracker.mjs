@@ -1,10 +1,15 @@
 // Status loop: folds 1Click /status into each sent trade leg with the router's applyStatus, keeps the trade's receipt
 // JSON (router ReceiptSchema, so `yeet-router replay` can re-check it) and the trade status, and emits onSettled once
-// when every sent leg reaches a terminal state. Awards nothing itself (XP is lane E).
+// when every sent leg reaches a final state. Awards nothing itself (XP is lane E).
+//
+// A trade is polled until every leg is final or its latest 1Click deposit deadline plus YEET_TRACK_MAX_HOURS (default
+// 24) has passed; then it is stale: no longer polled, trade status `partial` (some leg succeeded) or `failed` (the
+// contract has no "unknown"), and each unfinished leg says why in `refund_reason`. One trade failing to refresh never
+// stops the others: the error is kept in trades.last_error.
 import {applyStatus,ReceiptSchema,isTerminal,formatUnits} from './router.mjs';
 import {refuse,iso} from './util.mjs';
 
-export const TRACK_MAX_AGE_MS=2*60*60_000;
+export const TRACK_MAX_HOURS=24;
 
 /** A router ReceiptLeg for a live plan leg (same fields as the router's own emptyLeg). */
 export function receiptLeg(l){
@@ -15,38 +20,52 @@ export function receiptLeg(l){
  return leg;
 }
 
+/** The leg's 1Click deposit deadline (ms), NaN when unknown. */
+export const legDeadline=l=>{try{return Date.parse(JSON.parse(l.live_quote_json).deadline)}catch{return NaN}};
+/** Final 1Click state: SUCCESS, REFUNDED, FAILED; INCOMPLETE_DEPOSIT only once the deposit deadline has passed (1Click
+ * then refunds, ONECLICK-REFERENCE section 5). */
+export function legFinal(l,nowMs){
+ const s=l.oneclick_status;
+ if(!s)return false;
+ if(isTerminal(s))return true;
+ return s==='INCOMPLETE_DEPOSIT'&&nowMs>legDeadline(l);
+}
+
 /** Trade status from its legs (contract trade_status enum). Unsent or failed sends never settle. */
-export function foldStatus(legs){
+export function foldStatus(legs,nowMs=Date.now()){
  // A leg still queued or being sent keeps the trade in `signing` (recovery resolves it).
  if(legs.some(l=>l.send_status==='queued'||l.send_status==='sending'))return 'signing';
  const sent=legs.filter(l=>l.send_status==='sent');
  const missing=legs.length-sent.length;
  if(!sent.length)return 'failed';
- const st=sent.map(l=>l.oneclick_status);
- if(!st.every(s=>s&&isTerminal(s))){
+ if(!sent.every(l=>legFinal(l,nowMs))){
   if(missing)return 'partial';
-  return st.some(s=>s&&s!=='PENDING_DEPOSIT')?'settling':'submitted';
+  return sent.some(l=>l.oneclick_status&&l.oneclick_status!=='PENDING_DEPOSIT')?'settling':'submitted';
  }
+ const st=sent.map(l=>l.oneclick_status);
  const ok=st.filter(s=>s==='SUCCESS').length;
  if(ok===legs.length)return 'success';
  if(ok>0)return 'partial';
- return st.includes('REFUNDED')?'refunded':'failed';
+ return st.some(s=>s==='REFUNDED'||s==='INCOMPLETE_DEPOSIT')?'refunded':'failed';
 }
+/** A stale trade's status: the closest contract value, the detail is in each unfinished leg's refund_reason. */
+export const staleStatus=legs=>legs.some(l=>l.send_status==='sent'&&l.oneclick_status==='SUCCESS')?'partial':'failed';
 
-export function createTracker({db,client,now=Date.now,onSettled=()=>{},intervalMs=5000,maxAgeMs=TRACK_MAX_AGE_MS}){
+export function createTracker({db,client,now=Date.now,onSettled=()=>{},intervalMs=5000,trackMaxHours=TRACK_MAX_HOURS}){
  const legsOf=id=>db.prepare('SELECT * FROM trade_legs WHERE trade_id=? ORDER BY idx').all(id);
  const tradeRow=id=>db.prepare('SELECT * FROM trades WHERE id=?').get(id);
+ const graceMs=trackMaxHours*3600_000;
 
  /** Recomputes status and receipt for a trade from its legs; emits onSettled on the first complete receipt. */
  function refresh(tradeId){
   const t=tradeRow(tradeId);if(!t||t.status==='requote_required')return t;
-  const legs=legsOf(tradeId),prior=t.receipt_json?JSON.parse(t.receipt_json):null;
+  const legs=legsOf(tradeId),prior=t.receipt_json?JSON.parse(t.receipt_json):null,at=now();
   const sent=legs.filter(l=>l.send_status==='sent');
-  const receipt=ReceiptSchema.parse({...prior,writtenAt:iso(now()),legs:sent.map(l=>JSON.parse(l.receipt_leg_json)),
-   complete:sent.length>0&&sent.every(l=>l.oneclick_status&&isTerminal(l.oneclick_status)),
-   timedOut:prior?.timedOut||(now()-t.created_at>maxAgeMs&&!sent.every(l=>l.oneclick_status&&isTerminal(l.oneclick_status)))});
-  const status=foldStatus(legs);
-  db.prepare('UPDATE trades SET status=?,receipt_json=?,updated_at=? WHERE id=?').run(status,JSON.stringify(receipt),now(),tradeId);
+  const complete=sent.length>0&&legs.every(l=>!['queued','sending'].includes(l.send_status))&&sent.every(l=>legFinal(l,at));
+  const receipt=ReceiptSchema.parse({...prior,writtenAt:iso(at),legs:sent.map(l=>JSON.parse(l.receipt_leg_json)),
+   complete,timedOut:!!prior?.timedOut||(t.stale_at!==null&&!complete)});
+  const status=t.stale_at!==null&&!complete?staleStatus(legs):foldStatus(legs,at);
+  db.prepare('UPDATE trades SET status=?,receipt_json=?,updated_at=? WHERE id=?').run(status,JSON.stringify(receipt),at,tradeId);
   if(receipt.complete&&!prior?.complete){
    try{onSettled({tradeId,accountId:t.account_id,proposalId:t.proposal_id,direction:t.direction,status,receipt})}catch{}
   }
@@ -60,25 +79,46 @@ export function createTracker({db,client,now=Date.now,onSettled=()=>{},intervalM
   db.prepare('UPDATE trade_legs SET oneclick_status=?,settled_out_raw=?,refund_reason=?,receipt_leg_json=?,updated_at=? WHERE trade_id=? AND idx=?')
    .run(r.status,r.settled.amountOut??null,r.settled.refundReason??null,JSON.stringify(r),now(),tradeId,idx);
  }
- function noteError(tradeId,idx,message){
-  const leg=db.prepare('SELECT receipt_leg_json FROM trade_legs WHERE trade_id=? AND idx=?').get(tradeId,idx);
-  const r=JSON.parse(leg.receipt_leg_json);r.lastError=String(message).slice(0,300);
-  db.prepare('UPDATE trade_legs SET receipt_leg_json=? WHERE trade_id=? AND idx=?').run(JSON.stringify(r),tradeId,idx);
+ const noteTrade=(tradeId,message)=>db.prepare('UPDATE trades SET last_error=? WHERE id=?').run(String(message).slice(0,300),tradeId);
+
+ /** Tracking ends: unfinished legs get a reason, the trade a final contract status; nothing is given back to the cap
+  * (a leg whose transfer was attempted may have moved funds). */
+ function markStale(tradeId){
+  const at=now(),hours=trackMaxHours;
+  for(const l of legsOf(tradeId)){
+   if(l.send_status==='sending')db.prepare('UPDATE trade_legs SET refund_reason=?,updated_at=? WHERE trade_id=? AND idx=?')
+    .run(`Tracking stopped after ${hours} h: the transfer was never confirmed. Check your wallet history.`,at,tradeId,l.idx);
+   else if(l.send_status==='sent'&&!legFinal(l,at))db.prepare('UPDATE trade_legs SET refund_reason=?,updated_at=? WHERE trade_id=? AND idx=?')
+    .run(`Tracking stopped after ${hours} h without a final status (last: ${l.oneclick_status??'PENDING_DEPOSIT'}). Check the explorer link.`,at,tradeId,l.idx);
+  }
+  const t=tradeRow(tradeId);
+  db.prepare('UPDATE trades SET stale_at=? WHERE id=?').run(at,tradeId);
+  db.prepare("UPDATE proposals SET status='executed',updated_at=? WHERE id=? AND status='executing'").run(at,t.proposal_id);
+  refresh(tradeId);
+ }
+
+ async function pollTrade(id){
+  await recovery(id);
+  const at=now(),legs=legsOf(id);
+  const horizon=Math.max(tradeRow(id).created_at,...legs.map(legDeadline).filter(Number.isFinite))+graceMs;
+  if(at>horizon){markStale(id);return}
+  const open=legs.filter(l=>l.send_status==='sent'&&!legFinal(l,at));
+  await Promise.all(open.map(async l=>{
+   try{apply(id,l.idx,await client.status(l.deposit_address,l.deposit_memo??undefined))}
+   catch(e){noteTrade(id,`leg ${l.idx}: status: ${e?.message??'failed'}`)}
+  }));
+  refresh(id);
  }
 
  let running=false,timer,recovery=async()=>{};
+ /** One tick over every unfinished trade; returns how many were looked at. */
  async function pollOnce(){
   if(running)return 0;running=true;
   try{
-   const open=db.prepare("SELECT id,created_at FROM trades WHERE status IN('signing','submitted','settling','partial') AND receipt_json IS NOT NULL AND json_extract(receipt_json,'$.complete')=0 AND json_extract(receipt_json,'$.timedOut')=0").all();
+   const open=db.prepare("SELECT id FROM trades WHERE status IN('signing','submitted','settling','partial') AND stale_at IS NULL AND receipt_json IS NOT NULL AND json_extract(receipt_json,'$.complete')=0 ORDER BY created_at").all();
    for(const t of open){
-    await recovery(t.id);
-    const legs=legsOf(t.id).filter(l=>l.send_status==='sent'&&!(l.oneclick_status&&isTerminal(l.oneclick_status)));
-    await Promise.all(legs.map(async l=>{
-     try{apply(t.id,l.idx,await client.status(l.deposit_address,l.deposit_memo??undefined))}
-     catch(e){noteError(t.id,l.idx,e?.message??'status failed')}
-    }));
-    refresh(t.id);
+    try{await pollTrade(t.id)}
+    catch(e){try{noteTrade(t.id,e?.message??'refresh failed')}catch{}}
    }
    return open.length;
   }finally{running=false}

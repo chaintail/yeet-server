@@ -22,7 +22,7 @@ export async function createEngine({db,env=process.env,client,signer,balances,di
  const codes=createConfirmCodes({db,now});
  const wallets=createWallets({db,directory:signer.directory,balances,now});
  const proposals=createProposals({db,client,limits,wallets,codes,now,catalog});
- const tracker=createTracker({db,client,now,onSettled,intervalMs:trackerIntervalMs});
+ const tracker=createTracker({db,client,now,onSettled,intervalMs:trackerIntervalMs,trackMaxHours:limits.trackMaxHours});
  const executor=createExecutor({db,client,limits,wallets,signer,codes,proposals,tracker,now,hooks,...(budgetMs?{budgetMs}:{})});
  tracker.useRecovery(id=>executor.recover(id));
 
