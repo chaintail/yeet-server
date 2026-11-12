@@ -5,7 +5,7 @@ import {secret,equal,read,write,port,TEST,DEV_APP_ID} from '#shared/common.mjs';
 import {coins} from './coins.mjs';
 import {unavailable,failure} from './failure.mjs';
 import {tradeEngine,onTradeSettled} from './trade/runtime.mjs';
-import {xpRuntime,p2On} from './xp/xp.mjs';
+import {xpRuntime,p2On,homeXp,homeXpKeys} from './xp/xp.mjs';
 import {z} from 'zod';
 import {toolSchemas,zodSchema} from '../mcp/tool-contract.mjs';
 // Accounts are created on the first verified sign-in (identity-store.mjs). The identity app is Privy in
@@ -18,6 +18,8 @@ const user=id=>account(id);
 // XP (lane E, YEET_P2=1): trade settlement pays through the tracker's onSettled hook; read per event so the flag is live.
 onTradeSettled(e=>{if(p2On())xpRuntime().onSettled(e)});
 /** XP never stands in the way of the answer it decorates: a failure is logged and the XP part is left out. */
+/** yeet_home's xp fields as the pinned contract lists them; the summary is cut to these. */
+const HOME_XP_KEYS=homeXpKeys(toolSchemas.yeet_home.output);
 const xpSafe=(what,fn,fallback)=>{try{return fn()}catch(e){console.error(JSON.stringify({event:'xp_failed',what,error:String(e?.message??e).slice(0,200)}));return fallback}};
 const app=express();app.use(express.json({limit:'32kb'}));
 app.get('/health',(_q,r)=>r.json({ok:true}));
@@ -64,7 +66,7 @@ function trade(tool,fn){
 app.get('/home',trade('yeet_home',async(e,ctx)=>{
  const home=await e.home(ctx);
  if(!p2On())return home;
- return {...home,xp:xpSafe('home',()=>xpRuntime().summary(ctx.accountId),null),recent_wins:xpSafe('wins',()=>xpRuntime().recentWins(),[])};
+ return {...home,xp:xpSafe('home',()=>homeXp(xpRuntime().summary(ctx.accountId),HOME_XP_KEYS),null),recent_wins:xpSafe('wins',()=>xpRuntime().recentWins(),[])};
 }));
 app.post('/proposals',trade('yeet_propose',(e,ctx,a)=>e.propose(ctx,a)));
 app.post('/proposals/skeet',trade('skeet_propose',(e,ctx,a)=>e.skeet(ctx,a)));

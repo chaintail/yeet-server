@@ -7,9 +7,9 @@ import {join} from 'node:path';
 import {z} from 'zod';
 import {openLedger,DEFAULT_RULES} from './ledger.mjs';
 import {streakDays} from './streak.mjs';
-import {roll,BONUS_TABLE,createSpin,streakMilestone,STREAK_BONUS} from './spin.mjs';
+import {roll,BONUS_TABLE,createSpin,streakMilestone,STREAK_BONUS,STREAK_RULES,streakMilestones,nextStreakMilestone} from './spin.mjs';
 import {leaderboard,rankRows,handle} from './board.mjs';
-import {openXp} from './xp.mjs';
+import {openXp,homeXp,homeXpKeys} from './xp.mjs';
 import {createEngine} from '../trade/engine.mjs';
 import {openTradeDb} from '../trade/db.mjs';
 import {fakeOneClick,fakeSigner,fakeBalances,fakeClock,BASE_WALLET,SOL_WALLET} from '../trade/fakes.mjs';
@@ -87,7 +87,7 @@ test("YEET text.",()=>{
  assert.equal(spin.available('a'),true);
  const s2=spin.spin('a');assert.equal(s2.streak_days,2);assert.equal(s2.xp_won,5+roll(SECRET,'a|2026-11-11'));
  now.advance(86_400_000);
- const s3=spin.spin('a');assert.equal(s3.streak_days,3);assert.equal(s3.xp_won,5+roll(SECRET,'a|2026-11-12')+STREAK_BONUS);
+ const s3=spin.spin('a');assert.equal(s3.streak_days,3);assert.equal(s3.xp_won,5+roll(SECRET,'a|2026-11-12')+STREAK_BONUS+roll(SECRET,'a|2026-11-12|streak'));
  assert.equal(s3.total,s1.xp_won+s2.xp_won+s3.xp_won);
  assert.deepEqual([1,2,3,4,6,7,8,14,21,28,35].map(streakMilestone),[false,false,true,false,false,true,false,true,true,true,true]);
  // Without a secret there is no spin, and home says so.
@@ -197,10 +197,71 @@ test('trade XP: a lost onSettled (crash before the hook) is paid by the next sta
 
 test('home summary: total, streak and spin availability; recent wins stay empty',()=>{
  const now=clock();const xp=openXp({secret:SECRET,now});
- assert.deepEqual(xp.summary('a'),{total:0,streak_days:0,spin_available:true});
+ const next={days:3,xp:STREAK_BONUS};
+ assert.deepEqual(xp.summary('a'),{total:0,streak_days:0,spin_available:true,next_streak_milestone:next});
  xp.signIn('a');xp.signIn('a');
- assert.deepEqual(xp.summary('a'),{total:5,streak_days:1,spin_available:true});
+ assert.deepEqual(xp.summary('a'),{total:5,streak_days:1,spin_available:true,next_streak_milestone:next});
  const s=xp.doSpin('a');
- assert.deepEqual(xp.summary('a'),{total:5+s.xp_won,streak_days:1,spin_available:false});
+ assert.deepEqual(xp.summary('a'),{total:5+s.xp_won,streak_days:1,spin_available:false,next_streak_milestone:next});
  assert.deepEqual(xp.recentWins(),[]);
+});
+
+test('streak milestones: one table, day 3 then every 7th day; next milestone ported from Folio',()=>{
+ const paying=Array.from({length:70},(_,i)=>i+1).filter(d=>streakMilestone(d));
+ assert.deepEqual(paying,[3,7,14,21,28,35,42,49,56,63,70]);
+ for(const d of paying)assert.equal(streakMilestones(d).reduce((sum,r)=>sum+r.xp,0),STREAK_BONUS,`one rule pays on day ${d}`);
+ assert.ok(STREAK_RULES.every(r=>r.roll&&r.xp===STREAK_BONUS));
+ assert.deepEqual([0,1,2,3,6,7,13,27,28,34,35,100].map(d=>nextStreakMilestone(d)?.days),[3,3,3,7,7,14,14,28,35,35,42,105]);
+ assert.deepEqual(nextStreakMilestone(5),{days:7,xp:25});
+ // A custom table: rules firing on the same day add up; a one-time table runs out.
+ const rules=[{days:2,repeat_every:2,xp:10,roll:false},{days:4,repeat_every:null,xp:7,roll:true}];
+ assert.deepEqual(nextStreakMilestone(3,rules),{days:4,xp:17});
+ assert.deepEqual(nextStreakMilestone(4,rules),{days:6,xp:10});
+ assert.equal(nextStreakMilestone(4,[{days:4,repeat_every:null,xp:7,roll:true}]),null);
+});
+
+test('streak milestone: 25 XP plus a draw seeded id|day|streak, separate from the daily draw',()=>{
+ const now=clock('2026-11-01T09:00:00.000Z');const l=openLedger(':memory:',{now});
+ const spin=createSpin({ledger:l,secret:SECRET});
+ const paid=[];
+ for(let i=0;i<14;i++){
+  const day=new Date(now()).toISOString().slice(0,10);
+  const s=spin.spin('a');
+  const daily=5+roll(SECRET,`a|${day}`);
+  const bonus=s.xp_won-daily;paid.push(bonus);
+  if(streakMilestone(s.streak_days))assert.equal(bonus,STREAK_BONUS+roll(SECRET,`a|${day}|streak`),`day ${s.streak_days}`);
+  else assert.equal(bonus,0,`day ${s.streak_days}`);
+  now.advance(86_400_000);
+ }
+ assert.deepEqual(paid.map((b,i)=>b>0?i+1:0).filter(Boolean),[3,7,14]);
+ // The streak seed is its own: over many accounts it does not track the daily draw.
+ const pairs=Array.from({length:200},(_,i)=>[roll(SECRET,`u${i}|2026-11-03`),roll(SECRET,`u${i}|2026-11-03|streak`)]);
+ assert.ok(pairs.filter(([a,b])=>a!==b).length>100);
+});
+
+test('next_streak_milestone: today’s spin still counts until it happens; homeXp keeps only contract fields',()=>{
+ const now=clock('2026-11-01T09:00:00.000Z');const xp=openXp({secret:SECRET,now});
+ xp.doSpin('a');now.advance(86_400_000);xp.doSpin('a');now.advance(86_400_000);
+ // Day 3: a sign-in already made today active (streak 3), but the spin that pays day 3 has not happened.
+ xp.signIn('a');
+ assert.equal(xp.summary('a').streak_days,3);
+ assert.deepEqual(xp.summary('a').next_streak_milestone,{days:3,xp:25});
+ xp.doSpin('a');
+ assert.deepEqual(xp.summary('a').next_streak_milestone,{days:7,xp:25});
+ // A missed day resets the run; the next milestone is day 3 again.
+ now.advance(2*86_400_000);
+ assert.deepEqual(xp.summary('a').next_streak_milestone,{days:3,xp:25});
+ // No spin configured: no milestone can pay.
+ assert.equal(openXp({secret:undefined,now}).summary('a').next_streak_milestone,null);
+ // The pinned contract closes yeet_home.xp, so the home block carries only its listed fields and parses.
+ const summary=xp.summary('a');
+ const HOME_XP_KEYS=homeXpKeys(toolSchemas.yeet_home.output);
+ assert.deepEqual(HOME_XP_KEYS,['total','streak_days','spin_available']);
+ const block=homeXp(summary,HOME_XP_KEYS);
+ assert.deepEqual(Object.keys(block),HOME_XP_KEYS);
+ const xpSchema=zodSchema(z,toolSchemas.yeet_home.output.properties.xp);
+ assert.equal(xpSchema.safeParse(block).success,true);
+ assert.equal(xpSchema.safeParse(summary).success,false,'the closed contract refuses the extra field');
+ // Once the contract lists the field, it flows through unchanged.
+ assert.deepEqual(homeXp(summary,[...HOME_XP_KEYS,'next_streak_milestone']).next_streak_milestone,summary.next_streak_milestone);
 });
