@@ -7,7 +7,13 @@ import {didFor} from '../identity-store.mjs';
 import {TEST} from '#shared/common.mjs';
 
 let pending,overrides={};
-const settled=({tradeId,status,direction})=>console.log(JSON.stringify({event:'trade_settled',trade:tradeId,direction,status}));
+const listeners=new Set();
+/** Subscribes to the tracker's onSettled event (XP, lane E). Returns the undo. A listener's failure is contained. */
+export function onTradeSettled(fn){listeners.add(fn);return()=>listeners.delete(fn)}
+const settled=e=>{
+ console.log(JSON.stringify({event:'trade_settled',trade:e.tradeId,direction:e.direction,status:e.status}));
+ for(const fn of listeners)try{fn(e)}catch{}
+};
 
 export function configureTradeEngine(o={}){
  if(!TEST)throw Error('configureTradeEngine is for in-process tests only');

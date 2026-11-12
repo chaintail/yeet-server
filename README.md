@@ -14,6 +14,7 @@ connector/
   as/          sign-in server: OAuth 2.1 / OIDC (oidc-provider), consent, /me, sign-in pages
   core/        identity store (account on first verified sign-in), per-route scopes, YEET routes
   core/trade/  trade engine (Lane B): proposals, confirm codes, limits, executor, tracker, wallets, signers
+  core/xp/     XP (Lane E, P2): ledger, streak, daily spin, leaderboards
   mcp/         protocol endpoint at /, metadata, tool registration, card templates
   shared/      modules two roles load: common settings, introspection, Privy token check
   contracts/   error catalogue loader (reads the vendored contract's x-yeet-errors)
@@ -35,7 +36,8 @@ Node 24.
 ```
 cd connector
 npm ci
-npm test                         # engine + adapters (core/trade/*.test.mjs), contract, registration, in-process acceptance
+npm test                         # engine + adapters (core/trade/*.test.mjs), XP (core/xp/*.test.mjs), contract, registration, in-process acceptance
+node --test core/xp/*.test.mjs     # XP alone, including the YEET_P2=1 run through the connector
 node --test core/trade/*.test.mjs  # acceptance B-1 alone
 npm run build:login              # npm ci in login/ and esbuild -> login/dist/login.js
 npm run text-gate                # same as ../scripts/text-gate.sh
@@ -54,7 +56,7 @@ Schemas, titles, descriptions, annotations, scopes, cards, visibility and widget
 
 | Tool | P | Scope | Card | Model sees it | Against fakes | Needs real keys for |
 |---|---|---|---|---|---|---|
-| `yeet_home` | P0 | yeet:read | home | yes | wallets, USDC balance, `ready / needs_signer / needs_funds / paused`; `xp` null | Privy (wallet lookup), `BASE_RPC_URL` |
+| `yeet_home` | P0 | yeet:read | home | yes | wallets, USDC balance, `ready / needs_signer / needs_funds / paused`; `xp` null unless `YEET_P2=1`, `recent_wins` always empty (see XP) | Privy (wallet lookup), `BASE_RPC_URL` |
 | `yeet_coins` | P0 | yeet:read | none | yes | catalogue from the vendored router, prices null | none |
 | `yeet_propose` | P0 | yeet:write | basket | yes | dry router plan, limits, warnings, saved proposal, confirm code in `_meta` only | 1Click (dry quotes, no key needed) |
 | `yeet_quote` | P0 | yeet:write | basket | yes | new revision, fresh dry quote and code | 1Click |
@@ -62,7 +64,8 @@ Schemas, titles, descriptions, annotations, scopes, cards, visibility and widget
 | `trade_status` | P0 | yeet:read | receipt | yes | 1Click `/status` folded by the router's `applyStatus` | 1Click |
 | `yeet_portfolio` | P1 | yeet:read | portfolio | yes | Solana holdings of catalogue coins, prices from 1Click `/tokens` | `SOLANA_RPC_URL` |
 | `skeet_propose` | P1 | yeet:write | basket | yes | percent of holdings, dry SKEET plan | `SOLANA_RPC_URL`, then a Solana fee payer to execute |
-| `yeet_leaderboard`, `daily_spin` | P2 | | | registered only with `YEET_P2=1` | answer TEMPORARILY_UNAVAILABLE (lane E) | |
+| `yeet_leaderboard` | P2 | yeet:read | leaderboard | yes (only with `YEET_P2=1`) | all-time and 7-day XP boards, shared ranks for ties | none |
+| `daily_spin` | P2 | yeet:write | home | no (card only; only with `YEET_P2=1`) | one spin per UTC day | `YEET_XP_SECRET` |
 
 The one-time confirm code (32 random bytes, base64url) is returned only in result `_meta["yeet/confirm"]`; the
 connector strips it from `structuredContent` and `content`, and a test checks both. Core stores only its SHA-256,
@@ -77,7 +80,7 @@ code replays the trade it started.
   revision and a new code in `_meta`), cost ceiling, then one exact USDC `transfer` per leg through the signer and
   1Click `submitDeposit`. A failed leg leaves the trade `partial`; unsent amounts go back to the daily allowance.
 - The tracker (`core/trade/tracker.mjs`) polls `/status` every 5 s, keeps a router `ReceiptSchema` receipt per trade
-  (so `yeet-router replay` can re-check it) and calls `onSettled` once per trade; XP awards are lane E.
+  (so `yeet-router replay` can re-check it) and calls `onSettled` once per trade; XP subscribes to it (below).
 - Signers (`YEET_SIGNER`): `delegated` (default; the YEET key quorum on the person's embedded wallets, added at
   sign-in) or `custodial` (one Privy server wallet per account owned by the YEET key). Same interface; both use
   Privy wallet RPC with Folio's authorization-signature scheme. Base: `eth_sendTransaction` on `eip155:8453`,
@@ -88,6 +91,32 @@ code replays the trade it started.
   (USDC `transfer` on Base only, per-transaction and rolling 24 h caps); it never sends it.
 - State: `$STATE_DIR/trade.sqlite` (tables of plan 4.2, migrated at start).
 
+## XP (Lane E, P2)
+
+On only when core and connector both have `YEET_P2=1`; without it `yeet_home.xp` is null, `trade_status.xp_award` is
+null and the two P2 tools are not registered. It is just XP: no money, no prizes. State: `$STATE_DIR/xp.sqlite`.
+
+| Event | XP | Cap |
+|---|---|---|
+| `sign_in` (verified sign-in) | 5 | 1 a UTC day |
+| `first_yeet` (first YEET with a delivered leg) | 50 | once ever |
+| `yeet_settled` (YEET with at least one delivered leg) | 20 | 5 a UTC day |
+| `skeet_settled` (SKEET with at least one delivered leg) | 10 | 5 a UTC day |
+| `daily_spin` | 5 + draw (0 to 40, mean 7.52) + 25 when the streak reaches 3 days or a multiple of 7 | 1 a UTC day |
+
+- Ledger (`core/xp/ledger.mjs`): rules in `xp_rule` (seeded on first open, editable), awards in `xp_event`; caps and
+  dedupe are checked in the same transaction as the insert.
+- Trades: paid exactly once per trade from the tracker's `onSettled`; `xp_trade` (trade id primary key) is written
+  in the same transaction. If the hook is lost (crash), the next `trade_status` of the final trade pays it; repeats
+  add nothing. Refunded or failed trades show `xp_award {points: 0}`.
+- Streak: consecutive UTC days with any XP event. Spin: HMAC-SHA256(`YEET_XP_SECRET`, `account|day`) over the
+  weighted table; a repeat the same day returns the same spin. Without `YEET_XP_SECRET` (16+ characters) there is no
+  spin (`spin_available` false, `daily_spin` TEMPORARILY_UNAVAILABLE).
+- Leaderboards: all time and the last 7 days, top 50, equal XP shares a rank. Names are handles like
+  "Lucky Otter 42" from a SHA-256 of the account id: no email, wallet address or sign-in id.
+- `recent_wins` is always `[]`: the contract wants `{symbol, pct}`, and stored data has what each leg paid and
+  received but no later price, so no gain can be stated truthfully.
+
 ## Environment variables (names only)
 
 - Sign-in server: `ISSUER`, `RESOURCE`, `PUBLIC_BASE_URL`, `PUBLIC_MODE`, `COOKIE_SECURE`, `TRUST_PROXY`, `ACCESS_TTL`,
@@ -95,13 +124,13 @@ code replays the trade it started.
   removed), `PRIVY_LOGIN`, `REFRESH_CONSENT_COMPAT`, `REFRESH_DIAGNOSTICS`, `CIMD_TEST_FIXTURES`, `PRIVY_APP_ID`,
   `PRIVY_JWKS_URL`, `STATE_DIR`, `CORE_INTERNAL`, `YEET_SIGNER_ID`, `YEET_BASE_POLICY_ID`, `YEET_SOLANA_POLICY_ID`,
   `YEET_DAILY_CAP_USDC` (consent copy).
-- Connector: `ISSUER`, `RESOURCE`, `PUBLIC_MODE`, `PRIVY_LOGIN`, `AS_INTERNAL`, `CORE_INTERNAL`, `YEET_P2`.
+- Connector: `ISSUER`, `RESOURCE`, `PUBLIC_MODE`, `PRIVY_LOGIN`, `AS_INTERNAL`, `CORE_INTERNAL`, `YEET_P2` (`1` registers the P2 tools).
 - Core: `ISSUER`, `RESOURCE`, `PRIVY_LOGIN`, `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, `PRIVY_JWKS_URL`,
   `YEET_PRIVY_AUTHORIZATION_KEY`, `YEET_PRIVY_KEY_QUORUM_ID`, `YEET_BASE_POLICY_ID`, `YEET_SOLANA_POLICY_ID`,
   `YEET_SIGNER` (`delegated` | `custodial`), `YEET_GAS_WALLET_ID`, `YEET_SOL_FEE_PAYER_ID`, `BASE_RPC_URL`,
   `SOLANA_RPC_URL`, `ONECLICK_JWT`, `YEET_LIVE` (`1` to execute), `YEET_KILL_SWITCH`, `YEET_MAX_TRADE_USDC` (25),
   `YEET_DAILY_CAP_USDC` (50), `YEET_MIN_LEG_USDC` (3), `YEET_MAX_COST_BPS` (800), `YEET_MAX_ACCOUNTS` (200),
-  `YEET_XP_SECRET`, `STATE_DIR`.
+  `YEET_P2` (`1` turns XP on), `YEET_XP_SECRET` (spin draw key, 16+ characters), `STATE_DIR`.
 - All roles, for local runs and tests: `AS_PORT`, `CONNECTOR_PORT`, `CORE_PORT`, `ADMIN_PORT`, `LISTEN_HOST`,
   `SECRETS_DIR` (defaults: 38312, 38313, 38316, 38317, `0.0.0.0`, `/secrets`).
 
@@ -127,7 +156,7 @@ SUCCESS and replay matches. Without `YEET_LIVE=1` or any flag it refuses and mov
 
 ## Still stubbed or missing
 
-- XP, streak, spin, leaderboard (Lane E); `yeet_coins` prices are null.
+- `yeet_coins` prices are null; `recent_wins` stays empty (no price history).
 - SKEET execution needs the Solana fee payer (`YEET_SOL_FEE_PAYER_ID`) and a live check of the sponsored send.
 - Never exercised against live Privy: the `eth_sendTransaction` body and answer, `GET /v1/users/{did}`, the policy
   aggregation shape, gas sponsorship on the app's plan (see the comments in `core/trade/signer-privy.mjs` and

@@ -4,7 +4,8 @@ import {introspectBearer,validatePrincipal} from '#shared/introspection.mjs';
 import {secret,equal,read,write,port,TEST,DEV_APP_ID} from '#shared/common.mjs';
 import {coins} from './coins.mjs';
 import {unavailable,failure} from './failure.mjs';
-import {tradeEngine} from './trade/runtime.mjs';
+import {tradeEngine,onTradeSettled} from './trade/runtime.mjs';
+import {xpRuntime,p2On} from './xp/xp.mjs';
 import {z} from 'zod';
 import {toolSchemas,zodSchema} from '../mcp/tool-contract.mjs';
 // Accounts are created on the first verified sign-in (identity-store.mjs). The identity app is Privy in
@@ -14,10 +15,14 @@ if(process.env.PRIVY_LOGIN==='1'&&devStub)throw Error('Identity modes must be se
 if(process.env.PRIVY_LOGIN!=='1'&&!devStub)throw Error('No identity verifier configured');
 initializeIdentityStore({app:process.env.PRIVY_LOGIN==='1'?process.env.PRIVY_APP_ID:DEV_APP_ID});
 const user=id=>account(id);
+// XP (lane E, YEET_P2=1): trade settlement pays through the tracker's onSettled hook; read per event so the flag is live.
+onTradeSettled(e=>{if(p2On())xpRuntime().onSettled(e)});
+/** XP never stands in the way of the answer it decorates: a failure is logged and the XP part is left out. */
+const xpSafe=(what,fn,fallback)=>{try{return fn()}catch(e){console.error(JSON.stringify({event:'xp_failed',what,error:String(e?.message??e).slice(0,200)}));return fallback}};
 const app=express();app.use(express.json({limit:'32kb'}));
 app.get('/health',(_q,r)=>r.json({ok:true}));
 app.use((q,r,next)=>{const token=q.headers.authorization?.replace(/^Bearer /,'');q.role=['mcp','as','operator'].find(role=>equal(token,secret(`core-${role}`)));if(!q.role)return r.sendStatus(401);next()});
-app.post('/identity/resolve',(q,r)=>{if(q.role!=='as')return r.sendStatus(403);const id=resolveIdentity(q.body);if(!id||read('policy.json')[id]?.suspended)return r.sendStatus(403);r.json({id})});
+app.post('/identity/resolve',(q,r)=>{if(q.role!=='as')return r.sendStatus(403);const id=resolveIdentity(q.body);if(!id||read('policy.json')[id]?.suspended)return r.sendStatus(403);if(p2On())xpSafe('sign_in',()=>xpRuntime().signIn(id));r.json({id})});
 app.post('/policy',(q,r)=>{if(q.role!=='operator')return r.sendStatus(403);const {account,client,suspended,disconnect,reconnect}=q.body;if(!user(account))return r.sendStatus(400);const p=read('policy.json');const row=p[account]||{clients:{}};if(typeof suspended==='boolean')row.suspended=suspended;if(disconnect||reconnect){if(typeof client!=='string'||!client)return r.sendStatus(400);row.clients[client]=!!disconnect}p[account]=row;write('policy.json',p);r.json({ok:true})});
 app.get('/policy',(q,r)=>{if(q.role!=='as')return r.sendStatus(403);const subject=q.headers['x-yeet-subject'];const exists=!!user(subject);r.json({...read('policy.json')[subject],exists,eligible:exists})});
 app.use(async(q,r,next)=>{if(Object.keys(q.query).length)return r.sendStatus(400);if(q.role==='operator')return r.sendStatus(403);let subject,client;if(q.role==='mcp'){try{q.principal=validatePrincipal(await introspectBearer(q.headers['x-delegated-bearer'],'core-resource','core-introspection'));subject=q.principal.subject;client=q.principal.client}catch{return r.sendStatus(401)}}else subject=q.headers['x-yeet-subject'];if(!user(subject))return r.sendStatus(400);q.subject=subject;const p=read('policy.json')[subject];if(p?.suspended||q.role==='mcp'&&p?.clients?.[client])return r.sendStatus(403);next()});
@@ -56,15 +61,32 @@ function trade(tool,fn){
   }
  };
 }
-app.get('/home',trade('yeet_home',(e,ctx)=>e.home(ctx)));
+app.get('/home',trade('yeet_home',async(e,ctx)=>{
+ const home=await e.home(ctx);
+ if(!p2On())return home;
+ return {...home,xp:xpSafe('home',()=>xpRuntime().summary(ctx.accountId),null),recent_wins:xpSafe('wins',()=>xpRuntime().recentWins(),[])};
+}));
 app.post('/proposals',trade('yeet_propose',(e,ctx,a)=>e.propose(ctx,a)));
 app.post('/proposals/skeet',trade('skeet_propose',(e,ctx,a)=>e.skeet(ctx,a)));
 app.post('/proposals/:id/quote',trade(null,(e,ctx,_a,q)=>{const a=inputs.yeet_quote.safeParse({...q.body,proposal_id:q.params.id});if(!a.success)throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});return e.quote(ctx,a.data)}));
 app.post('/trades',trade('execute_trade',(e,ctx,a)=>e.execute(ctx,a)));
-app.get('/trades/:id',trade(null,(e,ctx,_a,q)=>e.status(ctx,q.params.id)));
+app.get('/trades/:id',trade(null,(e,ctx,_a,q)=>{
+ const view=e.status(ctx,q.params.id);
+ return p2On()?{...view,xp_award:xpSafe('trade',()=>xpRuntime().tradeAward(ctx.accountId,view),null)}:view;
+}));
 app.get('/portfolio',trade('yeet_portfolio',(e,ctx)=>e.portfolio(ctx)));
-// XP, leaderboard and spin arrive in lane E; until then each answers a typed retryable failure.
-for(const [method,path] of [['get','/leaderboard/:board'],['post','/spin']])
- app[method](path,(_q,r)=>unavailable(r));
+// Leaderboard and daily spin (P2): answered only with YEET_P2=1, otherwise a typed retryable failure.
+function xpRoute(tool,fn){
+ return (q,r)=>{
+  if(q.role!=='mcp')return r.sendStatus(403);
+  if(!p2On())return unavailable(r);
+  const args=inputs[tool].safeParse(q.method==='GET'?{...q.params}:q.body??{});
+  if(!args.success)return r.status(400).json(failure('INVALID_ARGUMENT'));
+  try{r.json(fn(xpRuntime(),q.subject,args.data))}
+  catch(e){console.error(JSON.stringify({event:'xp_route_failed',route:q.route?.path,error:String(e?.message??e).slice(0,200)}));unavailable(r)}
+ };
+}
+app.get('/leaderboard/:board',xpRoute('yeet_leaderboard',(x,who,a)=>x.board(a.board??'xp',who)));
+app.post('/spin',xpRoute('daily_spin',(x,who)=>x.doSpin(who)));
 app.use((_e,_q,r,_n)=>r.status(400).json({error:'invalid request'}));
 export const server=app.listen(port('CORE_PORT',38316),process.env.LISTEN_HOST||'0.0.0.0');

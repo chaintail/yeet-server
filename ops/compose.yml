@@ -64,6 +64,7 @@ services:
       PRIVY_LOGIN: ${PRIVY_LOGIN:-}
       AS_INTERNAL: ${AS_INTERNAL:-}
       CORE_INTERNAL: ${CORE_INTERNAL:-}
+      YEET_P2: ${YEET_P2:-}
     env_file: [{path: /var/lib/yeet-connector/config/connector.env, required: false}]
     ports: ['127.0.0.1:38861:38313']
     volumes: ['/var/lib/yeet-connector/secrets/mcp:/secrets:ro']
@@ -96,6 +97,7 @@ services:
       YEET_MIN_LEG_USDC: ${YEET_MIN_LEG_USDC:-}
       YEET_MAX_COST_BPS: ${YEET_MAX_COST_BPS:-}
       YEET_MAX_ACCOUNTS: ${YEET_MAX_ACCOUNTS:-}
+      YEET_P2: ${YEET_P2:-}
       STATE_DIR: /state
     # Secret values (PRIVY_APP_SECRET, YEET_PRIVY_AUTHORIZATION_KEY, ONECLICK_JWT, YEET_XP_SECRET) only from this file.
     env_file: [{path: /var/lib/yeet-connector/config/core.env, required: false}]
