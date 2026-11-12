@@ -2,7 +2,7 @@
 // process on 127.0.0.1 with throwaway state and service secrets; nothing outside the test's temp directory is touched.
 import test, {after} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,mkdirSync,writeFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,rmSync,existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomBytes,createHash} from 'node:crypto';
@@ -77,6 +77,10 @@ test('sign-in pages use yeet cookies and YEET titles; identity config is off wit
  assert.equal((await fetch(AS+'/demo/identity-config')).status,404);
  assert.equal((await fetch(AS+'/demo/api/profile')).status,404);
  const css=await fetch(AS+'/demo/auth-pages.css');assert.equal(css.status,200);
+ // The sign-in bundle is served from login/dist once `npm run build:login` has run.
+ if(existsSync(new URL('../login/dist/login.js',import.meta.url))){
+  const js=await fetch(AS+'/demo/privy-login/login.js');assert.equal(js.status,200);assert.match(js.headers.get('content-type'),/javascript/);
+ }
 });
 
 test('A-4: a signed-in, consented token lists the P0 tools over HTTP, execute_trade hidden, yeet_coins live',async()=>{
