@@ -14,7 +14,7 @@ import {iso,usd,refuse} from './util.mjs';
 
 export const PRICE_TTL_MS=5*60_000;
 
-export async function createEngine({db,env=process.env,client,signer,balances,didFor,now=Date.now,onSettled,trackerIntervalMs=5000,budgetMs,catalog=CATALOG,fetch=globalThis.fetch}){
+export async function createEngine({db,env=process.env,client,signer,balances,didFor,now=Date.now,onSettled,trackerIntervalMs=5000,budgetMs,hooks,catalog=CATALOG,fetch=globalThis.fetch}){
  const limits=limitsFromEnv(env);
  client??=new OneClickClient({jwt:env.ONECLICK_JWT||undefined,timeoutMs:6000,retryDelayMs:500});
  balances??=createRpcBalances({baseRpcUrl:env.BASE_RPC_URL,solanaRpcUrl:env.SOLANA_RPC_URL,fetch});
@@ -23,7 +23,7 @@ export async function createEngine({db,env=process.env,client,signer,balances,di
  const wallets=createWallets({db,directory:signer.directory,balances,now});
  const proposals=createProposals({db,client,limits,wallets,codes,now,catalog});
  const tracker=createTracker({db,client,now,onSettled,intervalMs:trackerIntervalMs});
- const executor=createExecutor({db,client,limits,wallets,signer,codes,proposals,tracker,now,...(budgetMs?{budgetMs}:{})});
+ const executor=createExecutor({db,client,limits,wallets,signer,codes,proposals,tracker,now,hooks,...(budgetMs?{budgetMs}:{})});
  tracker.useRecovery(id=>executor.recover(id));
 
  let prices={at:0,bySymbol:new Map()};

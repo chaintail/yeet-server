@@ -97,3 +97,44 @@ test('fix 1: the Privy adapter marks only definite refusals as nothing-broadcast
  await assert.rejects(s.transferUsdcBase({walletId:'bad id',from:BASE_WALLET,to:BASE_WALLET,amountRaw:'1',idempotencyKey:'d'.repeat(64)}),e=>e.notSent===true,'refused before any request');
  await assert.rejects(s.transferSpl({walletId:'w1'}),e=>e.code==='WALLET_NOT_READY'&&e.notSent===true,'no fee payer: nothing built');
 });
+
+const until=async(fn,what)=>{for(let i=0;i<500;i++){if(fn())return;await new Promise(r=>setImmediate(r))}throw Error(`timed out waiting for ${what}`)};
+/** An engine that "dies" right after the commit (the send never starts), and a restarted engine on the same state. */
+async function crashAfterCommit(){
+ const {createEngine}=await import('./engine.mjs');
+ const first=await fakeEngine({hooks:{afterCommit:()=>new Promise(()=>{})}});
+ const p=await first.engine.propose(alice,basket);
+ exec(first.engine,alice,p).catch(()=>{});
+ const tradeRow=()=>first.db.prepare('SELECT * FROM trades').get();
+ await until(()=>tradeRow()?.status==='signing','the commit');
+ const signer=fakeSigner();
+ const engine=await createEngine({db:first.db,env:{YEET_LIVE:'1'},client:first.oneclick,signer,balances:first.balances,now:first.now,trackerIntervalMs:60_000});
+ return {p,db:first.db,now:first.now,tradeId:tradeRow().id,engine,signer,oneclick:first.oneclick};
+}
+
+test('fix 2: crash between commit and send, deadline open: the restarted engine sweeps on start and sends every leg once',async()=>{
+ const {p,db,tradeId,engine,signer,oneclick}=await crashAfterCommit();
+ assert.deepEqual(legRows(db,tradeId).map(l=>l.send_status),['queued','queued','queued']);
+ assert.equal(spent(db),'20000000');
+ engine.tracker.start();
+ try{await until(()=>legRows(db,tradeId).every(l=>l.send_status==='sent'),'the startup sweep')}finally{engine.tracker.stop()}
+ assert.equal(signer.sent.length,3);assert.equal(oneclick.calls.submit.length,3);
+ assert.deepEqual(signer.sent.map(s=>s.idempotencyKey),[0,1,2].map(i=>legIdempotencyKey('wallet-base',tradeId,i)));
+ const replay=await exec(engine,alice,p);
+ assert.equal(replay.trade_id,tradeId);assert.deepEqual(replay.legs.map(l=>l.status),['sent','sent','sent']);
+ assert.ok(replay.legs.every(l=>l.tx_hash));
+ assert.equal(db.prepare('SELECT status FROM proposals').get().status,'executed');
+ assert.equal(signer.sent.length,3);
+});
+
+test('fix 2: crash between commit and send, deadline passed: legs not_sent, cap returned, and the replayed code answers the true state',async()=>{
+ const {p,db,now,tradeId,engine,signer}=await crashAfterCommit();
+ now.advance(31*60_000);// past the 30 min 1Click deadline
+ await assert.rejects(exec(engine,alice,p),e=>e.code==='TEMPORARILY_UNAVAILABLE','nothing was traded; not a stale `submitted`');
+ assert.deepEqual(legRows(db,tradeId).map(l=>l.send_status),['not_sent','not_sent','not_sent']);
+ assert.equal(spent(db),'0');
+ assert.equal(signer.sent.length,0);
+ assert.equal(db.prepare('SELECT status FROM proposals').get().status,'failed');
+ assert.equal(engine.status(alice,tradeId).status,'failed');
+ await assert.rejects(exec(engine,alice,p),e=>e.code==='TEMPORARILY_UNAVAILABLE','replay answers the same');
+});

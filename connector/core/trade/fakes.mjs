@@ -108,9 +108,9 @@ export function fakeBalances({usdc='100',holdings=[]}={}){
 export function fakeClock(start=Date.parse('2026-11-12T12:00:00.000Z')){let t=start;const now=()=>t;now.advance=ms=>{t+=ms};now.set=ms=>{t=ms};return now}
 
 /** An engine over an in-memory database with fakes for every external system. */
-export async function fakeEngine({env={YEET_LIVE:'1'},oneclick,signer,balances,now=fakeClock(),onSettled,budgetMs}={}){
+export async function fakeEngine({env={YEET_LIVE:'1'},oneclick,signer,balances,now=fakeClock(),onSettled,budgetMs,hooks}={}){
  const db=openTradeDb(':memory:');
  oneclick??=fakeOneClick();signer??=fakeSigner();balances??=fakeBalances();
- const engine=await createEngine({db,env,client:oneclick,signer,balances,now,onSettled,trackerIntervalMs:0,budgetMs});
+ const engine=await createEngine({db,env,client:oneclick,signer,balances,now,onSettled,trackerIntervalMs:0,budgetMs,hooks});
  return {engine,db,oneclick,signer,balances,now};
 }

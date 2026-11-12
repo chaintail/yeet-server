@@ -29,7 +29,7 @@ const codeOf=e=>e instanceof TradeError?e.code:'TEMPORARILY_UNAVAILABLE';
  * have moved funds, so it is reported as sent (without a hash), never as failed. */
 const ANSWER_STATUS={queued:'not_sent',sending:'sent',sent:'sent',failed:'failed',not_sent:'not_sent'};
 
-export function createExecutor({db,client,limits,wallets,signer,codes,proposals,tracker,now=Date.now,budgetMs=EXECUTE_BUDGET_MS}){
+export function createExecutor({db,client,limits,wallets,signer,codes,proposals,tracker,now=Date.now,budgetMs=EXECUTE_BUDGET_MS,hooks={}}){
  const trade=id=>db.prepare('SELECT * FROM trades WHERE id=?').get(id);
  const legsOf=id=>db.prepare('SELECT * FROM trade_legs WHERE trade_id=? ORDER BY idx').all(id);
  const legOf=(id,idx)=>db.prepare('SELECT * FROM trade_legs WHERE trade_id=? AND idx=?').get(id,idx);
@@ -130,14 +130,18 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
  }
 
  /**
-  * Recovery for one trade, run by the tracker on start and every tick (and before a replayed code is answered):
-  * `sending` legs are looked up at 1Click by deposit address, else re-issued with the same idempotency key while the
-  * deposit deadline is open; sent legs whose deposit/submit failed are submitted again.
+  * Recovery for one trade, run by the tracker on start and every tick (and before a replayed code is answered), for
+  * a trade no send loop in this process is working on (after a crash or restart):
+  *  - `queued` legs (never attempted): sent while the deposit deadline is more than SEND_MARGIN_MS away, otherwise
+  *    `not_sent` with the amount back to the daily cap;
+  *  - `sending` legs: looked up at 1Click by deposit address, else re-issued with the same idempotency key while the
+  *    deadline is open; past it they stay `sending` (counted as spent) until 1Click or the tracker horizon resolves them;
+  *  - sent legs whose deposit/submit failed are submitted again.
   */
  async function recover(tradeId){
   if(inFlight.has(tradeId))return false;
   const t=trade(tradeId);if(!t)return false;
-  const open=legsOf(tradeId).filter(l=>l.send_status==='sending'||(l.send_status==='sent'&&!l.deposit_submitted));
+  const open=legsOf(tradeId).filter(l=>l.send_status==='queued'||l.send_status==='sending'||(l.send_status==='sent'&&!l.deposit_submitted));
   if(!open.length)return false;
   inFlight.add(tradeId);
   try{
@@ -150,8 +154,14 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
    };
    for(const l of open){
     if(l.send_status==='sent'){await submit(t,l.idx);continue}
-    if(await lookup(t,l))continue;
     const deadline=Date.parse(JSON.parse(l.live_quote_json).deadline);
+    if(l.send_status==='queued'){
+     if(!(now()+SEND_MARGIN_MS<deadline)){release(t,l.idx,'not_sent');continue}
+     try{const {wallet,held}=await walletCtx();await attempt(t,l.idx,wallet,held)}
+     catch(e){note(tradeId,`leg ${l.idx}: ${e?.detail??e?.message}`)}// stays queued; retried next tick
+     continue;
+    }
+    if(await lookup(t,l))continue;
     // Never re-issue towards an address that may be inactive: the leg stays `sending` (spent) until 1Click or the
     // tracker's horizon resolves it.
     if(!(now()+SEND_MARGIN_MS<deadline))continue;
@@ -161,7 +171,14 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
    }
    settle(tradeId);
   }finally{inFlight.delete(tradeId)}
+  try{tracker.refresh(tradeId)}catch(e){note(tradeId,`refresh: ${e?.message}`)}
   return true;
+ }
+ /** A used code's answer: the trade's true current state, after recovery when its send loop is not running. */
+ async function replay(tradeId){
+  const t=trade(tradeId);
+  if(t&&t.status==='signing')await recover(tradeId);
+  return answer(tradeId);
  }
  const existingTrade=(proposalId)=>db.prepare("SELECT id FROM trades WHERE proposal_id=? AND status<>'requote_required' ORDER BY created_at DESC LIMIT 1").get(proposalId)?.id;
 
@@ -195,11 +212,11 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
   async execute(ctx,{proposal_id,revision,confirm}){
    const started=now();
    const code=codes.check({code:confirm,accountId:ctx.accountId,clientId:ctx.clientId,proposalId:proposal_id,revision});
-   if(code.used)return answer(code.trade_id);
+   if(code.used)return replay(code.trade_id);
    checkKillSwitch(limits);
    if(!limits.live)refuse('TRADING_PAUSED','YEET_LIVE is not set');
    const p=proposals.row(proposal_id);
-   if(p.status!=='proposed'||p.revision!==revision){const prior=existingTrade(p.id);if(prior)return answer(prior);refuse('CONFIRMATION_REQUIRED','revision is not current')}
+   if(p.status!=='proposed'||p.revision!==revision){const prior=existingTrade(p.id);if(prior)return replay(prior);refuse('CONFIRMATION_REQUIRED','revision is not current')}
    const legs=proposals.legsOf(p.id,revision);
    if(quoteHash(p.id,revision,legs)!==code.quote_sha256)refuse('CONFIRMATION_REQUIRED','quote changed');
    const w=await wallets.require(ctx.accountId,{refresh:!signer.directory.stable});
@@ -228,7 +245,7 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
    if(worse){
     const r=await requote(ctx,{p,legs,live,confirm});
     if(r)return r;
-    return answer(codes.check({code:confirm,accountId:ctx.accountId,clientId:ctx.clientId,proposalId:proposal_id,revision}).trade_id);
+    return replay(codes.check({code:confirm,accountId:ctx.accountId,clientId:ctx.clientId,proposalId:proposal_id,revision}).trade_id);
    }
    checkCost(limits,proposals.legsCost(proposals.legRows(live)));
 
@@ -246,13 +263,14 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
     for(const l of live.legs)ins.run(tradeId,l.index,l.symbol,l.amountIn,l.depositAddress,l.depositMemo??null,JSON.stringify(l),'queued',JSON.stringify(receiptLeg(l)),t);
     return true;
    });
-   if(!committed)return answer(codes.check({code:confirm,accountId:ctx.accountId,clientId:ctx.clientId,proposalId:proposal_id,revision}).trade_id);
+   if(!committed)return replay(codes.check({code:confirm,accountId:ctx.accountId,clientId:ctx.clientId,proposalId:proposal_id,revision}).trade_id);
 
    // Send: one exact transfer per leg, in order, within the time budget. A failed leg does not stop the others.
    const tRow=trade(tradeId);
    let lastError;
    inFlight.add(tradeId);
    try{
+    await hooks.afterCommit?.(tradeId);
     for(const l of live.legs){
      if(now()-started>budgetMs)break;
      const failed=await attempt(tRow,l.index,w[chain],held);

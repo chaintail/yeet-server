@@ -88,7 +88,8 @@ export function createTracker({db,client,now=Date.now,onSettled=()=>{},intervalM
   refresh,apply,pollOnce,
   /** The executor's per-trade send recovery, run before each trade is polled. */
   useRecovery(fn){recovery=fn},
-  start(){if(!timer&&intervalMs>0){timer=setInterval(()=>{pollOnce().catch(()=>{})},intervalMs);timer.unref?.()}},
+  /** Sweeps once at start (trades a crash left in `signing` are recovered), then every intervalMs. */
+  start(){if(!timer&&intervalMs>0){pollOnce().catch(()=>{});timer=setInterval(()=>{pollOnce().catch(()=>{})},intervalMs);timer.unref?.()}},
   stop(){if(timer)clearInterval(timer);timer=undefined},
   /** trade_status for the trade's owner. */
   status(ctx,tradeId){
