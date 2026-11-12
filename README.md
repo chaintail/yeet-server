@@ -1,10 +1,11 @@
 # yeet-ai (private)
 
-Private side of YEET: the ChatGPT connector (sign-in server, core, connector), its Privy sign-in bundle and the deployment
-files. The public side (router, landing page, tool contract, card widget) is `chaintail/yeet-win`.
+Private side of YEET: the ChatGPT connector (sign-in server, core, connector), its Privy sign-in bundle, the trade
+engine and the deployment files. The public side (router, landing page, tool contract, card widget) is
+`chaintail/yeet-win`; the pieces used here are vendored from a pinned commit.
 
 Port of the Folio connector from `stock-app` `origin/dev` (0e4002821) `research/folio-mcp/current`, following
-`YEET-PORT-PLAN.md` Lane A. The first commit is the verbatim import; the following commits are the YEET edits.
+`YEET-PORT-PLAN.md` Lanes A and B. The first commit is the verbatim import; the following commits are the YEET edits.
 
 ## Layout
 
@@ -12,14 +13,15 @@ Port of the Folio connector from `stock-app` `origin/dev` (0e4002821) `research/
 connector/
   as/          sign-in server: OAuth 2.1 / OIDC (oidc-provider), consent, /me, sign-in pages
   core/        identity store (account on first verified sign-in), per-route scopes, YEET routes
+  core/trade/  trade engine (Lane B): proposals, confirm codes, limits, executor, tracker, wallets, signers
   mcp/         protocol endpoint at /, metadata, tool registration, card templates
   shared/      modules two roles load: common settings, introspection, Privy token check
-  contracts/   yeet-tools.json (local P0 contract) and the error catalogue loader
+  contracts/   error catalogue loader (reads the vendored contract's x-yeet-errors)
   login/       Privy sign-in bundle source (React, esbuild)
-  vendor/      pinned files from yeet-win (see vendor/README.md)
+  vendor/      pinned yeet-win build: contract, card templates, router dist, router fixtures (vendor/README.md)
   test/        in-process acceptance test
 ops/           compose, Dockerfile, Caddy snippet, env names (not started)
-scripts/       text-gate.sh
+scripts/       vendor-yeet-win.sh, text-gate.sh, live-one-leg.mjs (B-2)
 ```
 
 Endpoints on `https://chatgpt.yeet.win`: `POST /` (protocol, connector), `GET /.well-known/oauth-protected-resource`
@@ -33,21 +35,58 @@ Node 24.
 ```
 cd connector
 npm ci
-npm test              # unit tests + in-process acceptance (127.0.0.1:38860-38863, temp state)
-npm run build:login   # npm ci in login/ and esbuild -> login/dist/login.js
-npm run text-gate     # same as ../scripts/text-gate.sh
+npm test                         # engine + adapters (core/trade/*.test.mjs), contract, registration, in-process acceptance
+node --test core/trade/*.test.mjs  # acceptance B-1 alone
+npm run build:login              # npm ci in login/ and esbuild -> login/dist/login.js
+npm run text-gate                # same as ../scripts/text-gate.sh
 ```
 
-## Tools (P0)
+Update the vendored yeet-win pieces (never writes into the yeet-win checkout; builds under the ignored `.build/`):
 
-| Tool | Scope | Card | Model sees it | State |
-|---|---|---|---|---|
-| `yeet_home` | yeet:read | home-v1 | yes | stub: TEMPORARILY_UNAVAILABLE |
-| `yeet_coins` | yeet:read | none | yes | live: curated catalogue from vendored yeet-win `catalog.json`, prices null |
-| `yeet_propose` | yeet:write | basket-v1 | yes | stub |
-| `yeet_quote` | yeet:write | basket-v1 | yes | stub |
-| `execute_trade` | yeet:trade | receipt-v1 | no (`openai/visibility: private`, `ui.visibility: ["app"]`) | stub |
-| `trade_status` | yeet:read | receipt-v1 | yes | stub |
+```
+scripts/vendor-yeet-win.sh ~/code/yeet-win main
+```
+
+## Tools
+
+Schemas, titles, descriptions, annotations, scopes, cards, visibility and widget access all come from the vendored
+`contracts/yeet-tools.json` (yeet-win commit in `connector/vendor/yeet-win/PINNED`).
+
+| Tool | P | Scope | Card | Model sees it | Against fakes | Needs real keys for |
+|---|---|---|---|---|---|---|
+| `yeet_home` | P0 | yeet:read | home | yes | wallets, USDC balance, `ready / needs_signer / needs_funds / paused`; `xp` null | Privy (wallet lookup), `BASE_RPC_URL` |
+| `yeet_coins` | P0 | yeet:read | none | yes | catalogue from the vendored router, prices null | none |
+| `yeet_propose` | P0 | yeet:write | basket | yes | dry router plan, limits, warnings, saved proposal, confirm code in `_meta` only | 1Click (dry quotes, no key needed) |
+| `yeet_quote` | P0 | yeet:write | basket | yes | new revision, fresh dry quote and code | 1Click |
+| `execute_trade` | P0 | yeet:trade | receipt | no (`openai/visibility: private`, `ui.visibility: ["app"]`) | full tap path with a fake signer | 1Click live quotes, Privy signer, `BASE_RPC_URL`, `YEET_LIVE=1` |
+| `trade_status` | P0 | yeet:read | receipt | yes | 1Click `/status` folded by the router's `applyStatus` | 1Click |
+| `yeet_portfolio` | P1 | yeet:read | portfolio | yes | Solana holdings of catalogue coins, prices from 1Click `/tokens` | `SOLANA_RPC_URL` |
+| `skeet_propose` | P1 | yeet:write | basket | yes | percent of holdings, dry SKEET plan | `SOLANA_RPC_URL`, then a Solana fee payer to execute |
+| `yeet_leaderboard`, `daily_spin` | P2 | | | registered only with `YEET_P2=1` | answer TEMPORARILY_UNAVAILABLE (lane E) | |
+
+The one-time confirm code (32 random bytes, base64url) is returned only in result `_meta["yeet/confirm"]`; the
+connector strips it from `structuredContent` and `content`, and a test checks both. Core stores only its SHA-256,
+bound to account, client, proposal, revision and a hash of the quoted legs, for 120 s; it is single use and a used
+code replays the trade it started.
+
+## Trade engine (Lane B)
+
+- `execute_trade` at the tap: code check, kill switch, `YEET_LIVE` (unset: TRADING_PAUSED, code stays unused),
+  signer state, balance, per-trade and daily caps, live router plan (`dry:false`), the requote rule (any live leg
+  under the preview `min_out`, or the preview over 60 s old and a live leg under its estimate: REQUOTE with a new
+  revision and a new code in `_meta`), cost ceiling, then one exact USDC `transfer` per leg through the signer and
+  1Click `submitDeposit`. A failed leg leaves the trade `partial`; unsent amounts go back to the daily allowance.
+- The tracker (`core/trade/tracker.mjs`) polls `/status` every 5 s, keeps a router `ReceiptSchema` receipt per trade
+  (so `yeet-router replay` can re-check it) and calls `onSettled` once per trade; XP awards are lane E.
+- Signers (`YEET_SIGNER`): `delegated` (default; the YEET key quorum on the person's embedded wallets, added at
+  sign-in) or `custodial` (one Privy server wallet per account owned by the YEET key). Same interface; both use
+  Privy wallet RPC with Folio's authorization-signature scheme. Base: `eth_sendTransaction` on `eip155:8453`,
+  `sponsor: true` unless `YEET_GAS_WALLET_ID` is set (then a 0.00003 ETH top-up from that wallet when needed).
+  Solana (SKEET) answers WALLET_NOT_READY until `YEET_SOL_FEE_PAYER_ID` is set.
+- Without Privy credentials the connector still runs: `yeet_home`, proposals and taps answer WALLET_NOT_READY.
+- Policy for the Base signer: `node core/trade/policy-create.mjs --max-trade 25 --daily 50` prints the JSON
+  (USDC `transfer` on Base only, per-transaction and rolling 24 h caps); it never sends it.
+- State: `$STATE_DIR/trade.sqlite` (tables of plan 4.2, migrated at start).
 
 ## Environment variables (names only)
 
@@ -56,25 +95,41 @@ npm run text-gate     # same as ../scripts/text-gate.sh
   removed), `PRIVY_LOGIN`, `REFRESH_CONSENT_COMPAT`, `REFRESH_DIAGNOSTICS`, `CIMD_TEST_FIXTURES`, `PRIVY_APP_ID`,
   `PRIVY_JWKS_URL`, `STATE_DIR`, `CORE_INTERNAL`, `YEET_SIGNER_ID`, `YEET_BASE_POLICY_ID`, `YEET_SOLANA_POLICY_ID`,
   `YEET_DAILY_CAP_USDC` (consent copy).
-- Connector: `ISSUER`, `RESOURCE`, `PUBLIC_MODE`, `PRIVY_LOGIN`, `AS_INTERNAL`, `CORE_INTERNAL`.
+- Connector: `ISSUER`, `RESOURCE`, `PUBLIC_MODE`, `PRIVY_LOGIN`, `AS_INTERNAL`, `CORE_INTERNAL`, `YEET_P2`.
 - Core: `ISSUER`, `RESOURCE`, `PRIVY_LOGIN`, `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, `PRIVY_JWKS_URL`,
   `YEET_PRIVY_AUTHORIZATION_KEY`, `YEET_PRIVY_KEY_QUORUM_ID`, `YEET_BASE_POLICY_ID`, `YEET_SOLANA_POLICY_ID`,
-  `YEET_SIGNER`, `YEET_GAS_WALLET_ID`, `YEET_SOL_FEE_PAYER_ID`, `BASE_RPC_URL`, `SOLANA_RPC_URL`, `ONECLICK_JWT`,
-  `YEET_LIVE`, `YEET_KILL_SWITCH`, `YEET_MAX_TRADE_USDC`, `YEET_DAILY_CAP_USDC`, `YEET_MIN_LEG_USDC`, `YEET_MAX_COST_BPS`,
-  `YEET_MAX_ACCOUNTS` (default 200), `YEET_XP_SECRET`, `STATE_DIR`.
+  `YEET_SIGNER` (`delegated` | `custodial`), `YEET_GAS_WALLET_ID`, `YEET_SOL_FEE_PAYER_ID`, `BASE_RPC_URL`,
+  `SOLANA_RPC_URL`, `ONECLICK_JWT`, `YEET_LIVE` (`1` to execute), `YEET_KILL_SWITCH`, `YEET_MAX_TRADE_USDC` (25),
+  `YEET_DAILY_CAP_USDC` (50), `YEET_MIN_LEG_USDC` (3), `YEET_MAX_COST_BPS` (800), `YEET_MAX_ACCOUNTS` (200),
+  `YEET_XP_SECRET`, `STATE_DIR`.
 - All roles, for local runs and tests: `AS_PORT`, `CONNECTOR_PORT`, `CORE_PORT`, `ADMIN_PORT`, `LISTEN_HOST`,
   `SECRETS_DIR` (defaults: 38312, 38313, 38316, 38317, `0.0.0.0`, `/secrets`).
 
 Service-to-service secret files: `core-mcp`, `core-as`, `core-operator`, `introspection`, `core-introspection`,
 `operator`, `csrf`.
 
+## B-2: one live leg, once funded
+
+Not run yet. Prerequisites: a Privy app with signers enabled, the YEET authorization key registered as a key quorum,
+the Base policy created from `policy-create.mjs` and attached at sign-in, the owner signed in once through the
+connector (account `yeet-privy-...`, signer attached), and at least the trade amount of USDC on the Base wallet.
+
+```
+cd /path/to/yeet-ai
+export YEET_LIVE=1 STATE_DIR=... PRIVY_APP_ID=... PRIVY_APP_SECRET=... YEET_PRIVY_AUTHORIZATION_KEY=... \
+       YEET_PRIVY_KEY_QUORUM_ID=... BASE_RPC_URL=... SOLANA_RPC_URL=... ONECLICK_JWT=...   # values from the secret store
+node scripts/live-one-leg.mjs --account yeet-privy-XXXX --usdc 3 --coin WIF --i-accept-real-funds
+```
+
+It prints home, the proposal, the submitted leg and each status change, writes `receipts/<trade>.json`, and prints
+`node connector/vendor/yeet-win/router/dist/src/cli.js replay receipts/<trade>.json`; B-2 passes when the leg reaches
+SUCCESS and replay matches. Without `YEET_LIVE=1` or any flag it refuses and moves nothing.
+
 ## Still stubbed or missing
 
-- Trade engine (Lane B): proposals, confirm codes, quotes, execution, status; every route except `/coins` answers
-  `TEMPORARILY_UNAVAILABLE`. `yeet_coins` prices are null until the 1Click price feed is wired in.
-- XP, streak, spin, leaderboard (Lane E); P1/P2 tools (`yeet_portfolio`, `skeet_propose`, `yeet_leaderboard`,
-  `daily_spin`) are not registered.
-- Tool contract: local `connector/contracts/yeet-tools.json` until yeet-win publishes `contracts/yeet-tools.json`.
-- Cards: built-in plain-text card until the yeet-win widget package is vendored under `connector/vendor/yeet-win/widget/`.
-- `@yeet/router` dist is not vendored yet (Lane B needs it).
+- XP, streak, spin, leaderboard (Lane E); `yeet_coins` prices are null.
+- SKEET execution needs the Solana fee payer (`YEET_SOL_FEE_PAYER_ID`) and a live check of the sponsored send.
+- Never exercised against live Privy: the `eth_sendTransaction` body and answer, `GET /v1/users/{did}`, the policy
+  aggregation shape, gas sponsorship on the app's plan (see the comments in `core/trade/signer-privy.mjs` and
+  `policy-create.mjs`).
 - Deploy: image not built, compose not started, Caddy and tunnel not changed (see `ops/README.md`).
