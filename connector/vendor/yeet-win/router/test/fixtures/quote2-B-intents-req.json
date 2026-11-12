@@ -1,0 +1,14 @@
+{
+  "dry": true,
+  "swapType": "EXACT_INPUT",
+  "slippageTolerance": 100,
+  "originAsset": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+  "depositType": "ORIGIN_CHAIN",
+  "destinationAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+  "amount": "25000000",
+  "refundTo": "probe.near",
+  "refundType": "INTENTS",
+  "recipient": "probe.near",
+  "recipientType": "INTENTS",
+  "deadline": "2026-11-12T07:52:03.000Z"
+}

@@ -11,6 +11,7 @@
 #      contracts/yeet-tools.json   tool schemas, card list and the x-yeet-errors catalogue
 #      widget/*.html, widget/templates.json
 #      router/dist/**               compiled @yeet/router (dist/src only: index, 1Click client, plan, receipt, catalogue)
+#      router/test/fixtures/*.json  recorded 1Click quote/status payloads (the engine tests' fake 1Click answers from them)
 #      PINNED                       the yeet-win commit every file above came from
 set -euo pipefail
 src="${1:?usage: vendor-yeet-win.sh <path-to-yeet-win> [ref]}"
@@ -36,10 +37,11 @@ fi
   (cd packages/widget && node build.mjs)
 )
 
-mkdir -p "$dest/contracts" "$dest/widget" "$dest/router/dist"
+mkdir -p "$dest/contracts" "$dest/widget" "$dest/router/dist" "$dest/router/test/fixtures"
 cp "$build/contracts/yeet-tools.json" "$dest/contracts/yeet-tools.json"
 rsync -a --delete --include='*.html' --include='templates.json' --exclude='*' "$build/packages/widget/dist/" "$dest/widget/"
 rsync -a --delete "$build/packages/router/dist/src/" "$dest/router/dist/src/"
+rsync -a --delete --include='*.json' --exclude='*' "$build/packages/router/test/fixtures/" "$dest/router/test/fixtures/"
 cat >"$dest/PINNED" <<EOF
 repo: chaintail/yeet-win
 branch: $ref
@@ -49,5 +51,6 @@ files:
   contracts/yeet-tools.json
   widget/$(cd "$dest/widget" && ls | tr '\n' ' ')
   router/dist/src/**
+  router/test/fixtures/*.json
 EOF
 echo "vendored yeet-win $sha into $dest"

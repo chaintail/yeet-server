@@ -48,7 +48,7 @@ const REFUSALS=['No valid authorization signatures were provided','No valid auth
 export function createPrivyApi({config,fetch=globalThis.fetch,timeoutMs=15_000}){
  const basic=()=>`Basic ${Buffer.from(`${config.appId}:${config.appSecret}`).toString('base64')}`;
  async function send(method,path,body,{idempotencyKey,signed}){
-  if(!/^\/v1\/[A-Za-z0-9_/-]+$/.test(path))throw new PrivyApiError('INVALID_PRIVY_PATH');
+  if(!/^\/v1\/[A-Za-z0-9_/:-]+$/.test(path))throw new PrivyApiError('INVALID_PRIVY_PATH');
   if(idempotencyKey!==undefined&&!/^[a-f0-9]{64}$/.test(idempotencyKey))throw new PrivyApiError('INVALID_IDEMPOTENCY_KEY');
   const url=PRIVY_ORIGIN+path;
   const privyHeaders={'privy-app-id':config.appId,...(idempotencyKey?{'privy-idempotency-key':idempotencyKey}:{})};

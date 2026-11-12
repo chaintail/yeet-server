@@ -71,7 +71,7 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
    if(p.status!=='proposed'||p.revision!==revision){const prior=existingTrade(p.id);if(prior)return answer(prior);refuse('CONFIRMATION_REQUIRED','revision is not current')}
    const legs=proposals.legsOf(p.id,revision);
    if(quoteHash(p.id,revision,legs)!==code.quote_sha256)refuse('CONFIRMATION_REQUIRED','quote changed');
-   const w=await wallets.require(ctx.accountId,{refresh:signer.kind==='delegated'});
+   const w=await wallets.require(ctx.accountId,{refresh:!signer.directory.stable});
    const chain=p.direction==='yeet'?'base':'solana';
    if(w[chain].signerState!=='granted'||!w[chain].walletId)refuse('WALLET_NOT_READY',`${chain} signer not granted`);
    const total=legs.reduce((a,l)=>a+BigInt(l.amount_in_raw),0n);

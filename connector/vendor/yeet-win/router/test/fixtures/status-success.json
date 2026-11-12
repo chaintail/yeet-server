@@ -1,0 +1,75 @@
+{
+  "correlationId": "c0000000-0000-4000-8000-000000000003",
+  "quoteResponse": {
+    "quote": {
+      "amountIn": "25000000",
+      "amountInFormatted": "25.0",
+      "amountInUsd": "24.986025000000",
+      "minAmountIn": "25000000",
+      "amountOut": "24997083",
+      "amountOutFormatted": "24.997083",
+      "amountOutUsd": "24.983109630603",
+      "minAmountOut": "24747112",
+      "timeEstimate": 35,
+      "refundFee": "0",
+      "withdrawFee": "0"
+    },
+    "quoteRequest": {
+      "dry": true,
+      "depositMode": "SIMPLE",
+      "swapType": "EXACT_INPUT",
+      "slippageTolerance": 100,
+      "originAsset": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+      "depositType": "ORIGIN_CHAIN",
+      "destinationAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+      "amount": "25000000",
+      "refundTo": "probe.near",
+      "refundType": "INTENTS",
+      "recipient": "probe.near",
+      "recipientType": "INTENTS",
+      "deadline": "2026-11-12T07:52:03.000Z",
+      "confidentiality": "public",
+      "quoteWaitingTimeMs": 0,
+      "insured": false,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 1
+        }
+      ]
+    },
+    "signature": "ed25519:3etbsQv7ZWoycSnSY4Q3mCJ7gJfVbJDukHVQXhc3e6kRJeFP4sbRaZLYWQNeD4R83USqYBZwh6qRVQpCayEJ9CRP",
+    "timestamp": "2026-11-12T06:52:04.150Z",
+    "correlationId": "433c62e1-3e83-4a66-b5d0-c1ef82394f89"
+  },
+  "status": "SUCCESS",
+  "updatedAt": "2026-11-12T07:00:00.000Z",
+  "swapDetails": {
+    "intentHashes": [
+      "9xQe"
+    ],
+    "nearTxHashes": [
+      "Hs3u"
+    ],
+    "originChainTxHashes": [
+      {
+        "hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "explorerUrl": "https://basescan.org/tx/0x1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    ],
+    "destinationChainTxHashes": [
+      {
+        "hash": "5VfYmGBjvQKe3xgLtTQPkMeAZJcMBdkdhtQ1WtABpbQV3Q6yZ8NnHcRmw7pS4u9vKcXbNfLwDtYr2aE6hJ1gMxoP",
+        "explorerUrl": "https://solscan.io/tx/5VfYmGBjvQKe3xgLtTQPkMeAZJcMBdkdhtQ1WtABpbQV3Q6yZ8NnHcRmw7pS4u9vKcXbNfLwDtYr2aE6hJ1gMxoP"
+      }
+    ],
+    "amountIn": "25000000",
+    "amountInFormatted": "25.0",
+    "amountInUsd": "24.98",
+    "amountOut": "24777000",
+    "amountOutFormatted": "24.777",
+    "amountOutUsd": "24.76",
+    "slippage": 12,
+    "depositedAmount": "25000000"
+  }
+}

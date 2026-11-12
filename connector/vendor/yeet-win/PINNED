@@ -6,3 +6,4 @@ files:
   contracts/yeet-tools.json
   widget/basket-v1.html home-v1.html leaderboard-v1.html portfolio-v1.html receipt-v1.html templates.json 
   router/dist/src/**
+  router/test/fixtures/*.json

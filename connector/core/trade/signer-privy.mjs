@@ -82,9 +82,9 @@ export function privyDirectory({api,didFor,keyQuorumId}){
   stable:false,
   async lookup(accountId){
    const did=didFor?.(accountId);
-   if(!did)return null;
+   if(typeof did!=='string'||!/^did:privy:[A-Za-z0-9_-]{1,128}$/.test(did))return null;
    let user;
-   try{user=await api.app('GET',`/v1/users/${encodeURIComponent(did)}`)}catch(e){if(e instanceof PrivyApiError&&e.status===404)return null;privyFailure(e)}
+   try{user=await api.app('GET',`/v1/users/${did}`)}catch(e){if(e instanceof PrivyApiError&&e.status===404)return null;privyFailure(e)}
    const accounts=Array.isArray(user?.linked_accounts)?user.linked_accounts:[];
    const embedded=chain=>accounts.find(a=>a?.type==='wallet'&&['privy','privy-v2'].includes(a.wallet_client_type)&&a.chain_type===chain&&typeof a.address==='string'&&typeof a.id==='string');
    const out={};
