@@ -49,7 +49,8 @@ async function signIn(did){
  let r=await step(auth.href);let page=r.headers.get('location');let d=await (await step(page)).json();
  r=await step(page,form({csrf:d.csrf,identity_token:`DEV:${did}`}));r=await step(r.headers.get('location'));
  page=r.headers.get('location');d=await (await step(page)).json();assert.equal(d.prompt,'consent');
- r=await step(page,form({csrf:d.csrf,consent:'yes'}));r=await step(r.headers.get('location'));
+ r=await step(page,form({csrf:d.csrf,consent:'yes',agree_wallet:'yes',agree_chatgpt:'yes',agree_near:'yes',agree_terms:'yes',agree_privacy:'yes'}));d=await (await step(r.headers.get('location'))).json();assert.equal(d.prompt,'referral');
+ r=await step(page,form({csrf:d.csrf,step:'referral',referral_action:'win',referral_code:'WIN'}));r=await step(r.headers.get('location'));
  const code=new URL(r.headers.get('location')).searchParams.get('code');
  const token=await (await fetch(AS+'/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',code,code_verifier:verifier,redirect_uri:redirect,client_id:'local-chatgpt-fixture',resource:ORIGIN})})).json();
  assert.ok(token.access_token);

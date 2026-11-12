@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import {applyConsentScopes,consentSelection,consentForm,submittedScopes,ignoreRefreshScope} from './consent-selection.mjs';
+import {applyConsentScopes,consentSelection,consentForm,submittedScopes,ignoreRefreshScope,requireAgreements,referralForm,referralCode,REFERRAL_TITLE} from './consent-selection.mjs';
 import {
   observeAuthorization,
   observeAuthorizationRejected,
@@ -376,6 +376,23 @@ function interactionBinding(d, s) {
   write("interaction-bindings.json", db);
   return binding;
 }
+function saveBinding(uid, binding) {
+  const db = read("interaction-bindings.json");
+  db[uid] = binding;
+  write("interaction-bindings.json", db);
+}
+// Per-account consent extras, next to the grant id they came with: product-email choice, referral code, screen shown.
+function accountConsent(accountId, patch) {
+  const db = read("account-consents.json");
+  if (patch) {
+    db[accountId] = { ...db[accountId], ...patch, updated: Date.now() };
+    write("account-consents.json", db);
+  }
+  return db[accountId];
+}
+// The referral screen shows once: for an account that has not seen it and holds no grant for this client.
+const referralDue = (accountId, clientId) =>
+  !accountConsent(accountId)?.referral_shown && Adapter.grantsFor(accountId, clientId).length === 0;
 app.get("/demo/login", (q, r) => {
   const c = randomBytes(24).toString("hex");
   cookie(r, "yeet_login", c, 300);
@@ -466,9 +483,14 @@ app.get("/interaction/:uid", async (q, r, next) => {
     const s = await prepareInteractionSession(d,session(q),{
       eligible,retire: current=>retireDemoSession(current,r),
     });
-    interactionBinding(d, s);
+    const binding = interactionBinding(d, s);
     if (s && !(await eligible(s.id, d.params.client_id)))
       throw Error("Account unavailable");
+    // Consent was submitted for this interaction; the referral screen comes next (also on reload).
+    if (d.prompt.name === "consent" && binding.pendingConsent) {
+      if (TEST) return r.json({ uid: d.uid, prompt: "referral", csrf: csrf(d.uid), referral_code: "WIN" });
+      return r.type("html").send(authDocument(r, REFERRAL_TITLE, referralForm({ csrf: csrf(d.uid) })));
+    }
     if (process.env.REFRESH_DIAGNOSTICS === "1")
       observeAccepted(d, await provider.Client.find(d.params.client_id));
     const data = {
@@ -537,7 +559,7 @@ app.post("/interaction/:uid", async (q, r, next) => {
       );
       return;
     }
-    if (d.prompt.name === "consent" && q.body.consent === "yes") {
+    if (d.prompt.name === "consent" && (q.body.consent === "yes" || q.body.step === "referral")) {
       const s = session(q);
       const binding = requireFreshBinding(read("interaction-bindings.json")[d.uid]);
       if (
@@ -547,16 +569,31 @@ app.post("/interaction/:uid", async (q, r, next) => {
         !(await eligible(d.session.accountId, d.params.client_id))
       )
         throw Error("Browser identity or eligibility changed");
+      if ((d.params.resource || RESOURCE) !== RESOURCE) throw Error("Invalid resource");
       const requested = (d.params.scope || "").split(" ").filter(Boolean);
-      const granted = submittedScopes(requested, q.body);
+      let pending = binding.pendingConsent, referral = null;
+      if (q.body.step === "referral") {
+        if (!pending) return r.sendStatus(400);
+        referral = referralCode(q.body);
+      } else {
+        // A repeated consent submit while the referral screen is due goes back to that screen.
+        if (pending) return r.redirect(303, `/interaction/${d.uid}`);
+        const granted = submittedScopes(requested, q.body);
+        let agreed;
+        try { agreed = requireAgreements(q.body); } catch { return r.sendStatus(400); }
+        pending = { granted, renewable: q.body.renewable_consent === "yes", product_email: agreed.product_email };
+        if (referralDue(d.session.accountId, d.params.client_id)) {
+          saveBinding(d.uid, { ...binding, pendingConsent: pending });
+          return r.redirect(303, `/interaction/${d.uid}`);
+        }
+      }
       // Every authorization gets a new grant: a second ChatGPT login never inherits an older one.
       const grant = new provider.Grant({ accountId: d.session.accountId, clientId: d.params.client_id });
-      if ((d.params.resource || RESOURCE) !== RESOURCE) throw Error("Invalid resource");
-      applyConsentScopes(grant, { requested, granted, resource: RESOURCE, opScopes: ["openid", "offline_access", ...issuableScopes], resourceScopes: issuableScopes });
+      applyConsentScopes(grant, { requested, granted: pending.granted, resource: RESOURCE, opScopes: ["openid", "offline_access", ...issuableScopes], resourceScopes: issuableScopes });
       const grantId = await grant.save();
       if (
         compatibilityClient(d.params.client_id) &&
-        q.body.renewable_consent === "yes"
+        pending.renewable
       )
         recordConsent({
           grantId,
@@ -565,6 +602,16 @@ app.post("/interaction/:uid", async (q, r, next) => {
           resource: d.params.resource || RESOURCE,
           scopes: [...grant.getOIDCScope().split(" "), ...grant.getResourceScope(RESOURCE).split(" ")].filter(Boolean),
         });
+      accountConsent(d.session.accountId, {
+        grantId,
+        product_email: pending.product_email,
+        ...(q.body.step === "referral" ? { referral_shown: true } : {}),
+        ...(referral ? { referral } : {}),
+      });
+      if (binding.pendingConsent) {
+        const { pendingConsent: _done, ...rest } = binding;
+        saveBinding(d.uid, rest);
+      }
       await provider.interactionFinished(
         q,
         r,

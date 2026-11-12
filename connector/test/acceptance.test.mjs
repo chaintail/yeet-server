@@ -100,7 +100,10 @@ async function signIn(){
  r=await step(r.headers.get('location'));assert.equal(r.status,303);
  page=r.headers.get('location');d=await (await step(page)).json();assert.equal(d.prompt,'consent');
  assert.deepEqual(d.consent_selection,{trade_requested:true,requires_confirm:true});
- r=await step(page,form({csrf:d.csrf,consent:'yes'}));assert.equal(r.status,303);
+ r=await step(page,form({csrf:d.csrf,consent:'yes',agree_wallet:'yes',agree_chatgpt:'yes',agree_near:'yes',agree_terms:'yes',agree_privacy:'yes'}));assert.equal(r.status,303);
+ // A new account sees the referral screen once on the same interaction; Skip continues the flow.
+ d=await (await step(r.headers.get('location'))).json();assert.equal(d.prompt,'referral');
+ r=await step(page,form({csrf:d.csrf,step:'referral',referral_action:'skip',referral_code:'WIN'}));assert.equal(r.status,303);
  r=await step(r.headers.get('location'));assert.equal(r.status,303);
  const callback=new URL(r.headers.get('location'));assert.equal(callback.origin+callback.pathname,redirect);
  const code=callback.searchParams.get('code');assert.ok(code);
