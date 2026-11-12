@@ -269,3 +269,12 @@ test('fix 5: code minting is rate limited per account (YEET_CODE_MINT_LIMIT per 
  assert.ok((await engine.propose(alice,basket)).confirm,'the window moves on');
  await assert.rejects(fakeEngine({env:{YEET_CODE_MINT_LIMIT:'many'}}),/Invalid YEET_CODE_MINT_LIMIT/);
 });
+
+test('review M1: a code that expires between the check and the commit is refused at consume; nothing moves',async()=>{
+ const {engine,oneclick,now,signer,db}=await fakeEngine();
+ const p=await engine.propose(alice,basket);
+ now.advance(119_000);
+ oneclick.mutate=(res,req)=>{if(!req.dry)now.advance(2_000)};// live quotes take 6 s: the code is 125 s old at the commit
+ await assert.rejects(exec(engine,alice,p),e=>e.code==='CONFIRMATION_REQUIRED');
+ assert.equal(signer.sent.length,0);assert.equal(db.prepare('SELECT count(*) n FROM trades').get().n,0);
+});

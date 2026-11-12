@@ -56,9 +56,11 @@ export function createConfirmCodes({db,now=Date.now,ttlMs=CONFIRM_TTL_MS,random=
    if(row.expires_at<=now())refuse('CONFIRMATION_REQUIRED','code expired');
    return {...row,used:false};
   },
-  /** Marks an unused code used by `tradeId`. Must run inside the caller's transaction. False when another tap won. */
+  /** Marks an unused, unexpired code used by `tradeId`. Must run inside the caller's transaction. False when another
+   * tap won or the code expired meanwhile (the caller's re-check then refuses it). */
   consume({code,tradeId}){
-   return db.prepare('UPDATE confirm_codes SET used_at=?,trade_id=? WHERE code_sha256=? AND used_at IS NULL').run(now(),tradeId,hash(code)).changes===1;
+   const t=now();// expiry is enforced here too: execute awaits balances and live quotes between check and consume
+   return db.prepare('UPDATE confirm_codes SET used_at=?,trade_id=? WHERE code_sha256=? AND used_at IS NULL AND expires_at>?').run(t,tradeId,hash(code),t).changes===1;
   },
  };
 }
