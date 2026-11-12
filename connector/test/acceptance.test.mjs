@@ -175,3 +175,14 @@ test('B-1 end to end through the connector with a real token: propose, quote, ex
   const port=await call('yeet_portfolio',{});assert.equal(port.isError,undefined,JSON.stringify(port.content));
  }finally{configureTradeEngine({})}
 });
+
+test('add funds: sign-in carries only the fund return target; /fund is off without the Privy sign-in',async()=>{
+ assert.equal((await fetch(AS+'/fund',{redirect:'manual'})).status,404);
+ const cookies=jar();
+ const page=async(path)=>{const r=await fetch(AS+path,{headers:{cookie:cookies.header()}});cookies.add(r);return r.text()};
+ assert.match(await page('/demo/login?next=fund'),/<input type="hidden" name="next" value="fund">/);
+ assert.doesNotMatch(await page('/demo/login?next=https%3A%2F%2Fexample.com'),/name="next"/);
+ const csrf=(await page('/demo/login?next=fund')).match(/name="csrf" value="([0-9a-f]+)"/)[1];
+ const r=await fetch(AS+'/demo/login',{method:'POST',redirect:'manual',headers:{cookie:cookies.header(),origin:ORIGIN,'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf,next:'fund',identity_token:'DEV:did:privy:acceptance-fund'})});
+ assert.equal(r.status,302);assert.equal(r.headers.get('location'),'/fund');
+});

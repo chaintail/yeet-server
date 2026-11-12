@@ -6,12 +6,7 @@ import {
   useLoginWithOAuth,
   useSigners,
 } from "@privy-io/react-auth";
-const PROVIDERS = [
-  ["google", "Google"],
-  ["apple", "Apple"],
-  ["telegram", "Telegram"],
-  ["twitter", "X"],
-];
+import { PROVIDERS, embeddedWallets, privyConfig } from "./privy-app.jsx";
 function EndSession() {
   const { ready, logout } = usePrivy();
   const [busy, setBusy] = useState(false),
@@ -37,19 +32,6 @@ function EndSession() {
       <p role="status">{error}</p>
     </>
   );
-}
-/** The person's YEET embedded wallets (created on login), one per chain. */
-function embeddedWallets(user) {
-  const wallets = (user?.linkedAccounts || []).filter(
-    (a) =>
-      a.type === "wallet" &&
-      (a.walletClientType === "privy" || a.walletClientType === "privy-v2") &&
-      !a.imported,
-  );
-  return {
-    base: wallets.find((w) => w.chainType === "ethereum"),
-    solana: wallets.find((w) => w.chainType === "solana"),
-  };
 }
 /**
  * Lets the YEET server sign for both embedded wallets, within the YEET policies. Runs only when
@@ -162,23 +144,7 @@ try {
   createRoot(document.getElementById("privy-login")).render(
     <PrivyProvider
       appId={config.appId}
-      config={{
-        scriptNonce: document.querySelector('meta[property="csp-nonce"]')
-          ?.content,
-        appearance: {
-          logo: <strong>YEET</strong>,
-          theme: "dark",
-          accentColor: "#ffe14d",
-          walletList: [],
-        },
-        loginMethods: PROVIDERS.map(([provider]) => provider),
-        embeddedWallets: {
-          disableAutomaticMigration: true,
-          ethereum: { createOnLogin: "all-users" },
-          solana: { createOnLogin: "all-users" },
-        },
-        externalWallets: { walletConnect: { enabled: false } },
-      }}
+      config={privyConfig()}
     >
       {document.getElementById("privy-login").dataset.mode === "logout" ? (
         <EndSession />

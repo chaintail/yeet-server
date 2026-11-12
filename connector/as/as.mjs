@@ -12,6 +12,7 @@ import {
 import { document, credentials, html, renewableConsentCopy, expiredAuthorizationBody, promptTitle } from "./auth-pages.mjs";
 import express from "express";
 import { providerCsp } from "./provider-csp.mjs";
+import { fundRoutes, privyPageCsp, afterSignIn, nextField } from "./fund-page.mjs";
 import {
   compatibilityClient,
   recordConsent,
@@ -313,7 +314,7 @@ function authDocument(res, title, body) {
   res.set(
     "Content-Security-Policy",
     // Privy sign-in plus embedded wallets: auth API, wallet RPC hosts, the wallet iframe and the Turnstile challenge.
-    `default-src 'self'; script-src 'self' 'nonce-${nonce}' https://challenges.cloudflare.com; style-src 'self' 'nonce-${nonce}'; connect-src 'self' https://auth.privy.io https://*.rpc.privy.systems; frame-src https://auth.privy.io https://challenges.cloudflare.com; child-src https://auth.privy.io https://challenges.cloudflare.com; img-src 'self' data: blob:; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self' https://chatgpt.com; frame-ancestors 'none'`,
+    privyPageCsp(nonce, { formAction: "'self' https://chatgpt.com" }),
   );
   return document(title, body, nonce);
 }
@@ -394,13 +395,14 @@ function accountConsent(accountId, patch) {
 const referralDue = (accountId, clientId) =>
   !accountConsent(accountId)?.referral_shown && Adapter.grantsFor(accountId, clientId).length === 0;
 app.get("/demo/login", (q, r) => {
+  const next = nextField(q.query.next);
   const c = randomBytes(24).toString("hex");
   cookie(r, "yeet_login", c, 300);
   r.type("html").send(
     authDocument(
       r,
       promptTitle("login"),
-      `<form method="POST" data-yeet-prompt="login"><input type="hidden" name="csrf" value="${c}">${loginFields()}${process.env.PRIVY_LOGIN === "1" ? "" : '<button type="submit">Sign in</button>'}</form>`,
+      `<form method="POST" data-yeet-prompt="login"><input type="hidden" name="csrf" value="${c}">${next}${loginFields()}${process.env.PRIVY_LOGIN === "1" ? "" : '<button type="submit">Sign in</button>'}</form>`,
     ),
   );
 });
@@ -425,7 +427,7 @@ app.post("/demo/login", async (q, r) => {
     write("sessions.json", db);
     cookie(r, "yeet_session", token);
     cookie(r, "yeet_login", "", 0);
-    r.redirect("/demo/");
+    r.redirect(afterSignIn(q.body.next));
   } catch {
     r.status(401).json({ error: "sign in failed" });
   }
@@ -468,6 +470,8 @@ app.get("/demo/", (_q, r) =>
       ),
     ),
 );
+// Add funds: USDC on Base through Privy funding (Coinbase Onramp). Needs a YEET sign-in session and the Privy sign-in.
+fundRoutes(app, { enabled: () => process.env.PRIVY_LOGIN === "1", session });
 app.get("/", (_q, r) => r.redirect("https://yeet.win"));
 function interactionError(e, r, next) {
   if (e instanceof AuthorizationExpired || e instanceof errors.SessionNotFound)
