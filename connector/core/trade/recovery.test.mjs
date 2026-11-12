@@ -240,3 +240,32 @@ test('fix 4: assertLivePlan checks origin asset, exact amountIn, destination coi
  for(const v of [{legs:[{...skeetLeg,depositAddress:wif.address}]},{legs:[{...skeetLeg,depositAddress:'11111111111111111111111111111111'}]},{legs:[{...skeetLeg,origin:{...skeetLeg.origin,assetId:FUNDING.assetId}}]},{recipient:'0x'+'55'.repeat(20)}])
   assert.throws(()=>assertLivePlan({direction:'skeet',live:{...skeet,...v},legs,w}),e=>e.code==='TEMPORARILY_UNAVAILABLE',JSON.stringify(v));
 });
+
+const liveCodes=(db,proposalId,at)=>db.prepare('SELECT count(*) n FROM confirm_codes WHERE proposal_id=? AND used_at IS NULL AND expires_at>?').get(proposalId,at).n;
+
+test('fix 5: re-calling propose (same request_id) or quote invalidates the earlier unused code: one live code per proposal',async()=>{
+ const {engine,db,now,signer}=await fakeEngine();
+ const first=await engine.propose(alice,basket);
+ const second=await engine.propose(alice,basket);
+ assert.equal(second.proposal_id,first.proposal_id);
+ assert.equal(liveCodes(db,first.proposal_id,now()),1);
+ await assert.rejects(exec(engine,alice,first),e=>e.code==='CONFIRMATION_REQUIRED','the earlier code no longer works');
+ const q=await engine.quote(alice,{proposal_id:first.proposal_id});
+ assert.equal(liveCodes(db,first.proposal_id,now()),1);
+ await assert.rejects(exec(engine,alice,second),e=>e.code==='CONFIRMATION_REQUIRED');
+ assert.equal(signer.sent.length,0);
+ assert.equal((await exec(engine,alice,q)).status,'submitted');
+});
+
+test('fix 5: code minting is rate limited per account (YEET_CODE_MINT_LIMIT per 10 minutes)',async()=>{
+ const {engine,now,oneclick}=await fakeEngine({env:{YEET_LIVE:'1',YEET_CODE_MINT_LIMIT:'3'}});
+ for(let i=0;i<3;i++)await engine.propose(alice,basket);
+ await assert.rejects(engine.propose(alice,basket),e=>e.code==='TEMPORARILY_UNAVAILABLE');
+ const quotes=oneclick.calls.quote.length;
+ await assert.rejects(engine.propose(alice,{...basket,request_id:'other'}),e=>e.code==='TEMPORARILY_UNAVAILABLE');
+ assert.equal(oneclick.calls.quote.length,quotes,'refused before asking 1Click');
+ assert.ok((await engine.propose({...alice,accountId:'yeet-privy-bob'},basket)).confirm,'per account');
+ now.advance(10*60_000+1);
+ assert.ok((await engine.propose(alice,basket)).confirm,'the window moves on');
+ await assert.rejects(fakeEngine({env:{YEET_CODE_MINT_LIMIT:'many'}}),/Invalid YEET_CODE_MINT_LIMIT/);
+});

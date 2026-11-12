@@ -5,6 +5,7 @@
 //   YEET_MAX_COST_BPS    swap cost ceiling in bps (default 800)    -> COST_TOO_HIGH
 //   YEET_KILL_SWITCH     1/true: no new proposals or trades        -> TRADING_PAUSED
 //   YEET_REQUOTE_TOLERANCE_BPS  live output may be this far under the previewed estimate at the tap (default 50)
+//   YEET_CODE_MINT_LIMIT confirm codes per account per 10 minutes (default 20) -> TEMPORARILY_UNAVAILABLE
 //   YEET_TRACK_MAX_HOURS hours a trade is tracked past its 1Click deposit deadline before it is stale (default 24)
 //   at most 5 legs                                                 -> INVALID_ARGUMENT
 import {parseUnits} from './router.mjs';
@@ -32,6 +33,7 @@ export function limitsFromEnv(env=process.env){
   dailyCapRaw:usdcEnv(env,'YEET_DAILY_CAP_USDC','50'),
   maxCostBps:intEnv(env,'YEET_MAX_COST_BPS',800,10_000),
   requoteToleranceBps:intEnv(env,'YEET_REQUOTE_TOLERANCE_BPS',50,1000),
+  codeMintLimit:intEnv(env,'YEET_CODE_MINT_LIMIT',20,10_000),
   trackMaxHours:intEnv(env,'YEET_TRACK_MAX_HOURS',24,24*30),
   killSwitch:['1','true','on','yes'].includes(String(env.YEET_KILL_SWITCH??'').toLowerCase()),
   live:env.YEET_LIVE==='1',

@@ -90,8 +90,8 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
    next:NEXT[p.direction],
   };
  }
- function mint(p,revision,accountId,clientId){
-  return codes.mint({accountId,clientId,proposalId:p.id,revision,quoteSha:quoteHash(p.id,revision,legsOf(p.id,revision))});
+ function mint(p,revision,accountId,clientId,opts){
+  return codes.mint({accountId,clientId,proposalId:p.id,revision,quoteSha:quoteHash(p.id,revision,legsOf(p.id,revision))},opts);
  }
  async function present(p,revision,ctx,w){
   const out=view(p,revision,await walletWarnings(w,p.direction,BigInt(p.amount_in_raw)));
@@ -150,6 +150,7 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
   /** yeet_propose */
   async propose(ctx,{request_id,amount_usdc,legs,slippage_bps}){
    checkKillSwitch(limits);
+   codes.checkRate(ctx.accountId);
    const slippage=slippageOf(slippage_bps);
    const hash=sha256({direction:'yeet',amount_usdc,legs,slippage});
    const existing=prior(ctx,request_id,hash);
@@ -168,6 +169,7 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
   /** skeet_propose: sell a percent of 1-5 held coins back to USDC on Base. */
   async skeet(ctx,{request_id,legs}){
    checkKillSwitch(limits);
+   codes.checkRate(ctx.accountId);
    const hash=sha256({direction:'skeet',legs});
    const existing=prior(ctx,request_id,hash);
    if(existing)return present(existing,existing.revision,ctx,await wallets.resolve(ctx.accountId));
@@ -183,6 +185,7 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
   async quote(ctx,{proposal_id,legs,amount_usdc}){
    checkKillSwitch(limits);
    const p=owned(ctx,proposal_id);
+   codes.checkRate(ctx.accountId);
    if(p.status!=='proposed')refuse('INVALID_ARGUMENT','proposal already used');
    const w=await wallets.require(ctx.accountId);
    const prev=legsOf(p.id,p.revision);

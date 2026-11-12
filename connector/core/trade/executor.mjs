@@ -249,7 +249,7 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
   const fresh=proposals.row(p.id);
   const result={trade_id:tradeId,proposal_id:p.id,direction:p.direction,status:'requote_required',legs:[],requote:proposals.view(fresh,revision)};
   db.prepare('UPDATE trades SET result_json=? WHERE id=?').run(JSON.stringify(result),tradeId);
-  return {...result,confirm:proposals.mint(fresh,revision,ctx.accountId,ctx.clientId)};
+  return {...result,confirm:proposals.mint(fresh,revision,ctx.accountId,ctx.clientId,{rateLimited:false})};// follows a used code: no amplification
  }
 
  return {
