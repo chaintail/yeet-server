@@ -23,3 +23,8 @@ secrets/
 # editor / OS
 .DS_Store
 *.swp
+
+# local build area (vendoring yeet-win)
+.build/
+# vendored @yeet/router build output is committed
+!connector/vendor/yeet-win/router/dist/

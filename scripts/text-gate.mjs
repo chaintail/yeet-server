@@ -28,7 +28,7 @@ hits.length=0;
 // 1. Whole files whose text is shown to people (pages, consent copy, card and tool text, error catalogue, login bundle).
 const files=['as/as.mjs','as/auth-pages.mjs','as/consent-selection.mjs','as/account-recovery.mjs','as/viewer/auth-pages.css',
  'mcp/instructions.mjs','mcp/widgets.mjs','mcp/errors.mjs','mcp/tool-registration.mjs',
- 'contracts/yeet-tools.json','contracts/errors.mjs','core/failure.mjs','core/coins.mjs','login/src.jsx','login/build.mjs'];
+ 'vendor/yeet-win/contracts/yeet-tools.json','contracts/errors.mjs','core/failure.mjs','core/coins.mjs','login/src.jsx','login/build.mjs'];
 const widgetDir=new URL('vendor/yeet-win/widget/',C);
 if(existsSync(widgetDir))for(const f of readdirSync(widgetDir))files.push(`vendor/yeet-win/widget/${f}`);
 for(const f of files)check(`connector/${f}`,readFileSync(new URL(f,C),'utf8'));
@@ -43,7 +43,7 @@ const {consentForm}=await import(new URL('as/consent-selection.mjs',C));
 check('rendered:instructions',instructions);
 for(const [k,v] of Object.entries(titles))check(`rendered:title:${k}`,v);
 for(const [k,v] of Object.entries(descriptions))check(`rendered:description:${k}`,v);
-for(const [code,e] of Object.entries(TOOL_ERRORS)){check(`rendered:error:${code}`,e.message);check(`rendered:card:${code}`,(e.card||[]).join('\n'));check(`rendered:tool-error:${code}`,toolError({error:code}).content[0].text)}
+for(const [code,e] of Object.entries(TOOL_ERRORS)){check(`rendered:error:${code}`,e.message);check(`rendered:card:${code}`,e.title);check(`rendered:tool-error:${code}`,toolError({error:code}).content[0].text)}
 for(const view of WIDGET_VIEWS){check(`rendered:card-html:${view}`,widgetHtml(view));check(`rendered:card-meta:${view}`,JSON.stringify(resourceMeta(view)))}
 const prior=process.env.PRIVY_LOGIN;
 for(const mode of ['1','0']){process.env.PRIVY_LOGIN=mode;for(const p of ['login','consent'])check(`rendered:page-title:${p}:${mode}`,pages.promptTitle(p))}
@@ -52,8 +52,10 @@ check('rendered:expired-page',pages.expiredAuthorizationBody);
 check('rendered:renewal',pages.renewableConsentCopy(3600));
 check('rendered:credentials',pages.credentials());
 check('rendered:consent',consentForm({csrf:'x',accountId:'yeet-privy-a',clientId:'https://chatgpt.com/oauth/client.json',resource:'https://chatgpt.yeet.win',requested:['openid','offline_access','yeet:read','yeet:write','yeet:trade']}));
-const contract=JSON.parse(readFileSync(new URL('contracts/yeet-tools.json',C),'utf8'));
-check('rendered:contract-description',contract.description+'\n'+contract['x-yeet-errors'].description);
+const contract=JSON.parse(readFileSync(new URL('vendor/yeet-win/contracts/yeet-tools.json',C),'utf8'));
+check('rendered:contract-title',contract.title);
+for(const [card,c] of Object.entries(contract['x-yeet-cards']))check(`rendered:card-spec:${card}`,c.title+'\n'+c.description);
+for(const [scope,text] of Object.entries(contract['x-yeet-scopes']))check(`rendered:scope:${scope}`,text);
 
 if(hits.length){console.error(`TEXT GATE FAIL (${hits.length})`);for(const h of hits)console.error('  '+h);process.exit(1)}
 console.log(`TEXT GATE PASS: ${files.length} files and ${WIDGET_VIEWS.length} cards, ${Object.keys(TOOL_ERRORS).length} error codes, ${Object.keys(titles).length} tools checked; allow-list: ${ALLOW.map(a=>JSON.stringify(a)).join(', ')}`);

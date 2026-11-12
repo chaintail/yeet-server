@@ -29,7 +29,7 @@ after(async()=>{
  rmSync(root,{recursive:true,force:true});
 });
 
-const P0=['execute_trade','trade_status','yeet_coins','yeet_home','yeet_propose','yeet_quote'];
+const LISTED=['execute_trade','skeet_propose','trade_status','yeet_coins','yeet_home','yeet_portfolio','yeet_propose','yeet_quote'];
 const SCOPES=['openid','offline_access','yeet:read','yeet:write','yeet:trade'];
 const local=url=>{const u=new URL(url,ORIGIN);return u.origin===ORIGIN?`${AS}${u.pathname}${u.search}`:u.href};
 function jar(){const c=new Map();return {header:()=>[...c].map(([k,v])=>`${k}=${v}`).join('; '),add(r){for(const s of r.headers.getSetCookie()){const p=s.split(';')[0],i=p.indexOf('=');c.set(p.slice(0,i),p.slice(i+1))}}}}
@@ -83,7 +83,7 @@ test('sign-in pages use yeet cookies and YEET titles; identity config is off wit
  }
 });
 
-test('A-4: a signed-in, consented token lists the P0 tools over HTTP, execute_trade hidden, yeet_coins live',async()=>{
+test('A-4: a signed-in, consented token lists the P0 and P1 tools over HTTP, execute_trade hidden, yeet_coins live',async()=>{
  const cookies=jar(),verifier=randomBytes(32).toString('base64url');
  const challenge=createHash('sha256').update(verifier).digest('base64url');
  const redirect='http://127.0.0.1:38314/callback';
@@ -111,7 +111,7 @@ test('A-4: a signed-in, consented token lists the P0 tools over HTTP, execute_tr
  const list=await rpc({jsonrpc:'2.0',id:2,method:'tools/list'},token.access_token);
  assert.equal(list.status,200);
  const {result:{tools}}=await list.json();
- assert.deepEqual(tools.map(t=>t.name).sort(),P0);
+ assert.deepEqual(tools.map(t=>t.name).sort(),LISTED);
  const exec=tools.find(t=>t.name==='execute_trade');
  assert.equal(exec._meta['openai/visibility'],'private');assert.deepEqual(exec._meta.ui.visibility,['app']);assert.equal(exec._meta['openai/widgetAccessible'],true);
  const call=async(name,args)=>(await (await rpc({jsonrpc:'2.0',id:3,method:'tools/call',params:{name,arguments:args}},token.access_token)).json()).result;
@@ -122,5 +122,5 @@ test('A-4: a signed-in, consented token lists the P0 tools over HTTP, execute_tr
  const trade=await call('execute_trade',{proposal_id:'p_abcdefghij0123456789',revision:1,confirm:'a'.repeat(43)});
  assert.equal(JSON.parse(trade.content[0].text).error,'TEMPORARILY_UNAVAILABLE');
  const templates=await (await rpc({jsonrpc:'2.0',id:4,method:'resources/list'},token.access_token)).json();
- assert.deepEqual(templates.result.resources.map(x=>x.uri).sort(),['ui://yeet/basket-v1.html','ui://yeet/home-v1.html','ui://yeet/receipt-v1.html']);
+ assert.deepEqual(templates.result.resources.map(x=>x.uri).sort(),['ui://yeet/basket-v1.html','ui://yeet/home-v1.html','ui://yeet/leaderboard-v1.html','ui://yeet/portfolio-v1.html','ui://yeet/receipt-v1.html']);
 });

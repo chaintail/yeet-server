@@ -1,39 +1,31 @@
-// Connector error catalog: reads x-yeet-errors from yeet-tools.json and refuses to load a catalog that
-// disagrees with the failure enum. node:fs only.
+// Connector error catalogue: reads `x-yeet-errors` from the vendored yeet-win contract
+// (vendor/yeet-win/contracts/yeet-tools.json, commit in vendor/yeet-win/PINNED) and refuses to load a catalogue
+// that disagrees with the failure enum. node:fs only.
 import {readFileSync} from 'node:fs';
 
-const contract=JSON.parse(readFileSync(new URL('./yeet-tools.json',import.meta.url),'utf8'));
+export const CONTRACT_URL=new URL('../vendor/yeet-win/contracts/yeet-tools.json',import.meta.url);
+const contract=JSON.parse(readFileSync(CONTRACT_URL,'utf8'));
 const catalog=contract['x-yeet-errors'];
 const enumCodes=contract.$defs?.failure?.properties?.error?.enum;
 const invalid=reason=>{throw new Error(`yeet-tools.json x-yeet-errors: ${reason}`)};
 if(!catalog||typeof catalog!=='object')invalid('missing');
 if(!Array.isArray(enumCodes))invalid('$defs.failure error enum missing');
-const toolCodes=Object.keys(catalog.tool??{});
-if(toolCodes.length!==enumCodes.length||enumCodes.some(code=>!toolCodes.includes(code)))invalid('tool keys must equal the failure enum');
-for(const [code,entry] of Object.entries(catalog.tool)){
- if(typeof entry.retryable!=='boolean'||typeof entry.message!=='string'||!entry.message)invalid(`${code}: retryable and message required`);
- if(entry.card!==null&&!(Array.isArray(entry.card)&&entry.card.length===2&&entry.card.every(s=>typeof s==='string'&&s)))invalid(`${code}: card must be null or [title, body]`);
+const codes=Object.keys(catalog);
+if(codes.length!==enumCodes.length||enumCodes.some(code=>!codes.includes(code)))invalid('keys must equal the failure enum');
+for(const [code,entry] of Object.entries(catalog)){
+ if(typeof entry.retryable!=='boolean')invalid(`${code}: retryable required`);
+ for(const k of ['title','message'])if(typeof entry[k]!=='string'||!entry[k])invalid(`${code}: ${k} required`);
 }
-if(!toolCodes.includes(catalog.unknown))invalid('unknown must be a tool code');
-for(const [code,{cases}={}] of Object.entries(catalog.wire??{})){
- if(!Array.isArray(cases)||!cases.length)invalid(`wire ${code}: cases required`);
- for(const c of cases){
-  if(!Number.isInteger(c.status))invalid(`wire ${code}: status required`);
-  if(c.outcome?.tool===undefined||!toolCodes.includes(c.outcome.tool))invalid(`wire ${code}: outcome must be a tool code`);
- }
-}
-if(!Array.isArray(catalog.passThrough)||catalog.passThrough.some(code=>!toolCodes.includes(code)))invalid('passThrough must be tool codes');
+/** Anything that is not a catalogue code becomes this one (an outage: nothing was traded). */
+export const UNKNOWN='TEMPORARILY_UNAVAILABLE';
+if(!codes.includes(UNKNOWN))invalid(`${UNKNOWN} missing`);
 
 const deepFreeze=value=>{if(value&&typeof value==='object'){Object.values(value).forEach(deepFreeze);Object.freeze(value)}return value};
-export const TOOL_ERRORS=deepFreeze(structuredClone(catalog.tool));
-export const WIRE=deepFreeze(structuredClone(catalog.wire));
-export const PASS_THROUGH=deepFreeze([...catalog.passThrough]);
-export const ADMISSION=deepFreeze(structuredClone(catalog.admission??{}));
-export const UNKNOWN=catalog.unknown;
-export const SOURCE=deepFreeze({errors:structuredClone(catalog),failureEnum:[...enumCodes]});
-/** A catalog code is returned unchanged; anything else is the catalog's unknown code. */
+export const TOOL_ERRORS=deepFreeze(structuredClone(catalog));
+export const FAILURE_CODES=Object.freeze([...enumCodes]);
+/** A catalogue code is returned unchanged; anything else is the catalogue's unknown code. */
 export const normalize=code=>typeof code==='string'&&Object.hasOwn(TOOL_ERRORS,code)?code:UNKNOWN;
 export const isRetryable=code=>TOOL_ERRORS[normalize(code)].retryable;
 export const toolMessage=code=>TOOL_ERRORS[normalize(code)].message;
-/** Widget card copy, only for codes that have a card; others use the widget's generic card. */
-export const cards=()=>Object.fromEntries(Object.entries(TOOL_ERRORS).filter(([,e])=>e.card).map(([code,e])=>[code,[...e.card]]));
+/** Card copy per code: [title, message]. */
+export const cards=()=>Object.fromEntries(Object.entries(TOOL_ERRORS).map(([code,e])=>[code,[e.title,e.message]]));

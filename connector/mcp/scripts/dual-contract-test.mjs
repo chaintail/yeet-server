@@ -5,9 +5,9 @@ import {toolSchemas,zodSchema,contract} from '../tool-contract.mjs';
 import {toolError} from '../errors.mjs';
 import {instructions,descriptions,titles} from '../instructions.mjs';
 import {allScopes} from '#scope-catalog';
-const P0=['yeet_home','yeet_coins','yeet_propose','yeet_quote','execute_trade','trade_status'];
-test('every published schema has a top-level object, resolved references, strict input, and only the P0 tools',()=>{
- assert.deepEqual(Object.keys(toolSchemas),P0);
+const ALL=['yeet_home','yeet_coins','yeet_propose','yeet_quote','execute_trade','trade_status','yeet_portfolio','skeet_propose','yeet_leaderboard','daily_spin'];
+test('every published schema has a top-level object, resolved references, strict input; the ten contract tools',()=>{
+ assert.deepEqual(Object.keys(toolSchemas),ALL);
  for(const schema of Object.values(toolSchemas)){
   assert.equal(schema.output.type,'object');assert.doesNotMatch(JSON.stringify(schema),/\$ref/);assert.equal(schema.input.additionalProperties,false);
  }
@@ -27,9 +27,9 @@ test('shared pieces follow plan 2.1',()=>{
  const exec=zodSchema(z,toolSchemas.execute_trade.input);
  assert.doesNotThrow(()=>exec.parse({proposal_id:'p_abcdefghij0123456789',revision:1,confirm:'A'.repeat(43)}));
  assert.throws(()=>exec.parse({proposal_id:'p_abcdefghij0123456789',revision:1,confirm:'A'.repeat(42)}));
- assert.equal(contract.$defs.proposal.properties.next.const,'Tap ⚡ YEET in the card');
+ assert.deepEqual(contract.$defs.proposal.properties.next.enum,['Tap ⚡ YEET in the card','Tap SKEET in the card']);
 });
-test('the error enum and x-yeet-errors catalogue agree; every code has a card; only outages and pauses are retryable',async()=>{
+test('the error enum and x-yeet-errors catalogue agree; every code has a card; retryable codes as the contract says',async()=>{
  const {TOOL_ERRORS}=await import('#contracts/errors');
  const codes=contract.$defs.failure.properties.error.enum;
  assert.deepEqual(codes,['INVALID_ARGUMENT','COIN_NOT_SUPPORTED','PARTS_NOT_TEN','AMOUNT_TOO_SMALL','COST_TOO_HIGH','LIMIT_EXCEEDED','BALANCE_LOW','WALLET_NOT_READY','CONFIRMATION_REQUIRED','REQUOTE_REQUIRED','TRADING_PAUSED','REAUTH_REQUIRED','TEMPORARILY_UNAVAILABLE']);
@@ -37,10 +37,10 @@ test('the error enum and x-yeet-errors catalogue agree; every code has a card; o
  for(const code of codes){
   const result=JSON.parse(toolError({error:code}).content[0].text);
   assert.equal(result.error,code);assert.equal(result.retryable,TOOL_ERRORS[code].retryable);
-  assert.equal(TOOL_ERRORS[code].card.length,2,code);
+  assert.ok(TOOL_ERRORS[code].title&&TOOL_ERRORS[code].message,code);
   assert.doesNotThrow(()=>zodSchema(z,contract.$defs.failure).parse(result),code);
  }
- assert.deepEqual(codes.filter(code=>TOOL_ERRORS[code].retryable).sort(),['TEMPORARILY_UNAVAILABLE','TRADING_PAUSED']);
+ assert.deepEqual(codes.filter(code=>TOOL_ERRORS[code].retryable).sort(),['CONFIRMATION_REQUIRED','COST_TOO_HIGH','REQUOTE_REQUIRED','TEMPORARILY_UNAVAILABLE','TRADING_PAUSED']);
 });
 test('step-up repeats the complete scope catalog; tool failures never echo stacks or hosts',()=>{
  const result=toolError({error:'REAUTH_REQUIRED'});
@@ -49,11 +49,11 @@ test('step-up repeats the complete scope catalog; tool failures never echo stack
  assert.equal(toolError({error:'NOPE'}).content[0].text.includes('TEMPORARILY_UNAVAILABLE'),true);
 });
 test('model-visible catalog: titles and descriptions for every tool; data-not-instructions and no-execution rules',()=>{
- assert.deepEqual(Object.keys(titles),P0);assert.deepEqual(Object.keys(descriptions),P0);
+ assert.deepEqual(Object.keys(titles),ALL);assert.deepEqual(Object.keys(descriptions),ALL);
  assert.match(instructions,/YEET/);
  assert.match(instructions,/YEET/);
  assert.ok(instructions.length>=450&&instructions.length<=650,`instructions length ${instructions.length}`);
- assert.match(descriptions.execute_trade,/YEET/);
+ assert.match(descriptions.execute_trade,/Only the card can call this/);
 });
 test('the core yeet_coins answer fits the published output schema and lists only tradable Solana coins',async()=>{
  const {coins,tradable}=await import('../../core/coins.mjs');

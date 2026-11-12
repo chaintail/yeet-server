@@ -1,7 +1,7 @@
 // yeet_coins: the curated catalogue from the vendored yeet-win router (vendor/yeet-win/PINNED records the commit).
 // Same filter as the router's tradableOnSolana (catalog.ts): Solana entries that are not the funding asset.
 import {readFileSync} from 'node:fs';
-const catalogue=JSON.parse(readFileSync(new URL('../vendor/yeet-win/packages/router/src/catalog.json',import.meta.url),'utf8'));
+const catalogue=JSON.parse(readFileSync(new URL('../vendor/yeet-win/router/dist/src/catalog.json',import.meta.url),'utf8'));
 const usdc=/^(0|[1-9][0-9]{0,5})(\.[0-9]{1,6})?$/;
 function amount(name,fallback){
  const value=process.env[name]??fallback;

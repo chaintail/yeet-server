@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>YEET basket</title>
+<style>/* YEET cards. Colours follow the yeet.win landing page; system fonts only, nothing loaded from the network.
+   Sizes are rem so a larger text size scales the card. Built for 320-480 px wide frames. */
+:root{color-scheme:dark;
+ --bg:#0b0814;--panel:#171127;--panel2:#211838;--line:#2e2450;--text:#f6f3ff;--muted:#bdb5d9;--dim:#8f86b3;
+ --yellow:#ffe14d;--pink:#ff3d8b;--cyan:#3ee8ff;--lime:#9dff4f;--red:#ff6b6b;--ring:#3ee8ff}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%;background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:.9375rem;line-height:1.4;font-variant-numeric:tabular-nums}
+main{padding:calc(.75rem + var(--host-top,0px)) calc(.75rem + var(--host-right,0px)) calc(.75rem + var(--host-bottom,0px)) calc(.75rem + var(--host-left,0px))}
+p{margin:0}
+h1{margin:0;font-size:1.125rem;font-weight:850;letter-spacing:-.01em}
+ul,ol{list-style:none;margin:0;padding:0}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:1.125rem;padding:.875rem;display:flex;flex-direction:column;gap:.75rem;min-width:0}
+.head{display:flex;align-items:baseline;justify-content:space-between;gap:.5rem;flex-wrap:wrap}
+.head .sub{color:var(--muted);font-size:.8125rem;font-weight:600}
+.waiting{color:var(--muted);padding:.5rem 0}
+.note{color:var(--muted);font-size:.8125rem}
+.fine{color:var(--dim);font-size:.75rem}
+.big{font-size:2rem;font-weight:900;color:var(--yellow)}
+
+/* Rows: letter avatar, symbol over name, estimate, then the control on the right. */
+.rows{display:flex;flex-direction:column;gap:.375rem}
+.row{display:grid;grid-template-columns:2.25rem minmax(0,1fr) auto auto;align-items:center;gap:.5rem;background:var(--panel2);border-radius:.875rem;padding:.5rem .5rem .5rem .5rem;min-height:3.25rem}
+.row .reason{grid-column:2/-1;color:var(--muted);font-size:.75rem}
+.avatar{width:2.25rem;height:2.25rem;border-radius:50%;display:grid;place-items:center;font-weight:900;font-size:1rem;color:#0b0814;background:var(--yellow)}
+.avatar[data-tone="1"]{background:var(--pink)}.avatar[data-tone="2"]{background:var(--cyan)}.avatar[data-tone="3"]{background:var(--lime)}
+.avatar[data-tone="4"]{background:#b18cff}.avatar[data-tone="5"]{background:#ffb02e}
+.who{display:flex;flex-direction:column;min-width:0}
+.sym{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.name{color:var(--muted);font-size:.75rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.est{display:flex;flex-direction:column;align-items:flex-end;text-align:right;white-space:nowrap;font-size:.8125rem}
+.est .amt{font-weight:700}
+.est .usd,.est.muted{color:var(--muted);font-size:.75rem}
+.row>.est:last-child{grid-column:3/-1}
+
+.stepper{display:flex;align-items:center;gap:.125rem;background:#0f0a1c;border-radius:999px;padding:.125rem}
+.btn.step{width:2rem;height:2rem;border-radius:50%;border:0;background:var(--panel2);font-size:1.125rem;font-weight:800;line-height:1;cursor:pointer;padding:0}
+.btn.step:not(:disabled):active{background:var(--line)}
+.btn.step:disabled{opacity:.35;cursor:default}
+.parts{min-width:1.375rem;text-align:center;font-weight:900;color:var(--yellow)}
+
+.totals{display:flex;flex-wrap:wrap;gap:.25rem .875rem;font-size:.8125rem;color:var(--muted)}
+.totals span:first-child{color:var(--text);font-weight:700}
+.cost.high{color:var(--yellow);font-weight:700}
+.chips{display:flex;flex-wrap:wrap;gap:.375rem}
+.chip{font-size:.75rem;padding:.125rem .5rem;border-radius:999px;background:var(--panel2);color:var(--muted)}
+.chip.up{color:var(--lime)}.chip.down{color:var(--red)}
+.inline-error{display:flex;flex-direction:column;gap:.125rem;font-size:.8125rem;padding:.5rem .625rem;border-radius:.75rem;background:#2a1030;border:1px solid #5a1d4a}
+.inline-error span{color:var(--muted)}
+
+.actions{display:flex;gap:.5rem;align-items:stretch;flex-wrap:wrap}
+.btn{border:0;cursor:pointer}
+.btn.primary{flex:1 1 10rem;min-height:3rem;border-radius:999px;font-size:1.25rem;font-weight:900;letter-spacing:.02em;color:#0b0814;
+ background:linear-gradient(90deg,var(--yellow),#ffb02e 50%,var(--pink));box-shadow:0 6px 22px rgba(255,61,139,.3);transition:transform .12s ease,box-shadow .2s,opacity .2s}
+.btn.primary.skeet{background:linear-gradient(90deg,var(--cyan),#b18cff);box-shadow:0 6px 22px rgba(62,232,255,.25)}
+.btn.primary:not(:disabled):active{transform:scale(.98)}
+.btn.primary:disabled{opacity:.4;box-shadow:none;cursor:default;filter:grayscale(.5)}
+.btn.quiet{flex:0 1 auto;min-height:3rem;padding:0 1rem;border-radius:999px;background:transparent;border:1.5px solid var(--line);color:var(--text);font-weight:700}
+.btn.skeet.small{min-height:2rem;padding:0 .75rem;border-radius:999px;font-size:.75rem;font-weight:900;color:#0b0814;background:var(--cyan)}
+.btn.skeet.small:disabled{opacity:.4}
+
+.status{font-size:.75rem;font-weight:700}
+.status.ok{color:var(--lime)}.status.wait{color:var(--yellow)}.status.bad{color:var(--red)}
+.links{display:flex;gap:.5rem;justify-content:flex-end}
+.tx{color:var(--cyan);font-size:.75rem;font-weight:700;text-decoration:none}
+.tx:hover{text-decoration:underline}
+.got{display:flex;flex-wrap:wrap;gap:.25rem .75rem;align-items:baseline}
+.got .label{color:var(--muted);font-size:.8125rem;flex-basis:100%}
+.got strong{color:var(--lime)}
+.xp{color:var(--yellow);font-weight:800;font-size:.875rem}
+.receipt[data-status=success] h1{color:var(--lime)}
+.receipt[data-status=failed] h1,.receipt[data-status=refunded] h1{color:var(--red)}
+
+.xpbox{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:.625rem;background:var(--panel2);border-radius:.875rem;padding:.5rem .625rem}
+.xpnum{font-weight:900;color:var(--yellow)}
+.streak{color:var(--muted);font-size:.8125rem}
+.xpbox .btn.quiet{min-height:2.25rem}
+.wheel{width:1.75rem;height:1.75rem;border-radius:50%;flex:none;background:conic-gradient(var(--yellow) 0 60deg,var(--pink) 0 120deg,var(--cyan) 0 180deg,var(--lime) 0 240deg,#b18cff 0 300deg,#ffb02e 0)}
+.spinning .wheel{animation:turn .6s linear infinite}
+@keyframes turn{to{transform:rotate(360deg)}}
+
+.board{display:flex;flex-direction:column}
+.line{display:grid;grid-template-columns:2.75rem minmax(0,1fr) auto;gap:.5rem;padding:.375rem .25rem;border-bottom:1px solid var(--line)}
+.line:nth-child(-n+3) .rank{color:var(--yellow)}
+.rank{font-weight:800;color:var(--muted)}
+.who-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pts{font-weight:700}
+.me{font-weight:800;color:var(--cyan)}
+
+.problem{border-color:#5a1d4a}
+.problem h1{color:var(--pink)}
+.problem p{color:var(--muted)}
+.problem .btn.quiet{align-self:flex-start}
+
+@media (max-width:360px){
+ .card{padding:.625rem}
+ .row{grid-template-columns:2rem minmax(0,1fr) auto auto;gap:.375rem;padding:.375rem}
+ .avatar{width:2rem;height:2rem;font-size:.875rem}
+ .btn.step{width:1.75rem;height:1.75rem}
+ .name{display:none}
+ /* Rows with a control on the right: the estimate moves under the symbol so the symbol keeps its width. */
+ .row:has(>.stepper),.row:has(>.btn){grid-template-columns:2rem minmax(0,1fr) auto;row-gap:0}
+ .row:has(>.stepper)>.avatar,.row:has(>.btn)>.avatar{grid-row:1/3}
+ .row:has(>.stepper)>.est,.row:has(>.btn)>.est{grid-column:2;grid-row:2;flex-direction:row;align-items:baseline;gap:.375rem;justify-content:flex-start}
+ .row:has(>.stepper)>.stepper,.row:has(>.btn)>.btn{grid-column:3;grid-row:1/3}
+}
+@media (prefers-reduced-motion:reduce){
+ *,*::before,*::after{animation:none!important;transition:none!important}
+}
+</style></head><body data-view="basket"><main id="root" aria-live="polite"></main>
+<script>(function yeetCard(window){
+'use strict';
+// One runtime for every YEET card. build.mjs stamps the view, the error copy and the coin names per template.
+// Rendering uses textContent only. The one-time confirm code lives in one closure variable and nowhere else.
+const document=window.document;
+const VIEW="basket";
+const ERRORS={"INVALID_ARGUMENT":["Check the request","A value in the request is not valid, so check the coins, parts and amount.",false],"COIN_NOT_SUPPORTED":["Coin not available","One of these coins can’t be traded on YEET right now, so pick another from the coin list.",false],"PARTS_NOT_TEN":["Parts must add up to 10","Give each coin whole parts so the basket adds up to exactly 10.",false],"AMOUNT_TOO_SMALL":["Amount too small","Each coin needs at least the minimum per coin, so raise the amount or use fewer coins.",false],"COST_TOO_HIGH":["Fees too high right now","Swap costs for this basket are above the YEET limit, so try a larger amount or fewer coins.",true],"LIMIT_EXCEEDED":["Over your limit","This trade would go over the per-trade or daily USDC limit.",false],"BALANCE_LOW":["Not enough funds","Your YEET wallet doesn’t hold enough for this trade, so add funds or lower the amount.",false],"WALLET_NOT_READY":["Wallet not ready","Your YEET wallet isn’t set up for trading yet, so finish sign-in and try again.",false],"CONFIRMATION_REQUIRED":["Tap to confirm","Trades only run from your tap in the card, so refresh the quote and tap again.",true],"REQUOTE_REQUIRED":["Price moved","The price moved past your minimum, so refresh the quote to see the new numbers.",true],"TRADING_PAUSED":["Trading is paused","YEET has paused trading for now and your funds stay in your wallet.",true],"REAUTH_REQUIRED":["Reconnect YEET","ChatGPT needs your permission again, so reconnect YEET when it asks.",false],"TEMPORARILY_UNAVAILABLE":["Try again in a minute","YEET couldn’t reach a service it needs and nothing was traded.",true]};
+const COINS={"USDC":"USD Coin (Solana)","SOL":"Solana","WIF":"dogwifhat","BOME":"BOOK OF MEME","TRUMP":"Official Trump","PENGU":"Pudgy Penguins","MELANIA":"Official Melania Meme","SPX":"SPX6900","TURBO":"Turbo","LOUD":"Loud","NEARKAT":"NearKat"};
+const CONFIRM_KEY='yeet/confirm';
+const POLL_MS=5000,POLL_MAX=360,SKEW_MS=2000,TOTAL_PARTS=10;
+const FINAL=new Set(['success','partial','refunded','failed']);
+const SYMBOL=/^[A-Z0-9]{2,12}$/,DECIMAL=/^-?(0|[1-9][0-9]*)(\.[0-9]+)?$/;
+const PROPOSAL_ID=/^p_[a-z0-9]{20}$/,TRADE_ID=/^t_[a-z0-9]{20}$/,CODE=/^[A-Za-z0-9_-]{43}$/;
+const EVM_TX=/^0x[0-9a-fA-F]{64}$/,SOL_TX=/^[1-9A-HJ-NP-Za-km-z]{43,90}$/;
+const EXPLORERS=new Set(['basescan.org','solscan.io','explorer.near-intents.org','nearblocks.io']);
+const WAITING={home:'Opening YEET…',basket:'Getting your quote…',receipt:'Checking your trade…',portfolio:'Reading your wallet…',leaderboard:'Loading the board…'};
+
+const root=document.getElementById('root');
+const pending=new Map();let sequence=0;
+const host={ready:false,canOpen:false,canCallTools:false};
+let state=readState();
+let current=null;          // {kind,data}: what the card shows
+let confirm=null;          // {proposal_id,revision,code,expires}: memory only, cleared on use or change
+const spent=new Set();     // proposal revisions already tapped; their code is never accepted again
+let draft=null,busy=false,quoting=false,queuedQuote=null,inlineError=null,note=null,spinWon=null;
+let expiryTimer=null,pollTimer=null,polls=0,pollFailures=0,lastKey=null,lastHeight=-1,heightFrame=null;
+
+const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined&&text!==null)n.textContent=String(text);return n};
+const has=(o,k)=>o!==null&&typeof o==='object'&&Object.hasOwn(o,k);
+const now=()=>Date.now();
+
+// ---- Host bridge: the Apps JSON-RPC channel first, ChatGPT's window.openai second -----------------
+function request(method,params,timeoutMs=4000){return new Promise((resolve,reject)=>{const id=++sequence;const timer=window.setTimeout(()=>{pending.delete(id);reject(Error('timeout'))},timeoutMs);pending.set(id,{resolve,reject,timer});window.parent.postMessage({jsonrpc:'2.0',id,method,params},'*')})}
+function notify(method,params={}){window.parent.postMessage({jsonrpc:'2.0',method,params},'*')}
+function canCall(){return host.canCallTools||typeof window.openai?.callTool==='function'}
+async function callTool(name,args,timeoutMs=20000){
+ if(host.canCallTools)return request('tools/call',{name,arguments:args},timeoutMs);
+ if(typeof window.openai?.callTool==='function')return window.openai.callTool(name,args);
+ throw Error('unsupported');
+}
+async function openLink(url){
+ if(host.canOpen){const r=await request('ui/open-link',{url});if(r?.isError)throw Error('refused');return}
+ if(typeof window.openai?.openExternal==='function'){await window.openai.openExternal({href:url});return}
+ const w=window.open(url,'_blank','noopener,noreferrer');if(!w)throw Error('blocked');
+}
+// Widget state holds only what survives a reload: the view and the last trade id. Never a code.
+function readState(){const s=window.openai?.widgetState;return s&&s.version===1&&s.view===VIEW?{version:1,view:VIEW,...(typeof s.trade_id==='string'&&TRADE_ID.test(s.trade_id)?{trade_id:s.trade_id}:{}),...(typeof s.proposal_id==='string'&&PROPOSAL_ID.test(s.proposal_id)?{proposal_id:s.proposal_id}:{})}:{version:1,view:VIEW}}
+function saveState(patch){state={...state,...patch,version:1,view:VIEW};try{window.openai?.setWidgetState?.(state)}catch{/* The card still works without persistence. */}}
+function reportHeight(){if(heightFrame!==null)return;heightFrame=window.requestAnimationFrame(()=>{heightFrame=null;const h=Math.ceil(root.getBoundingClientRect().height);if(h!==lastHeight){lastHeight=h;if(window.parent!==window)notify('ui/notifications/size-changed',{height:h});try{window.openai?.notifyIntrinsicHeight?.(h)}catch{/* optional */}}})}
+function applyInsets(insets){if(!insets)return;for(const edge of ['top','right','bottom','left']){const v=insets[edge];document.documentElement.style.setProperty(`--host-${edge}`,`${typeof v==='number'&&Number.isFinite(v)&&v>=0?v:0}px`)}}
+
+// ---- Results -----------------------------------------------------------------------------------
+const ERROR_TEXT_MAX=4096;
+function errorEnvelope(r){
+ const text=Array.isArray(r?.content)?r.content.find(c=>c&&c.type==='text'&&typeof c.text==='string')?.text:undefined;
+ if(typeof text!=='string'||text.length>ERROR_TEXT_MAX)return null;
+ try{const v=JSON.parse(text);return v&&typeof v==='object'&&typeof v.error==='string'&&/^[A-Z_]{1,40}$/.test(v.error)?{error:v.error}:null}catch{return null}
+}
+// A tool result from either bridge: {structuredContent,_meta,isError,content}. Returns {data,meta}.
+function unwrap(r){
+ if(!r||typeof r!=='object')return {data:{error:'TEMPORARILY_UNAVAILABLE'},meta:null};
+ if(r.isError===true)return {data:errorEnvelope(r)||{error:'TEMPORARILY_UNAVAILABLE'},meta:null};
+ const meta=r._meta&&typeof r._meta==='object'?r._meta:null;
+ if(has(r,'structuredContent'))return {data:r.structuredContent,meta};
+ if(typeof r.result==='string'){try{return {data:JSON.parse(r.result),meta}}catch{/* fall through */}}
+ return {data:{error:'TEMPORARILY_UNAVAILABLE'},meta:null};
+}
+function kindOf(d){
+ if(!d||typeof d!=='object')return null;
+ if(typeof d.error==='string')return 'error';
+ if(typeof d.proposal_id==='string'&&Array.isArray(d.legs)&&d.totals)return 'basket';
+ if(typeof d.trade_id==='string'&&Array.isArray(d.legs))return 'receipt';
+ if(d.wallets&&typeof d.ready==='string')return 'home';
+ if(d.solana&&d.base&&has(d,'priced_at'))return 'portfolio';
+ if(Array.isArray(d.rows)&&d.me)return 'leaderboard';
+ if(Number.isInteger(d.xp_won))return 'spin';
+ return null;
+}
+function takeConfirm(p,meta){
+ const c=meta?.[CONFIRM_KEY];const key=`${p.proposal_id}:${p.revision}`;
+ const expires=typeof c?.expires_at==='string'?Date.parse(c.expires_at):NaN;
+ if(c&&typeof c.code==='string'&&CODE.test(c.code)&&Number.isFinite(expires)&&!spent.has(key))confirm={proposal_id:p.proposal_id,revision:p.revision,code:c.code,expires};
+ else if(confirm&&(confirm.proposal_id!==p.proposal_id||confirm.revision!==p.revision))confirm=null;
+ window.clearTimeout(expiryTimer);
+ if(confirm){const left=confirm.expires-SKEW_MS-now();if(left>0)expiryTimer=window.setTimeout(render,Math.min(left+50,2147483000))}
+}
+function show(data,meta){
+ let kind=kindOf(data);
+ if(kind==='basket'){
+  const cur=current?.kind==='basket'?current.data:null;
+  if(cur&&cur.proposal_id===data.proposal_id&&data.revision<cur.revision)return;
+  if(state.trade_id&&state.proposal_id===data.proposal_id){current={kind:'receipt',data:{trade_id:state.trade_id,direction:data.direction,status:'submitted',legs:[]}};render();poll(0);return}
+  takeConfirm(data,meta);draft=null;inlineError=null;
+ }
+ if(kind==='receipt'&&data.status==='requote_required'&&data.requote){note='The price moved. Check the new quote, then tap again.';return show(data.requote,meta)}
+ if(kind==='receipt'&&TRADE_ID.test(data.trade_id)){if(state.trade_id!==data.trade_id){polls=0;pollFailures=0}saveState({trade_id:data.trade_id,...(PROPOSAL_ID.test(data.proposal_id??'')?{proposal_id:data.proposal_id}:{})});if(!FINAL.has(data.status))poll(POLL_MS);else window.clearTimeout(pollTimer)}
+ if(kind==='spin'){spinWon=data;if(current?.kind==='home'){const x=current.data.xp||{};current.data={...current.data,xp:{...x,total:data.total,streak_days:data.streak_days,spin_available:false}};render();return}}
+ if(kind!=='basket'&&kind!=='receipt'){confirm=null;window.clearTimeout(expiryTimer)}
+ if(kind!=='receipt')note=kind==='basket'?note:null;
+ current={kind:kind??'error',data:kind?data:{error:'TEMPORARILY_UNAVAILABLE'}};
+ render();
+}
+// Hosts may deliver the same result more than once; the key never includes the code itself.
+function receive(structured,meta,isError,raw){
+ if(structured===undefined&&!isError)return;
+ const data=isError?(errorEnvelope(raw)||{error:'TEMPORARILY_UNAVAILABLE'}):structured;
+ const c=meta?.[CONFIRM_KEY];
+ const key=JSON.stringify([data,typeof c?.expires_at==='string'?c.expires_at:null,!!isError]);
+ if(key===lastKey)return;lastKey=key;
+ if(data===null)return;
+ show(data,meta);
+}
+
+// ---- Actions -----------------------------------------------------------------------------------
+function canTap(p){return !!confirm&&confirm.proposal_id===p.proposal_id&&confirm.revision===p.revision&&now()<confirm.expires-SKEW_MS&&!busy&&!quoting&&!draft&&canCall()}
+async function tap(){
+ const p=current?.data;if(current?.kind!=='basket'||!canTap(p))return;
+ const c=confirm;confirm=null;window.clearTimeout(expiryTimer);spent.add(`${c.proposal_id}:${c.revision}`);
+ busy=true;note=null;render();
+ let r;
+ try{r=await callTool('execute_trade',{proposal_id:c.proposal_id,revision:c.revision,confirm:c.code},30000)}
+ catch{busy=false;note='No answer yet. Ask in the chat for your trade status before you try again.';render();return}
+ busy=false;const u=unwrap(r);
+ if(kindOf(u.data)==='error'){current={kind:'error',data:u.data,proposal_id:p.proposal_id};render();return}
+ show(u.data,u.meta);
+}
+async function requestQuote(args){
+ if(quoting){queuedQuote=args;render();return}
+ quoting=true;inlineError=null;render();
+ let u;
+ try{u=unwrap(await callTool('yeet_quote',args))}catch{u={data:{error:'TEMPORARILY_UNAVAILABLE'},meta:null}}
+ quoting=false;
+ if(queuedQuote){const next=queuedQuote;queuedQuote=null;requestQuote(next);return}
+ if(kindOf(u.data)==='basket'){note=null;show(u.data,u.meta);return}
+ if(current?.kind==='basket'){inlineError=typeof u.data?.error==='string'?u.data.error:'TEMPORARILY_UNAVAILABLE';render();return}
+ current={kind:'error',data:u.data,proposal_id:args.proposal_id};render();
+}
+function refresh(proposal_id){confirm=null;draft=null;note=null;if(current?.kind!=='basket')current={kind:'waiting'};requestQuote({proposal_id})}
+// Stepper rule: parts stay whole, at least 1 each, and always sum to 10. "+" takes one part from the largest
+// other row that can give one; "−" gives one part to the largest other row. Ties go to the upper row.
+function largestOther(parts,i,ok){let j=-1;parts.forEach((v,k)=>{if(k!==i&&ok(v)&&(j<0||v>parts[j]))j=k});return j}
+function step(parts,i,delta){
+ const p=parts.slice();
+ if(delta>0){const j=largestOther(p,i,v=>v>1);if(j<0)return null;p[i]+=1;p[j]-=1}
+ else{if(p[i]<=1)return null;const j=largestOther(p,i,()=>true);if(j<0)return null;p[i]-=1;p[j]+=1}
+ return p;
+}
+function onStep(i,delta){
+ const p=current?.data;if(current?.kind!=='basket'||busy)return;
+ const parts=draft||p.legs.map(l=>l.parts);const next=step(parts,i,delta);if(!next)return;
+ draft=next;confirm=null;window.clearTimeout(expiryTimer);
+ requestQuote({proposal_id:p.proposal_id,legs:p.legs.map((l,k)=>({symbol:l.symbol,parts:next[k]}))});
+}
+function poll(delay){
+ window.clearTimeout(pollTimer);
+ const id=state.trade_id;if(!id||!canCall()||polls>=POLL_MAX)return;
+ pollTimer=window.setTimeout(async()=>{
+  polls+=1;let u;
+  try{u=unwrap(await callTool('trade_status',{trade_id:id}))}catch{u=null}
+  if(state.trade_id!==id)return;
+  if(!u||kindOf(u.data)!=='receipt'){pollFailures+=1;if(pollFailures<3)poll(POLL_MS);else{note='Live updates paused. Ask in the chat for your trade status.';render()}return}
+  pollFailures=0;note=null;show(u.data,u.meta);
+ },delay);
+}
+async function skeet(symbol,button){
+ button.disabled=true;
+ const id=typeof window.crypto?.randomUUID==='function'?window.crypto.randomUUID():`r${now()}${Math.random().toString(36).slice(2)}`;
+ let u;try{u=unwrap(await callTool('skeet_propose',{request_id:id,legs:[{symbol,percent:100}]}))}catch{u={data:{error:'TEMPORARILY_UNAVAILABLE'}}}
+ show(u.data,u.meta);
+}
+async function spin(button){
+ button.disabled=true;button.closest('.card')?.classList.add('spinning');
+ let u;try{u=unwrap(await callTool('daily_spin',{}))}catch{u={data:{error:'TEMPORARILY_UNAVAILABLE'}}}
+ button.closest('.card')?.classList.remove('spinning');
+ if(kindOf(u.data)==='spin')show(u.data,null);else{note=ERRORS[u.data.error]?.[0]??ERRORS.TEMPORARILY_UNAVAILABLE[0];button.disabled=false;render()}
+}
+
+// ---- Formatting: amounts arrive as decimal strings and are only displayed --------------------------
+const usdFmt=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2});
+function money(v){if(typeof v!=='string'||!DECIMAL.test(v))return null;const n=Number(v);return Number.isFinite(n)?usdFmt.format(n):null}
+function amount(v){
+ if(typeof v!=='string'||!DECIMAL.test(v))return null;const n=Number(v);if(!Number.isFinite(n))return null;
+ const a=Math.abs(n);const opts=a>=1000?{maximumFractionDigits:0}:a>=1?{maximumFractionDigits:2}:{maximumSignificantDigits:4};
+ return new Intl.NumberFormat('en-US',opts).format(n);
+}
+function pct(n){return typeof n==='number'&&Number.isFinite(n)?`${n.toFixed(n<10?1:0)}%`:null}
+function shortAddr(a){return typeof a==='string'&&a.length>12?`${a.slice(0,6)}…${a.slice(-4)}`:a??''}
+function clock(iso){const t=new Date(iso);return Number.isFinite(t.getTime())?new Intl.DateTimeFormat('en-US',{hour:'numeric',minute:'2-digit'}).format(t):null}
+function safeSymbol(s){return typeof s==='string'&&SYMBOL.test(s)?s:null}
+function coinName(s){return s&&Object.hasOwn(COINS,s)?COINS[s]:null}
+function avatar(symbol){
+ const a=el('span','avatar',symbol?symbol[0]:'?');a.setAttribute('aria-hidden','true');
+ let h=0;for(const ch of symbol||'?')h=(h*31+ch.charCodeAt(0))>>>0;a.dataset.tone=String(h%6);return a;
+}
+function txUrl(hash,chain){if(chain==='base'&&EVM_TX.test(hash))return `https://basescan.org/tx/${hash}`;if(chain==='solana'&&SOL_TX.test(hash))return `https://solscan.io/tx/${hash}`;return null}
+function safeUrl(v){try{const u=new URL(v);return u.protocol==='https:'&&!u.username&&!u.password&&EXPLORERS.has(u.hostname)?u.href:null}catch{return null}}
+function link(text,url){const a=el('a','tx',text);a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.onclick=async e=>{e.preventDefault();try{await openLink(url)}catch{note='This link couldn’t open here.';render()}};return a}
+function button(cls,text,onclick){const b=el('button',`btn ${cls}`,text);b.type='button';if(onclick)b.onclick=onclick;return b}
+function head(title,sub){const h=el('div','head');h.append(el('h1',null,title));if(sub)h.append(el('span','sub',sub));return h}
+function noteLine(text,cls='note'){const n=el('p',cls,text);n.setAttribute('role','status');return n}
+
+// ---- Views -------------------------------------------------------------------------------------
+const WARN={COST_HIGH:'Cost is above 3%',LEG_SMALL:'One coin is near the minimum',BALANCE_LOW:'Not enough funds yet',SIGNER_MISSING:'Wallet needs set-up'};
+function renderBasket(p){
+ const skeet=p.direction==='skeet';const parts=draft||p.legs.map(l=>l.parts);const legs=p.legs.slice(0,5);
+ const card=el('section','card basket');card.dataset.direction=skeet?'skeet':'yeet';
+ card.append(head(skeet?'SKEET to USDC':'⚡ YEET basket',skeet?`${legs.length} coin${legs.length>1?'s':''} → USDC`:`${amount(p.amount_usdc)??"—"} USDC · ${legs.length} coin${legs.length>1?'s':''}`));
+ const list=el('ul','rows');
+ legs.forEach((l,i)=>{
+  const sym=safeSymbol(l.symbol);const li=el('li','row');li.append(avatar(sym));
+  const who=el('div','who');who.append(el('span','sym',sym??'?'));const name=coinName(sym);if(name)who.append(el('span','name',name));li.append(who);
+  const est=el('div','est');
+  if(skeet){est.append(el('span','amt',`${amount(l.amount_in)??'—'} ${sym??''}`.trim()),el('span','usd',`≈ ${money(l.est_out_usd)??'—'}`))}
+  else{est.append(el('span','amt',`≈ ${amount(l.est_out)??'—'}`),el('span','usd',money(l.est_out_usd)??'—'))}
+  li.append(est);
+  if(!skeet&&Number.isInteger(parts[i])){
+   const s=el('div','stepper');s.setAttribute('role','group');s.setAttribute('aria-label',`${sym} parts`);
+   const minus=button('step','−',()=>onStep(i,-1));minus.setAttribute('aria-label',`Less ${sym}`);minus.disabled=busy||!step(parts,i,-1);
+   const plus=button('step','+',()=>onStep(i,1));plus.setAttribute('aria-label',`More ${sym}`);plus.disabled=busy||!step(parts,i,1);
+   const v=el('output','parts',String(parts[i]));v.setAttribute('aria-label',`${parts[i]} of ${TOTAL_PARTS} parts`);
+   s.append(minus,v,plus);li.append(s);
+  }
+  list.append(li);
+ });
+ card.append(list);
+ const t=p.totals||{};const totals=el('p','totals');
+ totals.append(el('span',null,`${skeet?'Sell':'Spend'} ${money(t.in_usd)??'—'}`),el('span',null,`Get ≈ ${money(t.out_usd)??'—'}`),el('span',(p.warnings||[]).includes('COST_HIGH')?'cost high':'cost',`Cost ${pct(t.cost_pct)??'—'}`));
+ card.append(totals);
+ const warns=(Array.isArray(p.warnings)?p.warnings:[]).filter(w=>Object.hasOwn(WARN,w)&&w!=='COST_HIGH');
+ if(warns.length){const box=el('div','chips');for(const w of warns)box.append(el('span','chip',WARN[w]));card.append(box)}
+ if(inlineError){const e=ERRORS[inlineError]||ERRORS.TEMPORARILY_UNAVAILABLE;const box=el('div','inline-error');box.setAttribute('role','alert');box.append(el('strong',null,e[0]),el('span',null,e[1]));card.append(box)}
+ const actions=el('div','actions');
+ const live=canTap(p);
+ const primary=button(`primary ${skeet?'skeet':'yeet'}`,busy?'Sending…':skeet?'SKEET':'⚡ YEET',()=>tap());primary.disabled=!live;primary.dataset.role='trade';
+ actions.append(primary);
+ const expired=!busy&&!quoting&&!draft&&!live;
+ if(expired&&canCall()){const r=button('quiet','Refresh quote',()=>refresh(p.proposal_id));r.dataset.role='refresh';actions.append(r)}
+ card.append(actions);
+ if(note)card.append(noteLine(note));
+ else if(quoting||draft)card.append(noteLine('Updating quote…'));
+ else if(busy)card.append(noteLine('Sending your trade…'));
+ else if(!canCall())card.append(noteLine('Open this card in the chat to trade.'));
+ else if(expired)card.append(noteLine('Quote expired. Refresh for live numbers.'));
+ else card.append(noteLine(`Ready${Number.isInteger(t.time_estimate_s)?` · about ${Math.max(1,Math.round(t.time_estimate_s/60))} min to land`:''}`));
+ card.append(el('p','fine','Meme coins can go to zero. Only your tap trades.'));
+ return card;
+}
+const TRADE_TITLE={signing:'Signing…',submitted:'Sent',settling:'Swapping…',success:'Done',partial:'Partly done',refunded:'Refunded',failed:'Didn’t go through',requote_required:'Price moved'};
+const LEG_STATUS={PENDING_DEPOSIT:['Waiting for deposit','wait'],KNOWN_DEPOSIT_TX:['Deposit seen','wait'],INCOMPLETE_DEPOSIT:['Deposit short','bad'],PROCESSING:['Swapping','wait'],SUCCESS:['Received','ok'],REFUNDED:['Refunded','bad'],FAILED:['Failed','bad'],sent:['Sent','wait'],failed:['Failed','bad'],not_sent:['Not sent','bad']};
+function renderReceipt(t){
+ const skeet=t.direction==='skeet';const final=FINAL.has(t.status);
+ const card=el('section','card receipt');card.dataset.status=t.status??'';
+ card.append(head(TRADE_TITLE[t.status]??'Your trade',skeet?'SKEET':'⚡ YEET'));
+ const legs=Array.isArray(t.legs)?t.legs.slice(0,5):[];
+ const list=el('ul','rows');
+ for(const l of legs){
+  const sym=safeSymbol(l.symbol);const li=el('li','row');li.append(avatar(sym));
+  const who=el('div','who');who.append(el('span','sym',sym??'?'));
+  const [label,tone]=LEG_STATUS[l.status]??['Pending','wait'];const badge=el('span',`status ${tone}`,label);who.append(badge);li.append(who);
+  const right=el('div','est');
+  if(has(l,'amount_out')&&amount(l.amount_out))right.append(el('span','amt',`+${amount(l.amount_out)} ${skeet?'USDC':sym??''}`.trim()));
+  else if(amount(l.amount_in))right.append(el('span','usd',`${amount(l.amount_in)} ${skeet?sym??'':'USDC'} in`.trim()));
+  const links=el('span','links');
+  const origin=skeet?'solana':'base',dest=skeet?'base':'solana';
+  const u1=l.explorer_url?safeUrl(l.explorer_url):(l.tx_hash?txUrl(l.tx_hash,origin):(l.origin_tx?txUrl(l.origin_tx,origin):null));
+  const u2=l.destination_tx?txUrl(l.destination_tx,dest):null;
+  if(u1)links.append(link('Deposit',u1));if(u2)links.append(link('Swap',u2));
+  if(links.childElementCount)right.append(links);
+  li.append(right);
+  if(typeof l.refund_reason==='string'&&l.refund_reason)li.append(el('p','reason',l.refund_reason.slice(0,200)));
+  list.append(li);
+ }
+ if(legs.length)card.append(list);
+ const got=(Array.isArray(t.received)?t.received:[]).filter(r=>safeSymbol(r?.symbol)&&amount(r?.amount));
+ if(got.length){const p=el('p','got');p.append(el('span','label','You got'));for(const r of got)p.append(el('strong',null,`${amount(r.amount)} ${r.symbol}`));card.append(p)}
+ if(t.xp_award&&Number.isInteger(t.xp_award.points))card.append(el('p','xp',`+${t.xp_award.points} XP · ${Number(t.xp_award.total).toLocaleString('en-US')} total`));
+ if(note)card.append(noteLine(note));
+ else if(!final)card.append(noteLine(canCall()?'Updating every 5 s…':'Ask in the chat for your trade status.'));
+ const when=clock(t.updated_at);if(when)card.append(el('p','fine',`Updated ${when}`));
+ return card;
+}
+const READY={ready:['Ready to YEET','ok'],needs_signer:['Finish wallet set-up','wait'],needs_funds:['Add USDC on Base','wait'],paused:['Trading paused','bad']};
+function renderHome(h){
+ const card=el('section','card home');const [label,tone]=READY[h.ready]??['Checking…','wait'];
+ const top=head('YEET');top.append(el('span',`status ${tone}`,label));card.append(top);
+ const list=el('ul','rows');
+ const base=el('li','row');base.append(avatar('USDC'));const bw=el('div','who');bw.append(el('span','sym','USDC on Base'),el('span','name',shortAddr(h.wallets?.base?.address)));base.append(bw);
+ const bal=el('div','est');bal.append(el('span','amt',money(h.wallets?.base?.usdc)??'—'));base.append(bal);list.append(base);
+ const sol=el('li','row');sol.append(avatar('SOL'));const sw=el('div','who');sw.append(el('span','sym','Solana wallet'),el('span','name',shortAddr(h.wallets?.solana?.address)));sol.append(sw);
+ sol.append(el('div','est muted','Coins land here'));list.append(sol);
+ card.append(list);
+ if(h.xp&&Number.isInteger(h.xp.total)){
+  const xp=el('div','xpbox');const wheel=el('span','wheel');wheel.setAttribute('aria-hidden','true');
+  const words=el('div','who');words.append(el('span','xpnum',`${h.xp.total.toLocaleString('en-US')} XP`));
+  if(h.xp.streak_days>0)words.append(el('span','streak',`🔥 ${h.xp.streak_days}-day streak`));
+  xp.append(wheel,words);
+  if(h.xp.spin_available&&canCall()){const b=button('quiet','Spin for XP',null);b.onclick=()=>spin(b);xp.append(b)}
+  card.append(xp);
+ }
+ if(spinWon)card.append(el('p','xp',`+${spinWon.xp_won} XP from today’s spin`));
+ const wins=(Array.isArray(h.recent_wins)?h.recent_wins:[]).filter(w=>safeSymbol(w?.symbol)&&typeof w.pct==='number').slice(0,3);
+ if(wins.length){const box=el('div','chips');for(const w of wins)box.append(el('span',`chip ${w.pct>=0?'up':'down'}`,`${w.symbol} ${w.pct>=0?'+':'−'}${pct(Math.abs(w.pct))}`));card.append(box)}
+ if(note)card.append(noteLine(note));
+ card.append(el('p','fine','Say “yeet me a win” to start.'));
+ return card;
+}
+function renderSpin(s){
+ const card=el('section','card home');card.append(head('Daily spin'));
+ card.append(el('p','big',`+${s.xp_won} XP`),el('p','note',`${s.total.toLocaleString('en-US')} XP total · ${s.streak_days}-day streak`));
+ const next=clock(s.next_spin_at);if(next)card.append(el('p','fine',`Next spin after ${next}`));
+ return card;
+}
+function renderPortfolio(d){
+ const card=el('section','card portfolio');card.append(head('Your coins',money(d.total_usd)?`${money(d.total_usd)} total`:null));
+ const list=el('ul','rows');
+ const base=el('li','row');base.append(avatar('USDC'));const bw=el('div','who');bw.append(el('span','sym','USDC'),el('span','name','On Base, ready to YEET'));base.append(bw);
+ const bv=el('div','est');bv.append(el('span','amt',money(d.base?.usdc)??'—'));base.append(bv);list.append(base);
+ const rows=(Array.isArray(d.solana?.holdings)?d.solana.holdings:[]).filter(h=>safeSymbol(h?.symbol)).slice(0,25);
+ rows.sort((a,b)=>(Number(b.usd)||0)-(Number(a.usd)||0));
+ for(const h of rows){
+  const li=el('li','row');li.append(avatar(h.symbol));
+  const who=el('div','who');who.append(el('span','sym',h.symbol));const n=coinName(h.symbol);if(n)who.append(el('span','name',n));li.append(who);
+  const est=el('div','est');est.append(el('span','amt',amount(h.amount)??'—'),el('span','usd',money(h.usd)??'No price'));li.append(est);
+  if(canCall()){const b=button('skeet small','SKEET',null);b.onclick=()=>skeet(h.symbol,b);b.setAttribute('aria-label',`SKEET ${h.symbol}`);li.append(b)}
+  list.append(li);
+ }
+ card.append(list);
+ if(!rows.length)card.append(el('p','note','No coins yet. Say “yeet me a win”.'));
+ if(note)card.append(noteLine(note));
+ const when=clock(d.priced_at);if(when)card.append(el('p','fine',`Prices as of ${when}`));
+ return card;
+}
+function renderLeaderboard(d){
+ const card=el('section','card leaderboard');card.append(head('Leaderboard','XP'));
+ const list=el('ol','board');
+ for(const r of (Array.isArray(d.rows)?d.rows:[]).slice(0,50)){
+  const li=el('li','line');li.append(el('span','rank',Number.isInteger(r.rank)?`#${r.rank}`:'—'),el('span','who-name',typeof r.name==='string'?r.name.slice(0,32):'—'),el('span','pts',Number.isInteger(r.xp)?r.xp.toLocaleString('en-US'):'—'));list.append(li);
+ }
+ card.append(list);
+ const me=d.me||{};card.append(el('p','me',`You: ${Number.isInteger(me.rank)?`#${me.rank}`:'not ranked yet'} · ${Number.isInteger(me.xp)?me.xp.toLocaleString('en-US'):0} XP`));
+ return card;
+}
+const REFRESHABLE=new Set(['REQUOTE_REQUIRED','CONFIRMATION_REQUIRED','COST_TOO_HIGH','TEMPORARILY_UNAVAILABLE']);
+function renderError(d,proposal_id){
+ const code=typeof d?.error==='string'&&Object.hasOwn(ERRORS,d.error)?d.error:'TEMPORARILY_UNAVAILABLE';const [title,body,retryable]=ERRORS[code];
+ const card=el('section','card problem');card.dataset.code=code;card.setAttribute('role','alert');
+ card.append(el('h1',null,title),el('p',null,body));
+ const pid=proposal_id||state.proposal_id;
+ if(retryable&&REFRESHABLE.has(code)&&pid&&canCall())card.append(button('quiet','Refresh quote',()=>refresh(pid)));
+ if(note)card.append(noteLine(note));
+ return card;
+}
+function render(){
+ let node;
+ if(!current||current.kind==='waiting')node=el('p','waiting',WAITING[VIEW]??'Loading…');
+ else try{
+  node=current.kind==='basket'?renderBasket(current.data):current.kind==='receipt'?renderReceipt(current.data):current.kind==='home'?renderHome(current.data)
+   :current.kind==='portfolio'?renderPortfolio(current.data):current.kind==='leaderboard'?renderLeaderboard(current.data):current.kind==='spin'?renderSpin(current.data)
+   :renderError(current.data,current.proposal_id);
+ }catch{node=renderError({error:'TEMPORARILY_UNAVAILABLE'})}
+ root.replaceChildren(node);reportHeight();
+}
+
+// ---- Wiring ------------------------------------------------------------------------------------
+window.addEventListener('message',event=>{
+ if(event.source!==window.parent)return;const msg=event.data;if(!msg||msg.jsonrpc!=='2.0')return;
+ if(!has(msg,'method')&&(has(msg,'result')||has(msg,'error'))&&pending.has(msg.id)){const p=pending.get(msg.id);pending.delete(msg.id);window.clearTimeout(p.timer);msg.error?p.reject(msg.error):p.resolve(msg.result);return}
+ if(msg.method==='ping'&&has(msg,'id'))window.parent.postMessage({jsonrpc:'2.0',id:msg.id,result:{}},'*');
+ if(msg.method==='ui/notifications/tool-result'){const p=msg.params||{};receive(p.structuredContent,p._meta,p.isError===true,p)}
+ if(msg.method==='ui/notifications/host-context-changed'&&msg.params?.safeAreaInsets)applyInsets(msg.params.safeAreaInsets);
+ if(msg.method==='ui/notifications/tool-cancelled'&&!current){root.replaceChildren(el('p','waiting','Cancelled.'));reportHeight()}
+});
+window.addEventListener('openai:set_globals',event=>{
+ const g=event.detail?.globals;if(!g)return;if(g.safeArea)applyInsets(g.safeArea.insets);
+ if(has(g,'toolOutput'))receive(g.toolOutput,g.toolResponseMetadata??window.openai?.toolResponseMetadata,false);
+});
+if(typeof window.ResizeObserver==='function')new window.ResizeObserver(reportHeight).observe(root);
+if(window.openai){if(window.openai.safeArea)applyInsets(window.openai.safeArea.insets);if(window.openai.toolOutput!==undefined&&window.openai.toolOutput!==null)receive(window.openai.toolOutput,window.openai.toolResponseMetadata,false)}
+if(!current&&state.trade_id&&VIEW==='receipt'&&canCall()){current={kind:'receipt',data:{trade_id:state.trade_id,status:'submitted',legs:[]}};poll(0)}
+render();
+if(window.parent!==window)request('ui/initialize',{appInfo:{name:'YEET',version:'1.0.0'},appCapabilities:{availableDisplayModes:['inline']},protocolVersion:'2026-01-26'}).then(r=>{
+ host.ready=true;const caps=r?.hostCapabilities;host.canOpen=!!caps?.openLinks;host.canCallTools=!!caps?.serverTools;
+ if(r?.hostContext?.safeAreaInsets)applyInsets(r.hostContext.safeAreaInsets);
+ notify('ui/notifications/initialized');lastHeight=-1;
+ if(current?.kind==='receipt'&&!FINAL.has(current.data.status))poll(POLL_MS);
+ render();
+}).catch(()=>{/* window.openai, when present, still serves the card. */});
+})(window);
+</script></body></html>

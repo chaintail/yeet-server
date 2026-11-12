@@ -1,12 +1,18 @@
+// Tool schemas from the vendored yeet-win contract (vendor/yeet-win/contracts/yeet-tools.json; commit in PINNED).
 import {readFileSync} from 'node:fs';
-export const contract=JSON.parse(readFileSync(new URL('../contracts/yeet-tools.json',import.meta.url),'utf8'));
+import {CONTRACT_URL} from '#contracts/errors';
+export const contract=JSON.parse(readFileSync(CONTRACT_URL,'utf8'));
 export function resolveSchema(schema){
  if(Array.isArray(schema))return schema.map(resolveSchema);
  if(!schema||typeof schema!=='object')return schema;
- if(schema.$ref){const key=schema.$ref.split('/').at(-1);const {$ref,...rest}=schema;return {...resolveSchema(contract.$defs[key]),...resolveSchema(rest)}}
+ if(schema.$ref){
+  if(!schema.$ref.startsWith('#/$defs/'))throw Error(`Unsupported $ref ${schema.$ref}`);
+  const key=schema.$ref.slice('#/$defs/'.length);if(!contract.$defs[key])throw Error(`Unknown $ref ${schema.$ref}`);
+  const {$ref,...rest}=schema;return {...resolveSchema(contract.$defs[key]),...resolveSchema(rest)};
+ }
  return Object.fromEntries(Object.entries(schema).map(([k,v])=>[k,resolveSchema(v)]));
 }
-/** Only the keywords in the pinned contract. Fail loudly on an unknown type. */
+/** Only the keywords in the pinned contract (contracts/README.md "Schema subset"). Fail loudly on an unknown type. */
 export function zodSchema(z,schema){
  const s=resolveSchema(schema);let out;
  if(s.const!==undefined)out=z.literal(s.const);
@@ -29,4 +35,9 @@ export function zodSchema(z,schema){
  }else throw Error('Unsupported contract schema');
  return s.description?out.describe(s.description):out;
 }
-export const toolSchemas=Object.fromEntries(Object.entries(contract.tools).map(([name,{input,output}])=>[name,{input:resolveSchema(contract.$defs[input]),output:resolveSchema(contract.$defs[output])}]));
+/** Every contract tool, P0 to P2: {input, output} with all references resolved. */
+export const toolSchemas=Object.fromEntries(Object.entries(contract.tools).map(([name,t])=>[name,{input:resolveSchema(t.inputSchema),output:resolveSchema(t.outputSchema)}]));
+/** The contract's per-tool metadata (priority, title, description, annotations, scope, card, visible, widgetAccessible, resultMeta). */
+export const toolSpecs=Object.freeze(Object.fromEntries(Object.entries(contract.tools).map(([name,t])=>[name,Object.freeze({name,priority:t.priority,title:t.title,description:t.description,annotations:t.annotations,scope:t.scope,card:t.card,visible:t.visible,widgetAccessible:t.widgetAccessible,confirm:!!t.resultMeta?.[contract['x-yeet-meta'].confirm],errors:t.errors})])));
+export const CARDS=Object.freeze(contract['x-yeet-cards']);
+export const META_KEYS=Object.freeze(contract['x-yeet-meta']);

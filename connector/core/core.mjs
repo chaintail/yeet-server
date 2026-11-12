@@ -24,18 +24,19 @@ export const ROUTE_SCOPES=Object.freeze([
  ['GET',/^\/home$/,'yeet:read'],
  ['GET',/^\/coins$/,'yeet:read'],
  ['POST',/^\/proposals$/,'yeet:write'],
+ ['POST',/^\/proposals\/skeet$/,'yeet:write'],
  ['POST',/^\/proposals\/p_[a-z0-9]{20}\/quote$/,'yeet:write'],
  ['POST',/^\/trades$/,'yeet:trade'],
  ['GET',/^\/trades\/t_[a-z0-9]{20}$/,'yeet:read'],
  ['GET',/^\/portfolio$/,'yeet:read'],
- ['GET',/^\/leaderboard$/,'yeet:read'],
+ ['GET',/^\/leaderboard\/(xp|week)$/,'yeet:read'],
  ['POST',/^\/spin$/,'yeet:write'],
 ]);
 export const routeScope=(method,path)=>ROUTE_SCOPES.find(([m,p])=>m===method&&p.test(path))?.[2]??null;
 app.use((q,r,next)=>{if(q.role==='mcp'){const needed=routeScope(q.method,q.path);if(!needed||!q.principal.scopes.has(needed))return r.sendStatus(403)}next()});
 app.get('/coins',(_q,r)=>r.json(coins()));
 // Trade engine, XP and portfolio arrive in lanes B and E; until then each answers a typed retryable failure.
-for(const [method,path] of [['get','/home'],['post','/proposals'],['post','/proposals/:id/quote'],['post','/trades'],['get','/trades/:id'],['get','/portfolio'],['get','/leaderboard'],['post','/spin']])
+for(const [method,path] of [['get','/home'],['post','/proposals'],['post','/proposals/skeet'],['post','/proposals/:id/quote'],['post','/trades'],['get','/trades/:id'],['get','/portfolio'],['get','/leaderboard/:board'],['post','/spin']])
  app[method](path,(_q,r)=>unavailable(r));
 app.use((_e,_q,r,_n)=>r.status(400).json({error:'invalid request'}));
 export const server=app.listen(port('CORE_PORT',38316),process.env.LISTEN_HOST||'0.0.0.0');
