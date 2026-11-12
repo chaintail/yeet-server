@@ -1,0 +1,31 @@
+{
+  "name": "folio-mcp-oidc-research",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start:as": "node as/server.mjs as",
+    "start:core": "node core/server.mjs core",
+    "start:mcp": "node mcp/server.mjs mcp",
+    "test": "node --test --test-concurrency=2 as/scripts/consent-grant-test.mjs as/scripts/dual-consent-test.mjs core/scripts/dual-account-test.mjs core/scripts/real-advertisement-test.mjs shared/scripts/introspection-deadline-test.mjs mcp/scripts/dual-contract-test.mjs mcp/scripts/sdk-registration-test.mjs mcp/tests/dual-widgets.test.mjs && node as/scripts/diagnostics-test.mjs && node as/scripts/renewable-consent-test.mjs && node as/scripts/security-policy-test.mjs && node core/scripts/privy-identity-test.mjs && node shared/scripts/privy-jwks-test.mjs && node shared/scripts/privy-principal-test.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "SEE LICENSE IN LICENSE",
+  "type": "module",
+  "imports": {
+    "#shared/*": "./shared/*",
+    "#scope-catalog": "./scope-catalog.mjs",
+    "#research-policy": "./research-policy.mjs",
+    "#contracts/errors": "./contracts/errors.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@privy-io/node": "0.35.0",
+    "express": "5.2.1",
+    "jose": "6.2.12",
+    "oidc-provider": "9.12.2",
+    "zod": "4.6.5"
+  },
+  "private": true
+}

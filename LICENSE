@@ -1,0 +1,22 @@
+Copyright (c) 2026 Chaintail Labs Inc. All rights reserved.
+
+This repository is published so that the NEAR Hackathon judges and other
+readers can read, clone, build and run the code in order to evaluate it.
+
+No other rights are granted. Without prior written permission from
+Chaintail Labs Inc. you may not copy, modify, distribute, sublicense or sell
+this software or any part of it, or use it in a product or service.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+CHAINTAIL LABS INC. BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+This software may be released under the MIT License after the NEAR Hackathon
+judging period ends.
+
+Third-party components keep their own licences.
+
+Contact: labs@chaintail.xyz
