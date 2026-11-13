@@ -96,6 +96,15 @@ test('fallback: a basket over the rent quota falls back to per-leg requests (the
  assert.equal(rentDay(db).a,3);
 });
 
+test('fallback: a basket over a lowered fee cap (5 legs 18,000 > 15,000) falls back to per-leg requests (11,600 each)',async()=>{
+ const f=fakePipeline({env:{YEET_SPONSOR_MAX_FEE_LAMPORTS:'15000'}});const {p,db,logs}=f;
+ const x=await exec(p,await p.propose(ALICE,buy()));
+ assert.deepEqual(x.sign_requests.map(r=>r.legs),[[0],[1],[2],[3],[4]]);
+ assert.deepEqual(statuses(db,x.trade_id),Array(5).fill('awaiting_signature'));
+ assert.ok(logs.some(l=>l.includes('"basket_fallback"')&&l.includes('CLIENT_FEE_CAP_EXCEEDED')));
+ assert.equal(txDay(db),5);assert.equal(rentDay(db).a,5);
+});
+
 test('ledger: one attempt covers 5 legs; a second issue on any covered leg is refused; claim/finish/confirm move all; refunds give back 5 rent accounts',async()=>{
  const f=fakePipeline();const {p,db}=f;
  const x=await exec(p,await p.propose(ALICE,buy()));

@@ -14,7 +14,7 @@ import {legsOfAttempt} from '../ledger.mjs';
 
 export const SEND_MARGIN_MS=120_000;
 /** Why a basket chunk falls back to one request per leg. */
-const BATCH_FALLBACK=['BATCH_TOO_LARGE','BATCH_UNSUPPORTED','SPONSOR_QUOTA_EXHAUSTED'];
+const BATCH_FALLBACK=['BATCH_TOO_LARGE','BATCH_UNSUPPORTED','SPONSOR_QUOTA_EXHAUSTED','CLIENT_FEE_CAP_EXCEEDED'];
 /** YEET_SOL_BATCH_MAX_LEGS: legs per Solana transaction, 1..5, default 5 (1 = one request per leg, as before). */
 export const batchMaxFromEnv=env=>{const v=env.YEET_SOL_BATCH_MAX_LEGS?.trim();if(!v)return MAX_BASKET_LEGS;if(!/^[1-5]$/.test(v))throw Error('Invalid YEET_SOL_BATCH_MAX_LEGS (1..5)');return Number(v)};
 const priorityFromEnv=env=>{const v=env.YEET_SOL_PRIORITY_MICRO_LAMPORTS?.trim();if(!v)return DEFAULT_PRIORITY_MICRO_LAMPORTS;if(!/^\d{1,6}$/.test(v))throw Error('Invalid YEET_SOL_PRIORITY_MICRO_LAMPORTS');return BigInt(v)};
@@ -38,8 +38,10 @@ export function createSolanaDriver({ledger,rpc,signatureStatus,historySignatureS
   * Sign requests for several legs: [{attemptId, legs:[idx], ...issue result} | {legs:[idx], error}], never throws for a
   * leg. Eligible legs (deadline past the margin) go in chunks of at most YEET_SOL_BATCH_MAX_LEGS, in idx order, ONE
   * transaction per chunk. A chunk that does not fit (BATCH_TOO_LARGE), cannot share a transaction (BATCH_UNSUPPORTED)
-  * or is over the sponsorship quota as a whole (SPONSOR_QUOTA_EXHAUSTED) falls back to one request per leg (today's
-  * semantics: the quota admits what it can). Any other error is that chunk's legs' error.
+  * is over the sponsorship quota as a whole (SPONSOR_QUOTA_EXHAUSTED) or whose fee (compute limit grows with N) is
+  * over YEET_SPONSOR_MAX_FEE_LAMPORTS (CLIENT_FEE_CAP_EXCEEDED) falls back to one request per leg (today's semantics:
+  * the quota admits what it can). Any other error is that chunk's legs' error. All are refused before anything is
+  * reserved.
   */
  async function prepareLegs({trade,legs,wallet}){
   ready();
