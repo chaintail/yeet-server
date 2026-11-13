@@ -100,15 +100,15 @@ test('fix 1: the Privy adapter marks only definite refusals as nothing-broadcast
 
 const until=async(fn,what)=>{for(let i=0;i<500;i++){if(fn())return;await new Promise(r=>setImmediate(r))}throw Error(`timed out waiting for ${what}`)};
 /** An engine that "dies" right after the commit (the send never starts), and a restarted engine on the same state. */
-async function crashAfterCommit(){
+async function crashAfterCommit({env={YEET_LIVE:'1'},signer:firstSigner}={}){
  const {createEngine}=await import('./engine.mjs');
- const first=await fakeEngine({hooks:{afterCommit:()=>new Promise(()=>{})}});
+ const first=await fakeEngine({signer:firstSigner,hooks:{afterCommit:()=>new Promise(()=>{})}});
  const p=await first.engine.propose(alice,basket);
  exec(first.engine,alice,p).catch(()=>{});
  const tradeRow=()=>first.db.prepare('SELECT * FROM trades').get();
  await until(()=>tradeRow()?.status==='signing','the commit');
  const signer=fakeSigner();
- const engine=await createEngine({db:first.db,env:{YEET_LIVE:'1'},client:first.oneclick,signer,balances:first.balances,now:first.now,trackerIntervalMs:60_000});
+ const engine=await createEngine({db:first.db,env,client:first.oneclick,signer,balances:first.balances,now:first.now,trackerIntervalMs:60_000});
  return {p,db:first.db,now:first.now,tradeId:tradeRow().id,engine,signer,oneclick:first.oneclick};
 }
 
@@ -138,6 +138,35 @@ test('fix 2: crash between commit and send, deadline passed: legs not_sent, cap 
  assert.equal(engine.status(alice,tradeId).status,'failed');
  await assert.rejects(exec(engine,alice,p),e=>e.code==='TEMPORARILY_UNAVAILABLE','replay answers the same');
 });
+
+for(const [label,env] of [['kill switch on',{YEET_LIVE:'1',YEET_KILL_SWITCH:'1'}],['YEET_LIVE unset',{}]]){
+ test(`recovery while paused (${label}): queued legs are released as not_sent, nothing is sent, the cap is returned`,async()=>{
+  const {db,tradeId,engine,signer}=await crashAfterCommit({env});
+  await engine.tracker.pollOnce();
+  assert.equal(signer.sent.length,0,'no transfer while trading is paused');
+  assert.deepEqual(legRows(db,tradeId).map(l=>l.send_status),['not_sent','not_sent','not_sent']);
+  assert.equal(spent(db),'0');
+  assert.equal(db.prepare('SELECT status FROM proposals').get().status,'failed');
+  const ev=db.prepare("SELECT evidence_json FROM trade_events WHERE trade_id=? AND to_status='not_sent'").all(tradeId);
+  assert.ok(ev.length===3&&ev.every(e=>JSON.parse(e.evidence_json).reason==='trading paused'));
+ });
+ test(`recovery while paused (${label}): a sending leg is looked up but never re-issued`,async()=>{
+  const {createEngine}=await import('./engine.mjs');
+  const signer=fakeSigner({lostLegs:[0]});
+  const first=await fakeEngine({signer});
+  const p=await first.engine.propose(alice,{...basket,legs:[{symbol:'WIF',parts:10}]});
+  const r=await exec(first.engine,alice,p);
+  const dep=legRows(first.db,r.trade_id)[0].deposit_address;
+  first.oneclick.deposits.get(dep).script=['status-pending.json','status-pending.json','status-pending.json'];
+  const s2=fakeSigner();
+  const engine=await createEngine({db:first.db,env,client:first.oneclick,signer:s2,balances:first.balances,now:first.now,trackerIntervalMs:60_000});
+  first.now.advance(20_000);
+  await engine.tracker.pollOnce();
+  assert.equal(s2.sent.length+s2.replays,0,'not re-issued while paused');
+  assert.equal(legRows(first.db,r.trade_id)[0].send_status,'sending');
+  assert.equal(spent(first.db),'20000000','still counted as spent');
+ });
+}
 
 test('fix 3: one trade failing to refresh does not stop the tick for the others; the error is recorded on that trade',async()=>{
  const {engine,db}=await fakeEngine();

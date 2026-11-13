@@ -186,6 +186,8 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
   *  - `sending` legs: looked up at 1Click by deposit address, else re-issued with the same idempotency key while the
   *    deadline is open; past it they stay `sending` (counted as spent) until 1Click or the tracker horizon resolves them;
   *  - sent legs whose deposit/submit failed are submitted again.
+  * With the kill switch on or YEET_LIVE unset, `queued` legs become `not_sent` (amount back to the cap) and `sending`
+  * legs are only looked up, never re-issued.
   */
  async function recover(tradeId){
   if(inFlight.has(tradeId))return false;
@@ -201,16 +203,20 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
     const wallet=w[t.direction==='yeet'?'base':'solana'];
     return ctx={wallet,held:t.direction==='skeet'?await wallets.holdings(wallet.address):undefined};
    };
+   // Kill switch or YEET_LIVE unset: nothing new is sent or re-issued; legs already sent are still tracked.
+   const paused=limits.killSwitch||!limits.live;
    for(const l of open){
     if(l.send_status==='sent'){await submit(t,l.idx);continue}
     const deadline=Date.parse(JSON.parse(l.live_quote_json).deadline);
     if(l.send_status==='queued'){
+     if(paused){release(t,l.idx,'not_sent',{reason:'trading paused',kill_switch:limits.killSwitch,live:limits.live});continue}
      if(!(now()+SEND_MARGIN_MS<deadline)){release(t,l.idx,'not_sent',{reason:'deposit deadline too close',deadline:iso(deadline)});continue}
      try{const {wallet,held}=await walletCtx();await attempt(t,l.idx,wallet,held)}
      catch(e){note(tradeId,`leg ${l.idx}: ${e?.detail??e?.message}`)}// stays queued; retried next tick
      continue;
     }
     if(await lookup(t,l))continue;
+    if(paused)continue;// stays `sending` (spent) until 1Click or the tracker horizon resolves it
     // Never re-issue towards an address that may be inactive: the leg stays `sending` (spent) until 1Click or the
     // tracker's horizon resolves it.
     if(!(now()+SEND_MARGIN_MS<deadline))continue;
