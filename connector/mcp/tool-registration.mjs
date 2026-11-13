@@ -26,7 +26,8 @@ export function spinText(r){
  const s=r?.stamp;
  if(!s)return `You won ${r.xp_won} XP.`;
  const set=s.set_completed?`, completing a ${s.coin} set${r.set_bonus_xp>0?` YEET spin.head.bonus: ${r.set_bonus_xp}.`:''}`:'';
- return `You won ${r.xp_won} XP and a ${s.coin} stamp (${s.filled} of ${s.slots})${set}.`;
+ const more=r.spins_available>0?`, and you have ${r.spins_available} more spin${r.spins_available===1?'':'s'} today`:'';
+ return `You won ${r.xp_won} XP and a ${s.coin} stamp (${s.filled} of ${s.slots})${set}${more}.`;
 }
 /** Tools whose core result may carry fields the pinned contract does not list yet (stamps): cut to the contract's
  * top-level properties so the closed output schema still passes; the fields flow through once the contract lists them. */

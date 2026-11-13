@@ -3,9 +3,9 @@
 // recorded once (xp_stamp_set) and pays SET_COMPLETE_XP once through the ledger's set_completed rule. The count keeps
 // going into the next card: card = floor(count/7)+1, progress = count%7.
 //
-// Stamps are only written by grantIn, which spin.mjs calls inside the same transaction as the daily_spin xp_event row,
-// so a spin can never pay XP without its stamp, and xp_stamp_spin (one row per account and UTC day) makes a replay
-// return the stored stamp instead of adding another. A coin that later leaves the catalog keeps its stored count and is
+// Stamps are only written by grantIn, which spin.mjs calls inside the same transaction as the spin's xp_event row
+// (daily_spin or extra_spin), so a spin can never pay XP without its stamp, and xp_stamp_spin (one row per spin: the day
+// for the daily spin, the grant id for an extra spin) makes a replay return the stored stamp instead of adding another. A coin that later leaves the catalog keeps its stored count and is
 // still listed (after the catalog coins).
 import {tradable} from '../coins.mjs';
 /** XP paid once per completed card (a set), on top of that day's spin; the set_completed rule's default points. */
@@ -20,8 +20,10 @@ const SCHEMA=`CREATE TABLE IF NOT EXISTS xp_stamp(
   identity_id TEXT NOT NULL, coin TEXT NOT NULL, count INTEGER NOT NULL CHECK(count>=0),
   first_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(identity_id,coin));
  CREATE TABLE IF NOT EXISTS xp_stamp_spin(
-  identity_id TEXT NOT NULL, day TEXT NOT NULL, coin TEXT NOT NULL, count_after INTEGER NOT NULL CHECK(count_after>0),
-  set_bonus_xp INTEGER NOT NULL DEFAULT 0, ts TEXT NOT NULL, PRIMARY KEY(identity_id,day));
+  identity_id TEXT NOT NULL, spin_key TEXT NOT NULL, day TEXT NOT NULL, coin TEXT NOT NULL,
+  count_after INTEGER NOT NULL CHECK(count_after>0), set_bonus_xp INTEGER NOT NULL DEFAULT 0, ts TEXT NOT NULL,
+  PRIMARY KEY(identity_id,spin_key));
+ CREATE INDEX IF NOT EXISTS xp_stamp_spin_day ON xp_stamp_spin(identity_id,day,ts);
  CREATE TABLE IF NOT EXISTS xp_stamp_set(
   identity_id TEXT NOT NULL, coin TEXT NOT NULL, card INTEGER NOT NULL CHECK(card>0), bonus_xp INTEGER NOT NULL,
   ts TEXT NOT NULL, PRIMARY KEY(identity_id,coin,card));`;
@@ -39,14 +41,16 @@ export const spinStamp=row=>{
 export function createStamps({ledger,coins=stampCoins()}){
  const db=ledger.db;
  db.exec(SCHEMA);
- const spinRow=(who,day)=>db.prepare('SELECT coin,count_after,set_bonus_xp FROM xp_stamp_spin WHERE identity_id=? AND day=?').get(who,day);
+ const spinRow=(who,key)=>db.prepare('SELECT spin_key,coin,count_after,set_bonus_xp FROM xp_stamp_spin WHERE identity_id=? AND spin_key=?').get(who,key);
  return {
   coins,
-  /** The stamp `who` got on `day`, or undefined. */
-  forDay:spinRow,
-  /** Inside the caller's transaction: one stamp of `coin` for `who` on `day`, once. A repeat returns the stored row. */
-  grantIn(who,day,coin,at){
-   const prior=spinRow(who,day);
+  /** The stamp one spin gave (`key`: the day for the daily spin, the grant id for an extra spin), or undefined. */
+  forSpin:spinRow,
+  /** The latest stamp `who` got on `day`, or undefined. */
+  lastOn:(who,day)=>db.prepare('SELECT spin_key,coin,count_after,set_bonus_xp FROM xp_stamp_spin WHERE identity_id=? AND day=? ORDER BY ts DESC,rowid DESC LIMIT 1').get(who,day),
+  /** Inside the caller's transaction: one stamp of `coin` for the spin `key` on `day`, once. A repeat returns the stored row. */
+  grantIn(who,key,day,coin,at){
+   const prior=spinRow(who,key);
    if(prior)return prior;
    db.prepare(`INSERT INTO xp_stamp(identity_id,coin,count,first_at,updated_at) VALUES(?,?,1,?,?)
     ON CONFLICT(identity_id,coin) DO UPDATE SET count=count+1,updated_at=excluded.updated_at`).run(who,coin,at,at);
@@ -57,8 +61,8 @@ export function createStamps({ledger,coins=stampCoins()}){
     bonus=ledger.awardIn(who,'set_completed',`${coin}|${card}`,{at});
     db.prepare('INSERT INTO xp_stamp_set(identity_id,coin,card,bonus_xp,ts) VALUES(?,?,?,?,?)').run(who,coin,card,bonus,at);
    }
-   db.prepare('INSERT INTO xp_stamp_spin(identity_id,day,coin,count_after,set_bonus_xp,ts) VALUES(?,?,?,?,?,?)').run(who,day,coin,count,bonus,at);
-   return spinRow(who,day);
+   db.prepare('INSERT INTO xp_stamp_spin(identity_id,spin_key,day,coin,count_after,set_bonus_xp,ts) VALUES(?,?,?,?,?,?,?)').run(who,key,day,coin,count,bonus,at);
+   return spinRow(who,key);
   },
   /** Every catalog coin in catalog order (zero counts included), then any stored coin no longer in the catalog. */
   list(who){

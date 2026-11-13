@@ -48,7 +48,7 @@ test('replay safety: a repeat the same day returns the same stamp and adds nothi
  assert.equal(n(l,'SELECT SUM(count) n FROM xp_stamp'),1);
  assert.equal(n(l,"SELECT COUNT(*) n FROM xp_event WHERE event='daily_spin'"),1);
  // The store exposes no other way to add a stamp than the spin itself.
- assert.deepEqual(Object.keys(spin.stamps).sort(),['coins','forDay','grantIn','list','setsCompleted']);
+ assert.deepEqual(Object.keys(spin.stamps).sort(),['coins','forSpin','grantIn','lastOn','list','setsCompleted']);
 });
 
 test('transactionality: a failed stamp write leaves no XP row; a spin that pays no XP writes no stamp',()=>{
@@ -68,7 +68,7 @@ test('transactionality: a failed stamp write leaves no XP row; a spin that pays 
 test('the 7th stamp completes a set and pays the bonus once; counts continue into the next card',()=>{
  const now=clock();const l=openLedger(':memory:',{now});const spin=createSpin({ledger:l,secret:SECRET,coins:['WIF']});
  let s;
- for(let d=1;d<=6;d++){s=spin.spin('a');assert.equal(s.stamp.filled,d);assert.equal(s.set_bonus_xp,0);now.advance(DAY)}
+ for(let d=1;d<=6;d++){s=spin.spin('a');assert.equal(s.stamp.filled,d);assert.equal(s.set_bonus_xp,0);now.advance(2*DAY)}
  const before=l.total('a');
  s=spin.spin('a');
  assert.deepEqual(s.stamp,{coin:'WIF',count_after:7,slots:7,card:1,filled:7,set_completed:true});
@@ -78,10 +78,10 @@ test('the 7th stamp completes a set and pays the bonus once; counts continue int
  assert.deepEqual(spin.spin('a'),s,'replay on the completing day: same result, bonus not paid twice');
  assert.equal(n(l,"SELECT COUNT(*) n FROM xp_event WHERE event='set_completed'"),1);
  assert.equal(n(l,'SELECT COUNT(*) n FROM xp_stamp_set'),1);
- now.advance(DAY);s=spin.spin('a');
+ now.advance(2*DAY);s=spin.spin('a');
  assert.deepEqual(s.stamp,{coin:'WIF',count_after:8,slots:7,card:2,filled:1,set_completed:false});
  assert.deepEqual(s.stamps,[{coin:'WIF',count:8,slots:7,card:2,progress:1,complete:true}]);
- for(let d=9;d<=14;d++){now.advance(DAY);s=spin.spin('a')}
+ for(let d=9;d<=14;d++){now.advance(2*DAY);s=spin.spin('a')}
  assert.equal(s.stamp.card,2);assert.equal(s.stamp.set_completed,true);assert.equal(s.sets_completed,2);
  assert.equal(n(l,"SELECT COUNT(*) n FROM xp_event WHERE event='set_completed'"),2);
  assert.equal(STAMP_SLOTS,7);

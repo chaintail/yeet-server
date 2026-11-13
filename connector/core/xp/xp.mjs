@@ -74,16 +74,20 @@ export function openXp({file=':memory:',secret,now=Date.now,coins}={}){
   },
   /** The XP summary behind yeet_home's xp block (homeXp cuts it to the contract). next_streak_milestone: {days, xp} of
    * the next streak length that pays a bonus, or null when the spin is off. stamps: every coin's stamp card (catalog
-   * order, zero counts included); sets_completed: cards filled so far (docs/WHEEL-STAMPS.md). */
+   * order, zero counts included); sets_completed: cards filled so far; spins_available: spins left today (daily +
+   * unused extra spins); extra_spin_reason: why the next extra spin was granted, or null (docs/WHEEL-STAMPS.md). */
   summary(who){
    const at=ledger.iso();
    return {total:ledger.total(who),streak_days:streakDays(db,who,dayOf(at)),spin_available:spin.available(who,at),
-    next_streak_milestone:spin.nextMilestone(who,at),stamps:spin.stamps.list(who),sets_completed:spin.stamps.setsCompleted(who)};
+    next_streak_milestone:spin.nextMilestone(who,at),...spin.left(who,at),stamps:spin.stamps.list(who),
+    sets_completed:spin.stamps.setsCompleted(who)};
   },
   /** yeet_home's recent_wins. The contract asks for {symbol, pct}; the stored data has what a leg paid and received
    * but no later price, so no gain since the buy can be stated truthfully. An empty list until a price history exists. */
   recentWins:()=>[],
   doSpin:who=>spin.spin(who),
+  /** Internal: one extra spin for `who` on `day` (spin.mjs grantSpin). Kept for a future trade bonus; no caller yet. */
+  grantSpin:(who,day,reason,uniqueRef)=>spin.grantSpin(who,day,reason,uniqueRef),
   /** names(accountId): the name a row shows; the default name when left out. */
   board:(kind,who,names)=>leaderboard(db,{kind,me:who,at:now(),...(names?{names}:{})}),
  };
