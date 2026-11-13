@@ -266,7 +266,9 @@
             "REQUOTE_REQUIRED",
             "TRADING_PAUSED",
             "REAUTH_REQUIRED",
-            "TEMPORARILY_UNAVAILABLE"
+            "TEMPORARILY_UNAVAILABLE",
+            "USERNAME_TAKEN",
+            "USERNAME_NOT_ALLOWED"
           ]
         },
         "message": {
@@ -1371,6 +1373,57 @@
         "REAUTH_REQUIRED",
         "TEMPORARILY_UNAVAILABLE"
       ]
+    },
+    "yeet_set_username": {
+      "priority": "P2",
+      "title": "Set YEET username",
+      "description": "Replaces the person's YEET display name.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 16,
+            "pattern": "^[A-Za-z0-9_]{3,16}$"
+          }
+        },
+        "required": [
+          "username"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 16
+          }
+        },
+        "required": [
+          "username"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "scope": "yeet:write",
+      "card": null,
+      "visible": true,
+      "widgetAccessible": false,
+      "errors": [
+        "INVALID_ARGUMENT",
+        "REAUTH_REQUIRED",
+        "TEMPORARILY_UNAVAILABLE",
+        "USERNAME_TAKEN",
+        "USERNAME_NOT_ALLOWED"
+      ]
     }
   },
   "x-yeet-cards": {
@@ -1382,17 +1435,17 @@
     "basket": {
       "uri": "ui://yeet/basket-v1.html",
       "title": "YEET basket",
-      "description": "A quoted basket: coins with their parts, each coin's share in percent and USDC, estimated amounts, cost, and the ⚡ YEET or SKEET button."
+      "description": "A quoted basket: coins with their parts, each coin's share in percent and USDC, an amount slider, estimated amounts, cost, and the YEET or SKEET button."
     },
     "receipt": {
       "uri": "ui://yeet/receipt-v1.html",
       "title": "YEET receipt",
-      "description": "Live status of a trade per coin, amounts received and explorer links."
+      "description": "Live status of a trade per coin, amounts received, explorer links and a share picture once it is done."
     },
     "portfolio": {
       "uri": "ui://yeet/portfolio-v1.html",
       "title": "YEET portfolio",
-      "description": "Coins and USDC in the YEET wallets, each coin with a SKEET button."
+      "description": "Coins and USDC in the YEET wallets, each coin with a YEET more button and a SKEET button, and a share picture."
     },
     "leaderboard": {
       "uri": "ui://yeet/leaderboard-v1.html",
@@ -1493,6 +1546,16 @@
       "title": "Try again in a minute",
       "message": "YEET couldn’t reach a service it needs and nothing was traded.",
       "retryable": true
+    },
+    "USERNAME_TAKEN": {
+      "title": "Username taken",
+      "message": "That username is taken, so pick another one.",
+      "retryable": false
+    },
+    "USERNAME_NOT_ALLOWED": {
+      "title": "Username reserved",
+      "message": "That username is reserved, so pick another one.",
+      "retryable": false
     }
   }
 }

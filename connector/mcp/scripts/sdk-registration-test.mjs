@@ -41,13 +41,13 @@ test('tools/list: P0 and P1 tools with the contract annotations, scopes, cards a
   assert.equal(by.execute_trade._meta['openai/visibility'],'private');
   assert.deepEqual(by.execute_trade._meta.ui.visibility,['app']);
   for(const n of LISTED.filter(n=>n!=='execute_trade')){assert.equal(by[n]._meta['openai/visibility'],undefined,n);assert.deepEqual(by[n]._meta.ui.visibility,['model','app'],n)}
-  assert.deepEqual(TOOLS.map(t=>t.name).sort(),[...LISTED,'daily_spin','yeet_leaderboard'].sort());
+  assert.deepEqual(TOOLS.map(t=>t.name).sort(),[...LISTED,'daily_spin','yeet_leaderboard','yeet_set_username'].sort());
  }finally{await close()}
  const p2=createMcpServer({token:{scope:''},callCore:async()=>({}),env:{YEET_P2:'1'}});
  const c2=new Client({name:'p2',version:'1'});const [a,b]=InMemoryTransport.createLinkedPair();await p2.connect(a);await c2.connect(b);
  try{
   const {tools}=await c2.listTools();
-  assert.deepEqual(tools.map(t=>t.name).sort(),[...LISTED,'daily_spin','yeet_leaderboard'].sort());
+  assert.deepEqual(tools.map(t=>t.name).sort(),[...LISTED,'daily_spin','yeet_leaderboard','yeet_set_username'].sort());
   const spin=tools.find(t=>t.name==='daily_spin');assert.equal(spin._meta['openai/visibility'],'private');assert.deepEqual(spin._meta.ui.visibility,['app']);
   assert.equal(tools.find(t=>t.name==='yeet_leaderboard')._meta['openai/outputTemplate'],LEADERBOARD_UI_URI);
  }finally{await c2.close();await p2.close()}

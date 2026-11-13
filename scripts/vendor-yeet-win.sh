@@ -3,7 +3,8 @@
 #
 #   scripts/vendor-yeet-win.sh <path-to-yeet-win> [ref, default main]
 #
-# 1. `git archive <ref>` of contracts/, packages/router/, packages/widget/ and the workspace manifests is unpacked
+# 1. `git archive <ref>` of contracts/, packages/router/, packages/widget/, brand/, apps/landing/type-data.js (the
+#    card build inlines the brand tokens, logo, mark and heading glyphs) and the workspace manifests is unpacked
 #    into .build/yeet-win-<sha>/ (ignored by git; reused when it already exists).
 # 2. The router is built there with its own pinned toolchain (npm ci of the router workspace, then tsc), and the
 #    widget with `node build.mjs` (dist/*.html + dist/templates.json).
@@ -24,7 +25,7 @@ dest="$root/connector/vendor/yeet-win"
 mkdir -p "$root/.build"
 if [ ! -f "$build/.unpacked" ]; then
   mkdir -p "$build"
-  git -C "$src" archive --format=tar "$sha" contracts packages/router packages/widget package.json package-lock.json | tar -x -C "$build"
+  git -C "$src" archive --format=tar "$sha" contracts packages/router packages/widget brand apps/landing/type-data.js package.json package-lock.json | tar -x -C "$build"
   touch "$build/.unpacked"
 fi
 

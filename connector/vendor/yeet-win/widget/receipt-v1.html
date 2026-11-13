@@ -1,133 +1,97 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>YEET receipt</title>
-<style>/* YEET cards. Colours follow the yeet.win landing page; system fonts only, nothing loaded from the network.
-   Sizes are rem so a larger text size scales the card. Built for 320-480 px wide frames. */
-:root{color-scheme:dark;
- --bg:#0b0814;--panel:#171127;--panel2:#211838;--line:#2e2450;--text:#f6f3ff;--muted:#bdb5d9;--dim:#8f86b3;
- --yellow:#ffe14d;--pink:#ff3d8b;--cyan:#3ee8ff;--lime:#9dff4f;--red:#ff6b6b;--ring:#3ee8ff}
-*{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%;text-size-adjust:100%;background:var(--bg)}
-body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:.9375rem;line-height:1.4;font-variant-numeric:tabular-nums}
-main{padding:calc(.75rem + var(--host-top,0px)) calc(.75rem + var(--host-right,0px)) calc(.75rem + var(--host-bottom,0px)) calc(.75rem + var(--host-left,0px))}
-p{margin:0}
-h1{margin:0;font-size:1.125rem;font-weight:850;letter-spacing:-.01em}
-ul,ol{list-style:none;margin:0;padding:0}
-button{font:inherit;color:inherit}
-:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+<style>/* YEET design tokens. Dark first. The copy the site serves is apps/landing/tokens.css; edit here, then copy. */
+:root {
+  color-scheme: dark;
 
-.card{background:var(--panel);border:1px solid var(--line);border-radius:1.125rem;padding:.875rem;display:flex;flex-direction:column;gap:.75rem;min-width:0}
-.head{display:flex;align-items:baseline;justify-content:space-between;gap:.5rem;flex-wrap:wrap}
-.head .sub{color:var(--muted);font-size:.8125rem;font-weight:600}
-.waiting{color:var(--muted);padding:.5rem 0}
-.note{color:var(--muted);font-size:.8125rem}
-.fine{color:var(--dim);font-size:.75rem}
-.big{font-size:2rem;font-weight:900;color:var(--yellow)}
+  /* ground */
+  --ink-950: #06071C;
+  --ink-900: #0A0C2B;
+  --ink: #0F1240;
+  --ink-700: #181D5E;
+  --ink-600: #232A7A;
+  --blue: #2430FF;
+  --blue-deep: #1820C4;
+  --blue-lift: #4A55FF;
 
-/* Rows: letter avatar, symbol over name, estimate, then the control on the right. */
-.rows{display:flex;flex-direction:column;gap:.375rem}
-.row{display:grid;grid-template-columns:2.25rem minmax(0,1fr) auto auto;align-items:center;gap:.5rem;background:var(--panel2);border-radius:.875rem;padding:.5rem .5rem .5rem .5rem;min-height:3.25rem}
-.row .reason{grid-column:2/-1;color:var(--muted);font-size:.75rem}
-.row .where{grid-column:2/-1;color:var(--muted);font-size:.75rem}
-.avatar{width:2.25rem;height:2.25rem;border-radius:50%;display:grid;place-items:center;font-weight:900;font-size:1rem;color:#0b0814;background:var(--yellow)}
-.avatar[data-tone="1"]{background:var(--pink)}.avatar[data-tone="2"]{background:var(--cyan)}.avatar[data-tone="3"]{background:var(--lime)}
-.avatar[data-tone="4"]{background:#b18cff}.avatar[data-tone="5"]{background:#ffb02e}
-.who{display:flex;flex-direction:column;min-width:0}
-.sym{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.name{color:var(--muted);font-size:.75rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.share{color:var(--yellow);font-size:.75rem;font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums}
-/* A coin at 0 parts: dimmed and out of the trade; its stepper stays usable so it can come back. */
-.row.off>.avatar,.row.off>.who,.row.off>.est{opacity:.45}
-.row.off .share{color:var(--muted);font-weight:400}
-.est{display:flex;flex-direction:column;align-items:flex-end;text-align:right;white-space:nowrap;font-size:.8125rem}
-.est .amt{font-weight:700}
-.est .usd,.est.muted{color:var(--muted);font-size:.75rem}
-.row>.est:last-child{grid-column:3/-1}
+  /* brand: the logo, XP, highlights */
+  --yellow: #FFE03A;
+  --yellow-lift: #FFEE78;
+  --yellow-deep: #F2C200;
 
-.stepper{display:flex;align-items:center;gap:.125rem;background:#0f0a1c;border-radius:999px;padding:.125rem}
-.btn.step{width:2rem;height:2rem;border-radius:50%;border:0;background:var(--panel2);font-size:1.125rem;font-weight:800;line-height:1;cursor:pointer;padding:0}
-.btn.step:not(:disabled):active{background:var(--line)}
-.btn.step:disabled{opacity:.35;cursor:default}
-.parts{min-width:1.375rem;text-align:center;font-weight:900;color:var(--yellow)}
+  /* the two actions */
+  --yeet: #22E27A;
+  --yeet-lift: #8AF7B6;
+  --yeet-deep: #0FB95C;
+  --skeet: #FF4D8D;
+  --skeet-lift: #FF88B4;
+  --skeet-deep: #EE2E77;
 
-.totals{display:flex;flex-wrap:wrap;gap:.25rem .875rem;font-size:.8125rem;color:var(--muted)}
-.totals span:first-child{color:var(--text);font-weight:700}
-.cost.high{color:var(--yellow);font-weight:700}
-.chips{display:flex;flex-wrap:wrap;gap:.375rem}
-.chip{font-size:.75rem;padding:.125rem .5rem;border-radius:999px;background:var(--panel2);color:var(--muted)}
-.chip.up{color:var(--lime)}.chip.down{color:var(--red)}
-.inline-error{display:flex;flex-direction:column;gap:.125rem;font-size:.8125rem;padding:.5rem .625rem;border-radius:.75rem;background:#2a1030;border:1px solid #5a1d4a}
-.inline-error span{color:var(--muted)}
+  /* text and lines on dark */
+  --text: #F4F5FF;
+  --muted: #A9AEDD;
+  --dim: #6E74B2;
+  --line: rgba(255, 255, 255, .12);
+  --line-strong: rgba(255, 255, 255, .22);
+  --surface: rgba(15, 18, 64, .72);
+  --surface-solid: #12164C;
 
-.actions{display:flex;gap:.5rem;align-items:stretch;flex-wrap:wrap}
-.btn{border:0;cursor:pointer}
-a.btn{display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
-.btn.primary.fund{font-size:1.0625rem}
-.btn.primary{flex:1 1 10rem;min-height:3rem;border-radius:999px;font-size:1.25rem;font-weight:900;letter-spacing:.02em;color:#0b0814;
- background:linear-gradient(90deg,var(--yellow),#ffb02e 50%,var(--pink));box-shadow:0 6px 22px rgba(255,61,139,.3);transition:transform .12s ease,box-shadow .2s,opacity .2s}
-.btn.primary.skeet{background:linear-gradient(90deg,var(--cyan),#b18cff);box-shadow:0 6px 22px rgba(62,232,255,.25)}
-.btn.primary:not(:disabled):active{transform:scale(.98)}
-.btn.primary:disabled{opacity:.4;box-shadow:none;cursor:default;filter:grayscale(.5)}
-.btn.quiet{flex:0 1 auto;min-height:3rem;padding:0 1rem;border-radius:999px;background:transparent;border:1.5px solid var(--line);color:var(--text);font-weight:700}
-.btn.skeet.small{min-height:2rem;padding:0 .75rem;border-radius:999px;font-size:.75rem;font-weight:900;color:#0b0814;background:var(--cyan)}
-.btn.skeet.small:disabled{opacity:.4}
+  /* light surfaces (cards inside ChatGPT, print) */
+  --paper: #FFFFFF;
+  --sky: #EEF0FF;
+  --line-light: #DADDF5;
+  --muted-light: #5A5E8A;
 
-.status{font-size:.75rem;font-weight:700}
-.status.ok{color:var(--lime)}.status.wait{color:var(--yellow)}.status.bad{color:var(--red)}
-.links{display:flex;gap:.5rem;justify-content:flex-end}
-.tx{color:var(--cyan);font-size:.75rem;font-weight:700;text-decoration:none}
-.tx:hover{text-decoration:underline}
-.got{display:flex;flex-wrap:wrap;gap:.25rem .75rem;align-items:baseline}
-.got .label{color:var(--muted);font-size:.8125rem;flex-basis:100%}
-.got strong{color:var(--lime)}
-.xp{color:var(--yellow);font-weight:800;font-size:.875rem}
-.receipt[data-status=success] h1{color:var(--lime)}
-.receipt[data-status=failed] h1,.receipt[data-status=refunded] h1{color:var(--red)}
+  /* price moves */
+  --up: #22E27A;
+  --down: #FF6B8F;
 
-.xpbox{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:.625rem;background:var(--panel2);border-radius:.875rem;padding:.5rem .625rem}
-.xpnum{font-weight:900;color:var(--yellow)}
-.streak{color:var(--muted);font-size:.8125rem}
-.streak.next{color:var(--dim);font-size:.75rem}
-.xpbox .btn.quiet{min-height:2.25rem}
-.wheel{width:1.75rem;height:1.75rem;border-radius:50%;flex:none;background:conic-gradient(var(--yellow) 0 60deg,var(--pink) 0 120deg,var(--cyan) 0 180deg,var(--lime) 0 240deg,#b18cff 0 300deg,#ffb02e 0)}
-.spinning .wheel{animation:turn .6s linear infinite}
-@keyframes turn{to{transform:rotate(360deg)}}
+  /* coin chips */
+  --coin-1: #FFB238;
+  --coin-2: #F27BB3;
+  --coin-3: #9C84FF;
+  --coin-4: #38D1C0;
+  --coin-5: #E3A86B;
 
-/* Daily spin: the wheel box is square; wheel.css sizes the wheel inside it. */
-.spin{display:flex;flex-direction:column;gap:.5rem}
-.spin-head{display:flex;align-items:center;justify-content:space-between;gap:.5rem}
-.spin-head h2{margin:0;font-size:1rem;font-weight:850}
-.btn.quiet.small{min-height:2rem;padding:0 .75rem;font-size:.75rem}
-.spin-wheel{position:relative;width:100%;max-width:24rem;aspect-ratio:1;margin:0 auto}
-.spin-line{text-align:center;color:var(--muted);font-weight:700}
-.spin-line.won{color:var(--yellow);font-size:1.25rem;font-weight:900}
-.spin .fine{text-align:center}
-display:flex;flex-direction:column}
-.line{display:grid;grid-template-columns:2.75rem minmax(0,1fr) auto;gap:.5rem;padding:.375rem .25rem;border-bottom:1px solid var(--line)}
-.line:nth-child(-n+3) .rank{color:var(--yellow)}
-.rank{font-weight:800;color:var(--muted)}
-.who-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pts{font-weight:700}
-.me{font-weight:800;color:var(--cyan)}
+  /* type */
+  --font-display: "Archivo", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --text-hero: clamp(3.5rem, 17.5vw, 9.5rem);
+  --text-h2: clamp(2rem, 8.6vw, 4rem);
+  --text-h3: 1.25rem;
+  --text-body: 1.0625rem;
+  --text-small: .875rem;
+  --leading-display: .9;
+  --leading-body: 1.5;
 
-.problem{border-color:#5a1d4a}
-.problem h1{color:var(--pink)}
-.problem p{color:var(--muted)}
-.problem .btn.quiet{align-self:flex-start}
+  /* shape */
+  --r-chip: 999px;
+  --r-btn: 18px;
+  --r-card: 22px;
+  --r-tile: 28px;
 
-@media (max-width:360px){
- .card{padding:.625rem}
- .row{grid-template-columns:2rem minmax(0,1fr) auto auto;gap:.375rem;padding:.375rem}
- .avatar{width:2rem;height:2rem;font-size:.875rem}
- .btn.step{width:1.75rem;height:1.75rem}
- .name{display:none}
- /* Rows with a control on the right: the estimate moves under the symbol so the symbol keeps its width. */
- .row:has(>.stepper),.row:has(>.btn){grid-template-columns:2rem minmax(0,1fr) auto;row-gap:0}
- .row:has(>.stepper)>.avatar,.row:has(>.btn)>.avatar{grid-row:1/3}
- .row:has(>.stepper)>.est,.row:has(>.btn)>.est{grid-column:2;grid-row:2;flex-direction:row;align-items:baseline;gap:.375rem;justify-content:flex-start}
- .row:has(>.stepper)>.stepper,.row:has(>.btn)>.btn{grid-column:3;grid-row:1/3}
-}
-@media (prefers-reduced-motion:reduce){
- *,*::before,*::after{animation:none!important;transition:none!important}
+  /* depth: soft, never a hard offset */
+  --shadow-card: 0 20px 44px -24px rgba(2, 3, 20, .8);
+  --shadow-pop: 0 28px 60px -20px rgba(2, 3, 20, .85);
+  --glow-yeet: rgba(34, 226, 122, .55);
+  --glow-skeet: rgba(255, 77, 141, .55);
+  --glow-yellow: rgba(255, 224, 58, .45);
+
+  /* motion */
+  --dur-press: 120ms;
+  --dur-out: 420ms;
+  --dur-in: 760ms;
+  --dur-glint: 850ms;
+  --dur-edge: 9s;
+  --dur-breathe: 4.8s;
+  --dur-stretch: 5.2s;
+  --dur-drift: 22s;
+  --stagger: 70ms;
+  --ease-out: cubic-bezier(.2, .8, .2, 1);
+  --ease-in: cubic-bezier(.6, 0, .9, .4);
+  --ease-settle: cubic-bezier(.3, 1.25, .5, 1);
+  --ease-glint: cubic-bezier(.45, 0, .2, 1);
 }
 /* The XP wheel (src/wheel.js). The stage fills a sized box; the wheel sizes itself into it, leaving room for the end zoom. */
 .visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
@@ -182,16 +146,308 @@ display:flex;flex-direction:column}
 .wheel-flash.go{animation:wheel-flash .7s ease-out}
 @keyframes wheel-flash{0%{opacity:.85}100%{opacity:0}}
 @media (prefers-reduced-motion:reduce){.wheel-rays{animation:none!important}}
+/* YEET cards. Colours, type and motion come from brand/tokens.css (index.mjs puts it in front of this file).
+   The parts are the brand's own, lifted from apps/landing/ui.css: living buttons, coin chips, the edge light,
+   streak days, leaderboard rows, the trade wire, the share picture. System fonts only, nothing loaded from the network.
+   Sizes are rem so a larger text size scales the card. Built for 320-480 px wide frames. */
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%;background:var(--ink-950)}
+body{margin:0;color:var(--text);background:linear-gradient(100deg,var(--ink-950) 30%,#0B0E3A 68%,#141A8A 135%);
+ font:400 .9375rem/1.4 var(--font-body);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+main{position:relative;padding:calc(.75rem + var(--host-top,0px)) calc(.75rem + var(--host-right,0px)) calc(.75rem + var(--host-bottom,0px)) calc(.75rem + var(--host-left,0px))}
+p{margin:0}
+h1,h2{margin:0}
+ul,ol{list-style:none;margin:0;padding:0}
+button,input{font:inherit;color:inherit}
+button{-webkit-tap-highlight-color:transparent}
+:focus-visible{outline:3px solid var(--yellow);outline-offset:2px;border-radius:8px}
+::selection{background:var(--yellow);color:var(--ink)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* ---------- the card: a soft panel on the ground, a line of light on its top edge, a few stars ---------- */
+.card{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-card);padding:.875rem;display:flex;flex-direction:column;gap:.75rem;min-width:0}
+.card>*{position:relative}
+.card>.edge-line{position:absolute;inset:-1px -1px auto -1px;height:var(--r-card);border-radius:var(--r-card) var(--r-card) 0 0;overflow:hidden;pointer-events:none}
+.edge-line::before{content:"";position:absolute;left:0;top:0;height:1.5px;width:40%;background:linear-gradient(90deg,transparent,var(--el,rgba(255,224,58,.85)),transparent);animation:edge var(--dur-edge) linear infinite;animation-delay:calc(var(--clk,0)*-1s)}
+@keyframes edge{0%{transform:translateX(-100%)}55%,100%{transform:translateX(260%)}}
+.card>.stars{position:absolute;inset:0 0 auto 0;height:3.25rem;pointer-events:none;overflow:hidden;border-radius:var(--r-card) var(--r-card) 0 0}
+.tw{position:absolute;left:var(--x);top:var(--y);width:var(--s,10px);height:var(--s,10px);opacity:0;animation:twinkle var(--t,4s) ease-in-out infinite;animation-delay:calc(var(--clk,0)*-1s + var(--dl,0s))}
+.tw::before{content:"";position:absolute;inset:0;background:var(--c,#fff);clip-path:polygon(50% 0,60% 40%,100% 50%,60% 60%,50% 100%,40% 60%,0 50%,40% 40%)}
+@keyframes twinkle{0%,64%,100%{opacity:0;transform:scale(.2) rotate(0)}76%{opacity:.9;transform:scale(1) rotate(45deg)}88%{opacity:.35;transform:scale(.55) rotate(80deg)}}
+
+/* ---------- enter and leave: parts slide in from the left with a lean, one after the other ---------- */
+.card.enter>*:not(.edge-line):not(.stars){animation:rise var(--dur-in) var(--ease-out) both;animation-delay:calc(var(--i,0)*var(--stagger))}
+.card.enter .rows>li,.card.enter .lb>*{animation:rise var(--dur-in) var(--ease-out) both;animation-delay:calc((var(--i,0) + var(--j,0))*var(--stagger))}
+@keyframes rise{from{opacity:0;transform:translateX(-14px) skewX(-5deg);filter:blur(3px)}}
+.in{animation:pop .42s var(--ease-out) both}
+@keyframes pop{from{opacity:0;transform:translateY(8px) scale(.97)}}
+.tick{animation:tick .36s var(--ease-out) both}
+@keyframes tick{from{opacity:.25;transform:translateY(3px)}}
+.ghost{position:absolute;left:calc(.75rem + var(--host-left,0px));right:calc(.75rem + var(--host-right,0px));top:calc(.75rem + var(--host-top,0px));pointer-events:none;z-index:2}
+.going{pointer-events:none;overflow:hidden}
+
+/* ---------- head: the mark, a display heading, a short line on the right ---------- */
+.head{display:flex;align-items:center;justify-content:space-between;gap:.5rem .625rem;flex-wrap:wrap;min-height:1.75rem}
+.head .title{display:flex;align-items:center;gap:.5rem;min-width:0}
+.head .mark{width:1.375rem;height:1.375rem;flex:none;color:var(--yellow)}
+.head .mark path{fill:currentColor}
+.head .sub{color:var(--muted);font:600 .8125rem/1.2 var(--font-mono);white-space:nowrap}
+.display{font:italic 900 1.3125rem/1 var(--font-display);letter-spacing:-.035em;color:#fff}
+.display .set{display:flex;flex-wrap:wrap;gap:.1em .26em}
+.yw{display:block;line-height:0}
+.yw svg{display:block;height:1em;overflow:visible}
+.yw path{fill:currentColor}
+.yw.em{color:var(--yellow)}
+.logo{display:block;line-height:0}
+.logo svg{display:block;height:1.5rem;width:auto}
+.logo path{fill:#fff}
+.waiting{color:var(--muted);padding:.75rem .25rem;display:flex;align-items:center;gap:.75rem}
+.waiting::after{content:"";flex:1;height:2px;min-width:2rem;background:repeating-linear-gradient(90deg,var(--yellow) 0 6px,transparent 6px 11px);background-size:22px 2px;animation:wire .9s linear infinite;opacity:.7}
+.note{color:var(--muted);font-size:.8125rem}
+.fine{color:var(--muted);font-size:.75rem;opacity:.85}
+.big{font:italic 900 2rem/1 var(--font-display);color:var(--yellow)}
+.mention{display:inline-block;padding:0 .375rem;border-radius:.375rem;background:rgba(255,224,58,.18);color:var(--yellow);font-weight:650}
+
+/* ---------- rows: coin chip, symbol over name, estimate, then the control ---------- */
+.rows{display:flex;flex-direction:column;gap:.375rem}
+.row{display:grid;grid-template-columns:2.5rem minmax(0,1fr) auto auto;align-items:center;gap:.375rem .5rem;background:rgba(6,7,28,.55);border:1px solid var(--line);border-radius:.875rem;padding:.5rem;min-height:3.5rem}
+.row .reason,.row .where{grid-column:2/-1;color:var(--muted);font-size:.75rem}
+.coin{width:2.5rem;height:2.5rem;border-radius:50%;display:grid;place-items:center;flex:none;font:italic 900 .71875rem/1 var(--font-display);letter-spacing:-.03em;color:var(--ink);border:2px solid var(--ink);background:var(--coin-1)}
+.coin.c2{background:var(--coin-2)}.coin.c3{background:var(--coin-3)}.coin.c4{background:var(--coin-4)}.coin.c5{background:var(--coin-5)}
+.coin.usd{background:#2775CA;color:#fff;font-size:1rem;font-style:normal}
+.coin.mini{width:1.5rem;height:1.5rem;font-size:.5rem;border-width:1.5px}
+.who{display:flex;flex-direction:column;min-width:0}
+.sym{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.name{color:var(--muted);font-size:.75rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.share{color:var(--yellow);font-size:.75rem;font-weight:700;white-space:nowrap}
+/* A coin at 0 parts: dimmed and out of the trade; its stepper stays usable so it can come back. */
+.row.off>.coin,.row.off>.who,.row.off>.est{opacity:.45}
+.row.off .share{color:var(--muted);font-weight:400}
+.est{display:flex;flex-direction:column;align-items:flex-end;text-align:right;white-space:nowrap;font-size:.8125rem}
+.est .amt{font-weight:700}
+.est .usd,.est.muted{color:var(--muted);font-size:.75rem}
+.row>.est:last-child{grid-column:3/-1}
+/* Holdings: the two actions sit under the coin, side by side, YEET on the left. */
+.row>.pair{grid-column:1/-1}
+
+.stepper{display:flex;align-items:center;gap:.125rem;background:var(--ink-950);border:1px solid var(--line);border-radius:999px;padding:.125rem}
+.btn.step{width:2rem;height:2rem;min-height:0;border-radius:50%;background:rgba(255,255,255,.1);color:var(--text);font:800 1.125rem/1 var(--font-body);padding:0}
+.btn.step:not(:disabled):active{background:rgba(255,255,255,.22)}
+.btn.step:disabled{opacity:.35;cursor:default}
+.parts{min-width:1.5rem;text-align:center;font:italic 900 1rem/1 var(--font-display);color:var(--yellow)}
+
+/* ---------- amount: a field and a slider for the USDC to spend ---------- */
+.amount{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:.125rem .75rem;background:rgba(6,7,28,.55);border:1px solid var(--line);border-radius:.875rem;padding:.5rem .75rem .375rem .5rem}
+.amount .field{display:flex;align-items:center;gap:.375rem;height:2.5rem;padding:0 .625rem;border-radius:.625rem;background:rgba(255,255,255,.07);border:1px solid var(--line)}
+.amount .field:focus-within{border-color:var(--yellow)}
+.amount .field input{width:3.25rem;min-width:0;border:0;padding:0;background:none;color:#fff;font:800 1.0625rem/1 var(--font-mono);text-align:right;outline:0;-moz-appearance:textfield;appearance:textfield}
+.amount .field input::-webkit-outer-spin-button,.amount .field input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.amount .field span{color:var(--muted);font:600 .75rem/1 var(--font-mono)}
+.amount .slide{display:flex;flex-direction:column;min-width:0}
+.amount input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:1.75rem;margin:0;background:transparent;cursor:pointer;--fill:50%}
+.amount input[type=range]::-webkit-slider-runnable-track{height:.5rem;border-radius:999px;background:linear-gradient(90deg,var(--yeet-deep),var(--yeet) var(--fill),rgba(255,255,255,.14) var(--fill))}
+.amount input[type=range]::-moz-range-track{height:.5rem;border-radius:999px;background:linear-gradient(90deg,var(--yeet-deep),var(--yeet) var(--fill),rgba(255,255,255,.14) var(--fill))}
+.amount input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:1.5rem;height:1.5rem;margin-top:-.5rem;border-radius:50%;background:var(--yeet);border:2px solid var(--ink);box-shadow:0 0 0 3px rgba(34,226,122,.28);transition:transform var(--dur-press) var(--ease-out)}
+.amount input[type=range]::-moz-range-thumb{width:1.25rem;height:1.25rem;border-radius:50%;background:var(--yeet);border:2px solid var(--ink);box-shadow:0 0 0 3px rgba(34,226,122,.28)}
+.amount input[type=range]:active::-webkit-slider-thumb{transform:scale(1.12)}
+.amount input[type=range]:disabled{opacity:.45;cursor:default}
+.amount .ends{display:flex;justify-content:space-between;color:var(--muted);font:600 .6875rem/1 var(--font-mono);padding:0 .125rem}
+
+.totals{display:flex;flex-wrap:wrap;gap:.25rem .875rem;font-size:.8125rem;color:var(--muted)}
+.totals span:first-child{color:var(--text);font-weight:700}
+.cost.high{color:var(--yellow);font-weight:700}
+.chips{display:flex;flex-wrap:wrap;gap:.375rem}
+.chip{display:inline-flex;align-items:center;gap:.375rem;font-size:.75rem;font-weight:700;padding:.1875rem .625rem .1875rem .25rem;border-radius:999px;background:rgba(255,255,255,.07);border:1px solid var(--line);color:var(--muted)}
+.chip.plain{padding-left:.625rem}
+.chip.up{color:var(--up)}.chip.down{color:var(--down)}
+.inline-error{display:flex;flex-direction:column;gap:.125rem;font-size:.8125rem;padding:.5rem .625rem;border-radius:.75rem;background:rgba(255,77,141,.1);border:1px solid rgba(255,77,141,.4)}
+.inline-error strong{color:#fff}
+.inline-error span{color:var(--muted)}
+
+/* ---------- buttons: YEET green, SKEET pink, yellow for the brand's own calls ---------- */
+.actions{display:flex;gap:.5rem;align-items:stretch;flex-wrap:wrap}
+.btn{--f0:var(--yellow);--f1:var(--yellow-lift);--f2:#FFD41C;--gl:var(--glow-yellow);--rb:var(--yellow-deep);--ra:rgba(255,252,232,.95);
+ position:relative;isolation:isolate;display:inline-flex;align-items:center;justify-content:center;gap:.5em;border:0;cursor:pointer;
+ border-radius:var(--r-btn);color:var(--ink);font:italic 900 1.125rem/1 var(--font-display);letter-spacing:-.01em;text-decoration:none;white-space:nowrap;
+ user-select:none;-webkit-user-select:none;background:var(--f0);transition:transform var(--dur-press) var(--ease-out),filter .2s,opacity .2s}
+.btn:not(:disabled):active{transform:translateY(2px) scale(.985)}
+.btn.yeet{--f0:var(--yeet);--f1:var(--yeet-lift);--f2:var(--yeet-deep);--gl:var(--glow-yeet);--rb:var(--yeet-deep);--ra:rgba(236,255,244,.95)}
+.btn.skeet{--f0:var(--skeet);--f1:var(--skeet-lift);--f2:var(--skeet-deep);--gl:var(--glow-skeet);--rb:var(--skeet-deep);--ra:rgba(255,232,242,.95)}
+.btn.primary{flex:1 1 10rem;min-height:3.5rem;padding:0 1.25rem;font-size:1.25rem}
+.btn.primary.fund{font-size:1.125rem}
+.btn svg.ico{width:1.05em;height:1.05em;flex:none}
+/* the living button: breathing glow, a light that runs the border now and then, a moving fill, a glint */
+.btn.zap{background:transparent}
+.btn>.fx{position:absolute;inset:0;border-radius:inherit;z-index:-1;pointer-events:none}
+.fx>i{position:absolute;display:block;border-radius:inherit}
+.fx-glow{inset:-10px -6px -14px;border-radius:999px!important;background:radial-gradient(50% 50% at 50% 55%,var(--gl),transparent 100%);animation:breathe var(--dur-breathe) ease-in-out infinite;animation-delay:calc(var(--clk,0)*-1s)}
+.fx-ring{inset:0;overflow:hidden;background:var(--rb)}
+.fx-ring b{position:absolute;left:50%;top:50%;width:max(300%,260px);aspect-ratio:1;background:conic-gradient(from 0deg,transparent 0 62%,var(--ra) 72%,#fff 75%,var(--ra) 78%,transparent 88%);transform:translate(-50%,-50%);animation:ringspin 6.4s var(--ease-glint) infinite;animation-delay:calc(var(--clk,0)*-1s)}
+.fx-fill{inset:2px;overflow:hidden;background:var(--f0);border-radius:calc(var(--r-btn) - 2px)!important}
+.fx-fill::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 -3px 0 rgba(0,0,0,.12),inset 0 1px 0 rgba(255,255,255,.55)}
+.fx-flow{position:absolute;top:0;bottom:0;left:0;width:300%;background:linear-gradient(90deg,var(--f0),var(--f1) 28%,var(--f0) 52%,var(--f2) 78%,var(--f0)) 0 0/33.3334% 100% repeat-x;animation:flow 6.5s linear infinite;animation-delay:calc(var(--clk,0)*-1s)}
+.fx-sheen{position:absolute;top:-30%;bottom:-30%;left:0;width:34%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent);transform:translateX(-130%) skewX(-22deg);animation:sheen 4.6s var(--ease-glint) infinite;animation-delay:calc(var(--clk,0)*-1s)}
+.btn.skeet .fx-sheen{animation-name:sheen-back;animation-duration:5.4s}
+@keyframes breathe{0%,100%{opacity:.3;transform:scale(.97)}50%{opacity:.7;transform:scale(1.04)}}
+@keyframes ringspin{0%{transform:translate(-50%,-50%) rotate(0)}46%,100%{transform:translate(-50%,-50%) rotate(360deg)}}
+@keyframes flow{to{transform:translateX(-33.3333%)}}
+@keyframes sheen{0%,80%{transform:translateX(-130%) skewX(-22deg)}100%{transform:translateX(330%) skewX(-22deg)}}
+@keyframes sheen-back{0%,80%{transform:translateX(330%) skewX(-22deg)}100%{transform:translateX(-130%) skewX(-22deg)}}
+.btn.primary:disabled{opacity:.42;cursor:default;filter:saturate(.55)}
+.btn:disabled .fx-glow,.btn:disabled .fx-ring b,.btn:disabled .fx-sheen{display:none}
+.btn:disabled .fx-flow{animation:none}
+/* the word on YEET and SKEET: outlines between the narrow and the wide cut; on a YEET basket the width follows the amount */
+.btn .lbl{display:block;line-height:0}
+.btn .lbl svg{display:block;height:1.5rem;width:auto;overflow:visible}
+.btn .lbl path{fill:currentColor}
+/* two buttons, side by side, always */
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:.5rem;width:100%}
+.btn.small{min-height:2.375rem;padding:0 .75rem;border-radius:.75rem;font-size:.875rem;background:linear-gradient(180deg,var(--f1) -60%,var(--f0) 45%,var(--f2) 160%);box-shadow:inset 0 -2px 0 rgba(0,0,0,.12),inset 0 1px 0 rgba(255,255,255,.5)}
+.btn.small:disabled{opacity:.45;cursor:default}
+.btn.small.wait{animation:waitpulse 1s ease-in-out infinite}
+@keyframes waitpulse{50%{opacity:.6}}
+.btn.quiet{flex:0 1 auto;min-height:3.5rem;padding:0 1rem;background:transparent;border:1.5px solid var(--line-strong);color:var(--text);font:700 .9375rem/1 var(--font-body);letter-spacing:0}
+.btn.quiet:not(:disabled):active{background:rgba(255,255,255,.08)}
+.btn.quiet.small{min-height:2.25rem;padding:0 .75rem;font-size:.8125rem;box-shadow:none;border-radius:.75rem}
+.btn.quiet svg.ico{color:var(--yellow)}
+
+/* ---------- status, links, results ---------- */
+.status{display:inline-flex;align-items:center;gap:.375rem;font-size:.75rem;font-weight:700}
+.status::before{content:"";width:.4375rem;height:.4375rem;border-radius:50%;background:currentColor;flex:none}
+.status.ok{color:var(--up)}.status.wait{color:var(--yellow)}.status.bad{color:var(--down)}
+.status.wait::before{animation:blinkdot 1.2s ease-in-out infinite}
+@keyframes blinkdot{50%{opacity:.25}}
+.head .status{padding:.25rem .625rem;border-radius:999px;background:rgba(255,255,255,.07);border:1px solid var(--line)}
+.links{display:flex;gap:.625rem;justify-content:flex-end}
+.tx{color:var(--text);font-size:.75rem;font-weight:700;text-decoration:underline;text-decoration-color:var(--line-strong);text-underline-offset:2px}
+.tx:hover{text-decoration-color:var(--yellow)}
+.got{display:flex;flex-wrap:wrap;gap:.25rem .75rem;align-items:baseline;padding:.5rem .75rem;border-radius:.875rem;background:rgba(34,226,122,.08);border:1px solid rgba(34,226,122,.3)}
+.got .label{color:var(--muted);font-size:.8125rem;flex-basis:100%}
+.got strong{color:var(--yeet-lift)}
+.xp{display:inline-flex;align-items:center;gap:.3em;align-self:flex-start;background:var(--yellow);color:var(--ink);border-radius:var(--r-chip);padding:.25em .75em .25em .5em;font-weight:800;font-size:.8125rem}
+.xp svg{width:1em;height:1em;flex:none}
+.receipt[data-status=success] .display{color:var(--yeet)}
+.receipt[data-status=failed] .display,.receipt[data-status=refunded] .display{color:var(--down)}
+
+/* ---------- a trade in progress: dashes run along the wire, through NEAR Intents, to the wallet ---------- */
+.route{display:flex;align-items:center;justify-content:space-between;padding:.75rem;border-radius:.875rem;background:var(--ink-950);border:1px solid var(--line);color:#fff}
+.route .nd{display:flex;flex-direction:column;align-items:center;gap:.25rem;font:.625rem/1.2 var(--font-mono);color:var(--muted);text-align:center;min-width:3.25rem}
+.route .nd b{color:#fff;font-size:.75rem}
+.route .nd .ic{width:1.875rem;height:1.875rem;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:.6875rem}
+.route .nd .ic svg{width:.875rem;height:.875rem}
+.route .nd .ic.coin{border-width:1.5px;font-size:.5625rem}
+.route .wire{flex:1;height:2px;margin:0 .375rem 1.5rem;min-width:.875rem;background:repeating-linear-gradient(90deg,var(--yeet) 0 6px,transparent 6px 11px);background-size:22px 2px;animation:wire .9s linear infinite;animation-delay:calc(var(--clk,0)*-1s)}
+.route[data-direction=skeet] .wire{background-image:repeating-linear-gradient(90deg,var(--skeet) 0 6px,transparent 6px 11px)}
+.route[data-state=run] .nd:nth-child(3) .ic{animation:pulseNode 1.8s ease-in-out infinite}
+.route[data-state=done] .wire{background:var(--yeet);animation:none}
+.route[data-state=part] .wire{animation:none;opacity:.7}
+.route[data-state=off] .wire{background:var(--line-strong);animation:none}
+@keyframes wire{to{background-position:22px 0}}
+@keyframes pulseNode{0%,100%{box-shadow:0 0 0 0 rgba(255,224,58,.5)}60%{box-shadow:0 0 0 7px rgba(255,224,58,0)}}
+
+/* ---------- XP and streak ---------- */
+.xpbox{display:flex;flex-direction:column;gap:.625rem;background:rgba(6,7,28,.55);border:1px solid var(--line);border-radius:.875rem;padding:.75rem}
+.xpbox .top{display:flex;align-items:center;justify-content:space-between;gap:.5rem;flex-wrap:wrap}
+.xpnum{font:italic 900 1.25rem/1 var(--font-display);color:var(--yellow)}
+.stchip{display:inline-flex;align-items:center;gap:.375rem;height:2rem;padding:0 .875rem 0 .5rem;border-radius:999px;background:rgba(255,224,58,.12);color:var(--yellow);font-weight:800;font-size:.8125rem;border:1px solid rgba(255,224,58,.35)}
+.stchip svg{width:1.125rem;height:1.125rem;transform-origin:50% 100%;animation:flame 1.7s ease-in-out infinite;animation-delay:calc(var(--clk,0)*-1s)}
+.days{display:flex;gap:.375rem}
+.days .dd{flex:1;display:flex;flex-direction:column;align-items:center;gap:.375rem;font:.625rem/1 var(--font-mono);color:var(--muted)}
+.days .dd i{width:100%;max-width:2.375rem;aspect-ratio:1;border-radius:.625rem;background:rgba(255,255,255,.06);display:grid;place-items:center;border:1px solid var(--line);font-style:normal}
+.days .dd.on i{background:var(--yellow);border-color:var(--yellow);color:var(--ink)}
+.days .dd.today i{background:transparent;border:2px dashed var(--yellow);animation:today 2.4s ease-in-out infinite}
+.days .dd.goal{color:var(--yellow);font-weight:700}
+.days .dd i svg{width:1rem;height:1rem;transform-origin:50% 100%;animation:flame 1.7s ease-in-out infinite}
+.days .dd.on:nth-child(2) i svg{animation-delay:-.4s}.days .dd.on:nth-child(3) i svg{animation-delay:-.9s}.days .dd.on:nth-child(4) i svg{animation-delay:-1.3s}
+@keyframes flame{0%,100%{transform:scaleY(1) skewX(0)}25%{transform:scaleY(1.08) skewX(-3deg)}50%{transform:scaleY(.95) skewX(2deg)}75%{transform:scaleY(1.05) skewX(-1deg)}}
+@keyframes today{0%,100%{box-shadow:0 0 0 0 rgba(255,224,58,.45)}60%{box-shadow:0 0 0 7px rgba(255,224,58,0)}}
+.streak{color:var(--muted);font-size:.8125rem}
+.streak.next{font-size:.75rem}
+
+/* ---------- daily spin: the wheel box is square; wheel.css sizes the wheel inside it. Only the look is set here. ---------- */
+.spin{display:flex;flex-direction:column;gap:.5rem}
+.spin-head{display:flex;align-items:center;justify-content:space-between;gap:.5rem}
+.spin-head .display{font-size:1.125rem}
+.spin-wheel{position:relative;width:100%;max-width:24rem;aspect-ratio:1;margin:0 auto}
+.spin-line{text-align:center;color:var(--muted);font-weight:700}
+.spin-line.won{color:var(--yellow);font:italic 900 1.5rem/1 var(--font-display)}
+.spin .fine{text-align:center}
+.spin-wheel .wheel-stage{--bulb:#FFF6C4}
+.spin-wheel .wheel-halo{background:radial-gradient(circle,rgba(255,224,58,.24) 52%,rgba(255,224,58,0) 70%)}
+.spin-wheel .wheel-rotor{box-shadow:0 24px 60px rgba(2,3,20,.7),0 0 0 2px rgba(15,18,64,.6)}
+.spin-wheel .wheel-vignette{background:radial-gradient(circle at var(--wheel-x,50%) var(--wheel-y,50%),transparent calc(var(--wheel-size,600px)*.5),rgba(6,7,28,.8) calc(var(--wheel-size,600px)*1.05))}
+.spin-wheel .wheel-spot{background:conic-gradient(from calc(var(--slice-deg)/-2),rgba(6,7,28,0) 0deg var(--slice-deg),rgba(6,7,28,.68) var(--slice-deg) 360deg)}
+.spin-wheel .wheel-hub{background:radial-gradient(circle at 50% 35%,var(--blue-lift) 0%,var(--blue-deep) 72%);font-style:italic;font-weight:900;letter-spacing:.02em;
+ box-shadow:0 0 0 6px var(--yellow),0 0 0 9px var(--ink),0 0 0 11px var(--yellow-lift),0 10px 30px rgba(2,3,20,.6),inset 0 6px 18px rgba(255,255,255,.18)}
+.spin-wheel .wheel-stage.st-ready .wheel-hub:not(:disabled){animation:hubglow 1.8s ease-in-out infinite}
+@keyframes hubglow{50%{box-shadow:0 0 0 6px var(--yellow),0 0 0 9px var(--ink),0 0 0 11px var(--yellow-lift),0 0 40px 10px rgba(255,224,58,.55),inset 0 6px 18px rgba(255,255,255,.18)}}
+.spin-wheel .wheel-stage.st-won .wheel-hub{background:radial-gradient(circle at 50% 35%,color-mix(in srgb,var(--win) 75%,#fff) 0%,var(--win) 55%,color-mix(in srgb,var(--win) 55%,#000) 100%)}
+
+/* ---------- leaderboard ---------- */
+.lb{display:grid;gap:.375rem}
+.lb .lr{position:relative;overflow:hidden;display:flex;align-items:center;gap:.75rem;padding:.5rem .75rem;border-radius:.875rem;background:rgba(6,7,28,.55);border:1px solid var(--line)}
+.lb .lr .rk{width:1.625rem;font:800 .8125rem/1 var(--font-mono);color:var(--muted);text-align:center;flex:none}
+.lb .lr .av{width:2rem;height:2rem;border-radius:50%;flex:none;display:grid;place-items:center;color:var(--ink);background:linear-gradient(135deg,#FFB238,#FFE03A)}
+.lb .lr .av svg{width:1rem;height:1rem}
+.lb .lr .av.g1{background:linear-gradient(135deg,#F27BB3,#FF4D8D)}.lb .lr .av.g2{background:linear-gradient(135deg,#38D1C0,#9C84FF)}
+.lb .lr .av.g3{background:linear-gradient(135deg,#4A55FF,#38D1C0)}.lb .lr .av.g4{background:linear-gradient(135deg,#E3A86B,#F27BB3)}
+.lb .lr .av.g5{background:linear-gradient(135deg,#9C84FF,#4A55FF)}
+.lb .lr .nm{flex:1;font-weight:700;font-size:.875rem;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lb .lr .pts{font:800 .8125rem/1 var(--font-mono);color:var(--yellow-lift);white-space:nowrap}
+.lb .lr.me{background:var(--yellow);color:var(--ink);border-color:var(--yellow)}
+.lb .lr.me .rk,.lb .lr.me .pts{color:var(--ink)}
+.lb .lr.me .av{background:linear-gradient(135deg,#2430FF,#0F1240);color:var(--yellow)}
+.lb .lr.me::after{content:"";position:absolute;top:-40%;bottom:-40%;left:0;width:30%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);transform:translateX(-160%) skewX(-20deg);animation:glint 6.5s var(--ease-glint) infinite;animation-delay:calc(var(--clk,0)*-1s);pointer-events:none}
+@keyframes glint{0%,66%{transform:translateX(-160%) skewX(-20deg)}86%,100%{transform:translateX(440%) skewX(-20deg)}}
+.lb .lr.top .rk{color:var(--yellow)}
+.lb .gap{text-align:center;color:var(--muted);font:.75rem/1 var(--font-mono)}
+
+/* ---------- share: the picture, then save or share ---------- */
+.share-panel{display:flex;flex-direction:column;gap:.5rem;padding:.5rem;border-radius:1.125rem;background:rgba(6,7,28,.55);border:1px solid var(--line)}
+.share-panel canvas{display:block;width:100%;height:auto;aspect-ratio:1200/630;border-radius:.75rem;border:1px solid var(--line-strong);background:linear-gradient(90deg,var(--ink-950) 20%,var(--blue-deep) 70%,var(--blue))}
+.share-panel .actions .btn{flex:1 1 0}
+
+.problem{border-color:rgba(255,77,141,.45);--el:rgba(255,77,141,.9)}
+.problem .display{color:var(--skeet-lift)}
+.problem p{color:var(--muted)}
+.problem .btn.quiet{align-self:flex-start}
+
+@media (max-width:360px){
+ .card{padding:.625rem}
+ .row{grid-template-columns:2rem minmax(0,1fr) auto auto;gap:.375rem;padding:.375rem}
+ .coin{width:2rem;height:2rem;font-size:.5625rem}
+ .btn.step{width:1.75rem;height:1.75rem}
+ .name{display:none}
+ .display{font-size:1.125rem}
+ /* Rows with a stepper: the estimate moves under the symbol so the symbol keeps its width. */
+ .row:has(>.stepper){grid-template-columns:2rem minmax(0,1fr) auto;row-gap:0}
+ .row:has(>.stepper)>.coin{grid-row:1/3}
+ .row:has(>.stepper)>.est{grid-column:2;grid-row:2;flex-direction:row;align-items:baseline;gap:.375rem;justify-content:flex-start}
+ .row:has(>.stepper)>.stepper{grid-column:3;grid-row:1/3}
+ .amount{grid-template-columns:minmax(0,1fr)}
+ .route .nd{min-width:2.75rem}
+}
+@media (prefers-reduced-motion:reduce){
+ *,*::before,*::after{animation:none!important;transition:none!important}
+ .card>.stars{display:none}
+ .edge-line::before,.fx-sheen,.lb .lr.me::after{display:none}
+}
+/* The wheel keeps fixed-position layers: its box only fades, it never moves or blurs. */
+.card.enter>.spin,.spin.in{animation-name:fade}
+@keyframes fade{from{opacity:0}}
+.totals.stale span:not(:first-child){opacity:.45}
 </style></head><body data-view="receipt"><main id="root" aria-live="polite"></main>
 <script>(function yeetCard(window){
 'use strict';
-// One runtime for every YEET card. build.mjs stamps the view, the error copy and the coin names per template.
-// Rendering uses textContent only. The one-time confirm code lives in one closure variable and nowhere else.
+// One runtime for every YEET card. build.mjs stamps the view, the error copy, the coin names and the brand's
+// outlines per template. Rendering uses textContent and node-by-node SVG only. The one-time confirm code lives in one closure variable and nowhere else.
 const document=window.document;
 const VIEW="receipt";
-const ERRORS={"INVALID_ARGUMENT":["Check the request","A value in the request is not valid, so check the coins, parts and amount.",false],"COIN_NOT_SUPPORTED":["Coin not available","One of these coins can’t be traded on YEET right now, so pick another from the coin list.",false],"PARTS_EMPTY":["Pick at least one coin","Every coin is at 0 parts, so give at least one coin 1 or more parts.",false],"AMOUNT_TOO_SMALL":["A coin gets too little","Each coin needs at least the minimum per coin (3 USDC), so raise the amount, give the smallest coin more parts or set it to 0.",false],"COST_TOO_HIGH":["Fees too high right now","Swap costs for this basket are above the YEET limit, so try a larger amount or fewer coins.",true],"LIMIT_EXCEEDED":["Over your limit","This trade would go over the per-trade or daily USDC limit.",false],"BALANCE_LOW":["Not enough funds","Your YEET wallet doesn’t hold enough for this trade, so add funds or lower the amount.",false],"WALLET_NOT_READY":["Wallet not ready","Your YEET wallet isn’t set up for trading yet, so finish sign-in and try again.",false],"CONFIRMATION_REQUIRED":["Tap to confirm","Trades only run from your tap in the card, so refresh the quote and tap again.",true],"REQUOTE_REQUIRED":["Price moved","The price moved past your minimum, so refresh the quote to see the new numbers.",true],"TRADING_PAUSED":["Trading is paused","YEET has paused trading for now and your funds stay in your wallet.",true],"REAUTH_REQUIRED":["Reconnect YEET","ChatGPT needs your permission again, so reconnect YEET when it asks.",false],"TEMPORARILY_UNAVAILABLE":["Try again in a minute","YEET couldn’t reach a service it needs and nothing was traded.",true]};
+const ERRORS={"INVALID_ARGUMENT":["Check the request","A value in the request is not valid, so check the coins, parts and amount.",false],"COIN_NOT_SUPPORTED":["Coin not available","One of these coins can’t be traded on YEET right now, so pick another from the coin list.",false],"PARTS_EMPTY":["Pick at least one coin","Every coin is at 0 parts, so give at least one coin 1 or more parts.",false],"AMOUNT_TOO_SMALL":["A coin gets too little","Each coin needs at least the minimum per coin (3 USDC), so raise the amount, give the smallest coin more parts or set it to 0.",false],"COST_TOO_HIGH":["Fees too high right now","Swap costs for this basket are above the YEET limit, so try a larger amount or fewer coins.",true],"LIMIT_EXCEEDED":["Over your limit","This trade would go over the per-trade or daily USDC limit.",false],"BALANCE_LOW":["Not enough funds","Your YEET wallet doesn’t hold enough for this trade, so add funds or lower the amount.",false],"WALLET_NOT_READY":["Wallet not ready","Your YEET wallet isn’t set up for trading yet, so finish sign-in and try again.",false],"CONFIRMATION_REQUIRED":["Tap to confirm","Trades only run from your tap in the card, so refresh the quote and tap again.",true],"REQUOTE_REQUIRED":["Price moved","The price moved past your minimum, so refresh the quote to see the new numbers.",true],"TRADING_PAUSED":["Trading is paused","YEET has paused trading for now and your funds stay in your wallet.",true],"REAUTH_REQUIRED":["Reconnect YEET","ChatGPT needs your permission again, so reconnect YEET when it asks.",false],"TEMPORARILY_UNAVAILABLE":["Try again in a minute","YEET couldn’t reach a service it needs and nothing was traded.",true],"USERNAME_TAKEN":["Username taken","That username is taken, so pick another one.",false],"USERNAME_NOT_ALLOWED":["Username reserved","That username is reserved, so pick another one.",false]};
 const COINS={"USDC":"USD Coin (Solana)","SOL":"Solana","WIF":"dogwifhat","BOME":"BOOK OF MEME","TRUMP":"Official Trump","PENGU":"Pudgy Penguins","MELANIA":"Official Melania Meme","SPX":"SPX6900","TURBO":"Turbo","LOUD":"Loud","NEARKAT":"NearKat"};
 const SPIN={"base_xp":5,"streak_bonus_xp":25,"streak_draw":true,"parts":"xp_won = base_xp + draw_xp + streak_xp; draw_xp is one bonus_xp value; streak_xp is 0, or on a streak milestone streak_bonus_xp plus a second, independent bonus_xp draw","bonus_xp":[0,2,5,7,9,12,15,19,24,31,40]};
+const TYPE={"em":1000,"base":780,"space":290,"wide":{"0":[811,"M378 792Q255 792,182 759Q109 726,77 668Q45 609,45 531Q45 479,54 424Q64 368,84 314Q105 261,138 217Q162 185,193 160Q224 134,264 116Q304 99,353 90Q402 80,462 80Q586 80,658 113Q731 146,763 205Q795 264,795 342Q795 385,787 434Q779 482,765 528Q751 575,731 612Q709 654,676 687Q644 720,601 744Q558 767,502 780Q447 792,378 792ZM383 651Q421 651,448 639Q476 627,496 603Q515 579,528 543Q542 507,550 458Q555 429,558 408Q561 388,563 374Q565 359,566 349Q566 339,566 330Q566 274,542 247Q517 220,459 220Q422 220,394 232Q366 243,346 266Q326 290,312 326Q299 362,291 411Q286 440,283 460Q280 481,278 495Q276 509,276 520Q275 530,275 539Q275 595,300 623Q325 651,383 651Z"],"1":[731,"M1 780L30 612L248 612L301 315L83 315L103 199Q147 197,198 187Q249 177,302 162Q354 147,403 128Q452 110,492 91L564 91L472 612L671 612L642 780Z"],"2":[809,"M2 780L10 731Q18 680,52 638Q85 596,134 560Q184 525,240 494Q297 464,352 437Q408 410,454 384Q499 359,526 334Q554 309,554 282Q554 256,530 240Q505 224,446 224Q407 224,378 236Q348 248,330 268Q312 289,307 315L303 335L82 335Q89 278,116 231Q143 184,192 150Q240 116,310 98Q381 80,475 80Q575 80,646 100Q717 120,756 160Q794 200,794 259Q794 297,778 330Q763 363,736 392Q709 421,674 446Q639 472,600 494Q560 516,520 534Q480 553,443 569Q421 578,402 586Q382 595,365 603L744 603L713 780Z"],"3":[813,"M382 792Q259 792,181 768Q103 745,66 705Q28 665,28 616Q28 610,30 598Q31 586,35 569L253 569Q250 582,250 588Q249 594,249 596Q249 621,280 636Q310 651,371 651Q426 651,461 638Q496 626,514 604Q531 581,531 552Q531 533,520 520Q509 508,490 502Q472 495,449 495L349 495L372 364L452 364Q472 364,490 360Q509 355,524 345Q540 335,549 320Q558 306,558 286Q558 267,546 252Q534 237,510 228Q485 219,447 219Q417 219,390 228Q362 237,344 252Q326 266,323 283L321 297L111 297L116 268Q125 216,170 174Q215 131,292 106Q368 80,472 80Q579 80,650 102Q722 123,758 161Q794 199,794 249Q794 290,774 324Q753 359,718 383Q684 407,640 419L640 423Q699 436,731 473Q763 510,763 565Q763 626,723 678Q683 729,598 760Q514 792,382 792Z"],"4":[819,"M398 780L422 643L2 643L29 482Q79 435,135 370Q191 306,245 231Q299 156,340 80L580 80Q569 112,540 154Q511 196,471 242Q431 289,386 334Q340 380,295 420Q250 459,211 488L449 488L474 350Q493 332,516 306Q540 280,563 251Q586 222,606 194Q625 167,637 146L736 146L675 488L801 488L774 643L648 643L624 780Z"],"5":[813,"M393 792Q273 792,192 768Q111 743,70 698Q30 654,30 594Q30 585,31 576Q32 567,34 558L252 558Q251 561,251 564Q251 567,251 570Q251 596,266 614Q280 633,308 642Q336 651,375 651Q411 651,440 643Q469 635,490 620Q512 605,524 582Q535 560,535 531Q535 490,502 470Q469 449,410 449Q380 449,354 454Q328 460,308 471Q288 482,274 499L85 477L189 92L784 92L754 265L331 265L302 367Q318 357,348 346Q377 336,418 328Q460 321,509 321Q591 321,650 344Q708 366,740 410Q771 453,771 517Q771 593,726 656Q680 718,595 755Q510 792,393 792Z"],"6":[815,"M388 792Q276 792,200 764Q123 737,84 680Q46 623,46 536Q46 515,48 492Q51 470,55 445Q78 314,132 234Q186 154,272 117Q357 80,473 80Q572 80,645 102Q718 124,758 166Q799 209,799 272Q799 282,798 292Q797 301,795 312L577 312Q578 307,578 302Q579 298,579 294Q579 256,550 238Q520 220,472 220Q415 220,381 240Q347 259,328 297Q310 335,300 393Q332 373,369 362Q406 350,442 346Q478 341,507 341Q585 341,646 362Q707 383,742 424Q778 465,778 525Q778 589,748 638Q719 688,666 722Q614 757,543 774Q472 792,388 792ZM391 651Q437 651,472 638Q508 625,527 599Q535 587,540 572Q544 558,544 542Q544 517,530 500Q515 484,488 476Q461 467,423 467Q374 467,339 480Q304 493,286 521Q279 531,274 546Q270 562,270 576Q270 601,284 618Q299 634,326 642Q354 651,391 651Z"],"7":[755,"M125 780Q137 709,168 640Q200 572,247 508Q294 443,353 383Q412 323,479 268L60 268L91 92L816 92L799 187Q744 234,690 284Q637 333,589 384Q541 436,502 490Q463 545,436 602Q410 660,399 721Q397 736,394 750Q391 765,389 780Z"],"8":[828,"M389 792Q277 792,195 772Q113 751,69 711Q25 671,25 612Q25 564,47 529Q69 494,108 470Q146 445,193 431Q147 399,129 370Q111 341,111 307Q111 252,140 210Q169 168,219 139Q269 110,335 95Q401 80,474 80Q568 80,643 101Q718 122,762 162Q805 202,805 261Q805 295,793 325Q781 355,752 381Q723 407,671 431Q721 453,752 486Q783 518,783 569Q783 641,734 691Q684 741,595 766Q506 792,389 792ZM394 651Q433 651,466 644Q499 636,521 620Q543 603,548 576Q549 572,549 569Q549 566,549 562Q549 530,517 514Q485 497,421 497Q384 497,350 504Q317 511,294 527Q272 543,267 571Q266 575,266 578Q266 581,266 585Q266 616,298 634Q330 651,394 651ZM445 362Q482 362,516 355Q549 348,572 332Q594 317,598 292Q599 289,599 286Q599 284,599 281Q599 252,567 236Q535 220,470 220Q437 220,404 226Q370 233,346 248Q322 263,317 290Q316 292,316 295Q316 298,316 301Q316 329,348 346Q381 362,445 362Z"],"9":[815,"M376 792Q278 792,204 770Q131 749,90 706Q50 663,50 600Q50 590,51 580Q52 570,54 560L272 560Q271 564,270 568Q270 573,270 578Q270 615,300 634Q329 652,377 652Q434 652,468 632Q502 613,520 574Q539 536,549 479Q517 499,480 510Q443 522,408 526Q372 531,342 531Q265 531,204 510Q142 489,106 448Q71 406,71 347Q71 283,100 234Q130 184,182 150Q235 115,306 98Q377 80,461 80Q574 80,650 108Q726 135,764 192Q803 248,803 336Q803 357,801 380Q799 402,794 427Q772 557,718 638Q663 718,578 755Q493 792,376 792ZM426 405Q475 405,510 392Q545 379,563 351Q571 340,575 325Q579 310,579 296Q579 271,564 254Q550 238,523 230Q496 221,458 221Q412 221,376 234Q341 247,322 273Q314 285,310 299Q305 313,305 330Q305 354,320 371Q334 388,361 396Q388 405,426 405Z"],"A":[954,"M-38 780L415 92L687 92L899 780L639 780L614 689L277 689L221 780ZM382 518L569 518L541 402Q539 394,536 380Q534 367,532 350Q529 333,526 316Q523 299,521 285L514 285Q505 302,493 324Q481 346,470 367Q458 388,450 402Z"],"B":[930,"M28 780L149 92L723 92Q780 92,824 110Q869 129,895 162Q921 196,921 241Q921 298,897 335Q873 372,838 392Q802 413,765 421L764 425Q812 438,846 468Q879 499,879 561Q879 625,850 674Q821 724,769 752Q717 780,648 780ZM303 620L557 620Q576 620,592 612Q609 604,620 588Q630 571,630 546Q630 527,616 514Q601 502,578 502L324 502ZM349 360L587 360Q601 360,614 356Q626 351,637 342Q648 333,654 320Q660 306,660 288Q660 269,646 256Q631 243,608 243L370 243Z"],"C":[939,"M459 792Q254 792,153 721Q52 650,52 513Q52 422,78 348Q105 274,154 220Q197 174,255 143Q313 112,386 96Q460 80,546 80Q661 80,746 111Q830 142,876 198Q923 254,923 329Q923 340,922 352Q921 363,919 375L679 375Q680 370,680 365Q681 360,681 356Q681 325,663 302Q645 278,612 264Q578 251,532 251Q483 251,446 264Q408 278,382 302Q355 326,339 357Q323 388,316 423Q313 437,312 446Q310 456,310 463Q309 470,308 474Q308 479,308 484Q308 522,324 554Q340 585,374 603Q408 621,462 621Q519 621,562 606Q605 591,632 564Q658 537,664 501L897 501Q883 585,826 651Q768 717,674 754Q581 792,459 792Z"],"D":[933,"M28 780L149 92L529 92Q709 92,809 165Q909 238,909 373Q909 449,888 513Q866 577,827 626Q787 677,729 711Q671 745,600 762Q529 780,448 780ZM305 609L443 609Q483 609,518 597Q552 585,579 564Q606 542,624 512Q641 483,647 447Q650 429,652 419Q653 409,654 402Q654 396,654 391Q654 352,636 324Q619 295,586 279Q552 263,504 263L366 263Z"],"E":[860,"M28 780L149 92L884 92L854 263L367 263L351 352L771 352L743 514L323 514L306 609L801 609L771 780Z"],"F":[807,"M28 780L149 92L845 92L815 263L366 263L346 379L739 379L708 550L315 550L275 780Z"],"G":[1012,"M436 792Q244 792,148 724Q51 656,51 518Q51 429,76 356Q101 284,147 231Q192 180,255 146Q318 113,398 96Q478 80,571 80Q657 80,730 94Q804 108,860 136Q916 164,947 206Q978 247,978 303Q978 312,977 322Q976 331,974 341L734 341Q734 339,734 336Q735 333,735 331Q735 312,722 297Q710 282,688 272Q665 262,636 256Q606 251,572 251Q515 251,471 263Q427 275,395 297Q363 319,344 351Q324 383,315 424Q312 439,310 449Q308 459,308 466Q307 474,306 480Q306 486,306 491Q306 536,326 564Q347 593,388 607Q430 621,492 621Q543 621,588 612Q634 603,664 584Q694 566,698 540L699 536L490 536L515 396L966 396L898 780L758 780L749 704Q707 733,658 753Q610 773,555 782Q500 792,436 792Z"],"H":[1009,"M28 780L149 92L396 92L353 336L720 336L763 92L1010 92L889 780L642 780L687 525L320 525L275 780Z"],"I":[395,"M28 780L149 92L396 92L275 780Z"],"J":[764,"M330 792Q177 792,96 744Q14 695,14 588Q14 574,16 558Q18 541,23 513L256 513Q252 535,251 544Q250 552,250 558Q250 592,271 606Q292 621,331 621Q384 621,413 596Q442 572,452 514L526 92L774 92L699 515Q681 617,632 678Q584 739,508 766Q432 792,330 792Z"],"K":[988,"M28 780L149 92L396 92L343 391L723 92L1035 92L680 379L922 780L639 780L484 518L298 650L275 780Z"],"L":[786,"M28 780L149 92L396 92L308 591L754 591L721 780Z"],"M":[1178,"M28 780L149 92L529 92L570 344Q574 365,577 392Q580 420,583 448Q586 475,587 495L594 495Q602 476,614 450Q626 424,640 396Q654 367,666 344L795 92L1179 92L1058 780L811 780L864 480Q869 455,874 425Q880 395,886 366Q892 337,896 316L888 316Q877 339,862 370Q847 400,832 430Q817 459,806 480L645 780L426 780L371 480Q362 432,356 386Q349 341,347 316L339 316Q337 332,333 358Q329 385,324 416Q319 448,313 480L260 780Z"],"N":[1007,"M28 780L149 92L364 92L652 395Q657 400,666 410Q675 420,686 431Q696 442,704 451L714 451Q716 437,720 414Q724 390,728 368L776 92L1008 92L887 780L674 780L399 490Q382 472,362 452Q343 431,332 418L323 418Q321 432,316 458Q312 483,307 509L260 780Z"],"O":[1008,"M476 792Q343 792,248 757Q154 722,104 656Q53 590,53 497Q53 418,78 350Q104 283,150 232Q195 182,258 148Q320 115,396 98Q473 80,561 80Q694 80,788 116Q883 151,934 217Q984 283,984 377Q984 457,958 526Q931 594,883 645Q838 693,776 726Q714 759,638 776Q562 792,476 792ZM486 621Q533 621,573 608Q613 596,644 572Q676 549,696 517Q716 485,722 447Q724 434,726 425Q727 416,728 410Q728 404,728 400Q729 395,729 391Q729 349,708 318Q687 286,647 268Q607 251,551 251Q504 251,464 264Q424 276,393 299Q362 322,342 354Q322 385,316 423Q314 436,312 445Q311 454,310 460Q310 467,310 471Q309 475,309 479Q309 521,330 553Q351 585,390 603Q430 621,486 621Z"],"P":[865,"M28 780L149 92L682 92Q748 92,796 116Q843 141,869 185Q895 229,895 289Q895 353,874 406Q853 458,816 496Q780 534,734 555Q688 576,637 576L311 576L275 780ZM341 405L578 405Q605 405,625 394Q645 384,656 364Q667 344,667 314Q667 288,651 276Q635 263,603 263L366 263Z"],"Q":[1008,"M590 911L483 792Q482 792,481 792Q480 792,478 792Q345 792,250 757Q156 722,106 656Q55 590,55 497Q55 418,80 350Q106 283,152 232Q197 182,260 148Q322 115,398 98Q475 80,563 80Q696 80,790 116Q885 151,936 217Q986 283,986 377Q986 457,960 526Q933 594,885 645Q854 677,816 702Q778 728,733 746L902 911ZM488 621Q535 621,575 608Q615 596,646 572Q678 549,698 517Q718 485,724 447Q726 434,728 425Q729 416,730 410Q730 404,730 400Q731 395,731 391Q731 349,710 318Q689 286,649 268Q609 251,553 251Q506 251,466 264Q426 276,395 299Q364 322,344 354Q324 385,318 423Q316 436,314 445Q313 454,312 460Q312 467,312 471Q311 475,311 479Q311 521,332 553Q353 585,392 603Q432 621,488 621Z"],"R":[943,"M28 780L149 92L725 92Q799 92,846 118Q894 143,918 186Q941 229,941 281Q941 337,923 386Q905 435,870 472Q835 510,783 532L872 780L604 780L538 565L313 565L275 780ZM343 394L605 394Q625 394,643 384Q661 375,672 358Q684 340,684 315Q684 289,668 276Q653 263,628 263L366 263Z"],"S":[882,"M438 792Q351 792,277 783Q203 774,148 753Q92 732,61 695Q30 658,30 601Q30 589,32 573Q33 557,37 547L278 547Q275 554,274 561Q273 568,273 573Q273 598,292 612Q310 625,344 630Q377 634,421 634Q444 634,471 632Q498 631,522 626Q547 622,562 612Q578 602,578 584Q578 567,555 558Q532 548,494 542Q455 537,408 532Q360 526,312 517Q269 509,229 496Q189 482,157 461Q125 440,106 408Q88 377,88 332Q88 263,122 215Q156 167,214 137Q272 107,346 94Q419 80,498 80Q574 80,640 90Q707 100,757 121Q807 142,836 176Q864 210,864 259Q864 267,863 277Q862 287,859 304L620 304Q621 299,621 296Q621 292,621 290Q621 264,594 247Q566 230,502 230Q450 230,416 237Q383 244,366 255Q350 266,350 279Q350 295,368 304Q387 313,419 318Q451 324,492 328Q532 333,575 339Q623 346,670 358Q718 369,756 389Q795 409,818 442Q841 474,841 523Q841 595,808 646Q776 697,720 730Q664 762,592 777Q519 792,438 792Z"],"T":[877,"M269 780L357 281L65 281L98 92L929 92L896 281L604 281L516 780Z"],"U":[989,"M466 792Q270 792,174 723Q79 654,79 523Q79 503,81 483Q83 463,87 441L149 92L396 92L335 438Q333 451,332 462Q331 473,331 484Q331 549,368 584Q406 620,476 620Q559 620,613 572Q667 524,682 438L743 92L990 92L925 457Q905 572,848 646Q792 721,697 756Q602 792,466 792Z"],"V":[938,"M297 780L83 92L350 92L425 381Q429 396,435 424Q441 453,448 484Q454 516,459 542L466 542Q478 519,494 489Q511 459,528 430Q544 401,556 381L735 92L1005 92L549 780Z"],"W":[1230,"M161 780L80 92L326 92L354 397Q356 421,358 444Q359 467,360 486Q361 504,361 515L368 515Q373 500,380 479Q388 458,397 436Q406 415,413 397L545 92L846 92L869 397Q871 415,872 436Q873 458,874 479Q874 500,874 515L881 515Q887 499,895 478Q903 457,912 436Q921 414,928 397L1065 92L1300 92L977 780L693 780L662 393Q661 376,660 359Q658 342,658 328Q657 314,656 306L649 306Q645 318,638 334Q631 350,624 366Q618 381,613 393L445 780Z"],"X":[961,"M-43 780L344 419L107 92L411 92L522 253L531 253L696 92L1004 92L644 421L911 780L607 780L472 587L462 587L264 780Z"],"Y":[966,"M314 780L362 509L92 92L374 92L512 324L519 324L739 92L1024 92L609 509L561 780Z"],"Z":[877,"M-24 780L-12 709L455 263L96 263L126 92L908 92L896 163L427 609L827 609L797 780Z"],"a":[808,"M282 792Q209 792,152 768Q96 745,64 696Q31 648,31 573Q31 521,41 478Q51 435,69 401Q98 345,142 310Q186 274,240 257Q294 240,351 240Q382 240,417 246Q452 253,484 268Q516 284,535 310L544 310L583 252L777 252L759 358Q758 362,754 388Q749 414,742 451Q735 488,728 526Q722 563,718 590Q713 617,713 623Q713 635,720 643Q726 651,739 651L794 651L772 772Q754 779,720 786Q686 792,649 792Q597 792,567 780Q537 767,522 746Q515 736,511 725Q507 714,505 702L497 702Q449 753,392 772Q336 792,282 792ZM365 636Q398 636,423 626Q448 617,466 601Q483 585,494 564Q504 543,508 519Q509 511,510 506Q510 501,510 496Q511 492,511 488Q511 462,500 441Q490 420,468 408Q445 396,407 396Q364 396,334 412Q305 427,288 452Q272 477,266 507Q264 520,262 528Q261 535,261 540Q261 545,261 549Q261 586,286 611Q310 636,365 636Z"],"b":[795,"M438 792Q377 792,324 772Q270 751,236 698L227 698L196 780L15 780L141 55L365 55L321 310L330 310Q356 284,388 268Q421 253,454 246Q488 240,515 240Q588 240,644 263Q700 286,732 334Q765 382,765 457Q765 508,755 554Q745 600,726 635Q697 690,652 725Q606 760,551 776Q496 792,438 792ZM386 636Q430 636,460 621Q491 606,508 580Q526 555,531 525Q533 512,534 504Q535 497,536 492Q536 488,536 485Q536 460,525 440Q514 420,490 408Q467 396,428 396Q395 396,370 406Q345 415,328 431Q310 447,300 468Q289 489,284 513Q283 520,282 526Q281 532,280 536Q280 541,280 545Q280 570,290 591Q301 612,324 624Q348 636,386 636Z"],"c":[809,"M371 792Q269 792,192 767Q116 742,74 691Q31 640,31 563Q31 507,46 460Q62 413,90 376Q117 341,154 316Q190 290,235 274Q280 257,332 248Q383 240,438 240Q533 240,610 262Q686 283,731 326Q776 368,776 432Q776 440,776 448Q775 457,773 466L546 466Q547 463,547 460Q547 458,547 455Q547 434,532 417Q518 400,492 390Q465 381,428 381Q380 381,346 398Q312 415,293 444Q274 472,268 506Q266 520,264 529Q263 538,262 543Q262 548,262 553Q262 580,275 602Q288 625,316 638Q344 651,390 651Q430 651,462 638Q494 626,514 606Q534 586,538 565L756 565Q743 643,688 693Q632 743,550 768Q467 792,371 792Z"],"d":[795,"M282 792Q209 792,152 768Q96 745,64 696Q31 648,31 573Q31 498,52 439Q74 380,110 340Q133 314,162 295Q190 276,222 264Q253 252,286 246Q320 240,354 240Q385 240,420 246Q456 253,488 268Q520 284,539 310L548 310L592 55L816 55L689 780L504 780L504 698L495 698Q447 751,392 772Q338 792,282 792ZM368 636Q412 636,442 620Q472 604,490 577Q507 550,512 519Q513 511,514 506Q514 501,514 496Q515 492,515 488Q515 462,504 441Q494 420,471 408Q448 396,410 396Q366 396,336 412Q306 427,289 452Q272 477,266 507Q264 520,262 528Q261 535,261 540Q261 545,261 549Q261 586,286 611Q311 636,368 636Z"],"e":[811,"M382 792Q276 792,197 768Q118 744,74 694Q31 643,31 565Q31 500,51 448Q71 396,107 357Q144 317,195 292Q246 266,308 253Q370 240,439 240Q546 240,622 264Q699 287,740 335Q781 383,781 459Q781 472,779 493Q777 514,769 554L264 554Q263 559,263 564Q263 568,263 573Q263 604,278 624Q292 645,320 655Q349 665,391 665Q421 665,446 659Q470 653,488 642Q505 632,516 619Q526 606,529 592L761 592Q753 642,720 680Q686 717,634 742Q582 767,518 780Q453 792,382 792ZM283 452L547 452Q548 449,548 446Q548 443,548 440Q548 420,536 404Q523 387,500 377Q476 367,442 367Q398 367,366 378Q333 390,312 410Q292 429,283 452Z"],"f":[526,"M75 989Q51 989,20 986Q-10 984,-40 980Q-69 976,-92 971L-71 848L-7 848Q51 848,74 836Q98 825,103 795L173 393L58 393L83 252L198 252L201 238Q216 168,251 125Q286 82,338 62Q389 43,452 43Q477 43,507 46Q537 48,567 52Q597 56,619 61L598 184L534 184Q476 184,452 196Q428 207,424 237L422 252L586 252L561 393L397 393L327 794Q315 864,279 907Q243 950,190 970Q138 989,75 989Z"],"g":[798,"M318 989Q201 989,134 970Q66 951,37 919Q8 887,8 848Q8 841,9 826Q10 811,16 796L236 796Q235 799,235 802Q235 804,235 806Q235 814,244 824Q252 833,273 839Q294 845,330 845Q383 845,414 829Q445 813,460 790Q475 767,479 746Q482 731,484 716Q487 702,490 687L481 687Q454 714,417 730Q380 747,343 754Q306 761,277 761Q207 761,152 738Q97 716,66 670Q34 623,34 552Q34 500,46 456Q57 413,77 379Q121 307,196 274Q271 240,353 240Q415 240,470 260Q526 281,560 334L569 334L600 252L782 252L696 742Q682 824,630 879Q578 934,498 962Q418 989,318 989ZM373 605Q406 605,431 597Q456 589,474 574Q491 560,502 542Q512 524,515 503Q516 496,516 492Q517 487,518 484Q518 480,518 477Q518 454,507 436Q496 417,472 406Q449 396,410 396Q366 396,336 408Q307 421,290 442Q274 464,268 491Q266 503,264 508Q263 514,263 518Q263 521,263 526Q263 548,274 566Q285 584,310 594Q334 605,373 605Z"],"h":[788,"M15 780L141 55L365 55L320 313L328 313Q357 287,390 271Q423 255,458 248Q493 240,527 240Q599 240,647 260Q695 279,720 318Q744 357,744 414Q744 428,742 444Q741 459,738 476L684 780L460 780L510 495Q511 489,512 483Q512 477,512 472Q512 449,503 432Q494 415,476 406Q457 396,428 396Q401 396,377 404Q353 413,334 428Q315 443,302 464Q290 485,286 509L239 780Z"],"i":[344,"M116 190L140 55L364 55L340 190ZM15 780L107 252L331 252L238 780Z"],"j":[342,"M117 190L141 55L365 55L341 190ZM-7 990Q-29 990,-56 988Q-83 986,-109 982Q-135 977,-155 972L-133 849L-74 849Q-36 849,-14 829Q9 809,14 778L107 252L331 252L238 781Q226 850,198 896Q169 943,120 966Q70 990,-7 990Z"],"k":[773,"M15 780L141 55L365 55L296 447L540 252L813 252L556 464L725 780L474 780L374 576L261 646L238 780Z"],"l":[344,"M15 780L141 55L365 55L238 780Z"],"m":[1201,"M15 780L108 252L290 252L290 338L299 338Q329 303,366 282Q402 260,442 250Q481 240,519 240Q600 240,650 265Q699 290,718 338L728 338Q758 303,794 282Q831 260,870 250Q910 240,948 240Q1053 240,1105 284Q1157 327,1157 412Q1157 427,1156 443Q1154 459,1151 476L1097 780L873 780L923 495Q924 488,924 482Q925 475,925 469Q925 447,917 431Q909 415,892 406Q876 396,850 396Q816 396,788 410Q759 425,740 450Q722 476,716 509L668 780L444 780L494 495Q495 488,496 482Q496 475,496 469Q496 447,488 431Q480 415,464 406Q447 396,421 396Q387 396,358 410Q330 425,312 450Q293 476,287 509L239 780Z"],"n":[788,"M15 780L108 252L290 252L290 338L299 338Q330 303,368 282Q405 260,446 250Q487 240,527 240Q600 240,648 260Q696 280,720 318Q744 357,744 415Q744 429,742 444Q741 459,738 476L684 780L460 780L510 495Q511 489,512 483Q512 477,512 471Q512 449,504 432Q495 415,476 406Q458 396,429 396Q402 396,378 404Q354 413,335 428Q316 443,304 464Q291 485,287 509L239 780Z"],"o":[810,"M376 792Q272 792,194 767Q116 742,74 691Q31 640,31 563Q31 501,50 450Q68 398,102 360Q138 319,189 292Q240 266,302 253Q364 240,433 240Q538 240,616 266Q693 291,736 342Q779 393,779 471Q779 525,765 570Q751 615,725 650Q690 698,636 730Q583 761,516 776Q450 792,376 792ZM381 651Q429 651,462 634Q496 617,516 588Q536 560,541 526Q544 511,545 502Q546 494,546 488Q546 483,546 479Q546 451,534 429Q522 407,496 394Q470 381,428 381Q380 381,346 398Q312 415,293 444Q274 472,268 506Q266 520,264 529Q263 538,262 544Q262 549,262 553Q262 581,274 603Q286 625,312 638Q339 651,381 651Z"],"p":[795,"M-18 977L108 252L294 252L294 334L303 334Q351 281,406 260Q460 240,515 240Q587 240,644 263Q700 286,732 334Q765 383,765 458Q765 509,755 552Q745 596,727 631Q698 686,652 722Q607 758,552 775Q496 792,438 792Q408 792,374 786Q339 779,308 764Q277 748,258 722L249 722L205 977ZM387 636Q431 636,461 620Q491 605,508 580Q525 554,530 525Q532 512,533 504Q534 496,534 492Q535 487,535 483Q535 458,524 438Q513 419,490 408Q467 396,429 396Q386 396,356 412Q326 428,308 454Q291 481,285 513Q284 520,283 526Q282 531,282 536Q282 540,282 545Q282 570,292 591Q303 612,326 624Q350 636,387 636Z"],"q":[795,"M430 977L474 722L465 722Q440 748,407 764Q374 779,340 786Q307 792,280 792Q208 792,152 769Q96 746,64 698Q31 649,31 575Q31 507,48 452Q66 398,96 358Q127 317,168 291Q209 265,256 252Q303 240,352 240Q414 240,470 260Q525 281,559 334L568 334L599 252L781 252L654 977ZM366 636Q399 636,424 627Q449 618,467 602Q485 587,496 567Q506 547,510 525Q512 512,513 504Q514 496,514 492Q515 487,515 483Q515 458,504 438Q493 419,470 408Q446 396,408 396Q365 396,335 412Q305 428,288 454Q270 481,264 513Q263 520,262 526Q261 531,261 536Q261 540,261 545Q261 583,286 610Q310 636,366 636Z"],"r":[515,"M15 780L108 252L290 252L290 338L299 338Q323 303,352 281Q381 259,412 249Q443 239,472 239Q497 239,518 242Q538 245,557 252L528 418L425 418Q394 418,370 428Q345 437,327 454Q309 470,298 492Q286 515,281 542L239 780Z"],"s":[747,"M336 792Q277 792,219 784Q161 775,114 758Q67 740,38 712Q10 684,10 645Q10 637,11 630Q12 622,16 612L247 612Q246 616,245 620Q244 623,244 627Q244 642,257 652Q270 663,292 668Q314 673,342 673Q356 673,377 672Q398 671,418 667Q439 663,453 654Q467 646,467 631Q467 618,448 611Q429 604,398 600Q366 597,328 594Q289 590,249 584Q213 578,180 568Q146 559,119 542Q92 526,76 502Q61 477,61 441Q61 382,90 343Q120 304,170 282Q220 259,282 250Q345 240,411 240Q467 240,521 248Q575 255,619 271Q663 287,690 312Q716 338,716 374Q716 381,714 390Q713 398,711 406L482 406Q483 399,483 397Q483 395,483 394Q483 382,471 374Q459 367,440 363Q422 359,402 359Q393 359,375 360Q357 360,338 364Q318 367,304 374Q291 382,291 396Q291 411,317 417Q343 423,385 426Q427 429,474 434Q515 438,554 446Q594 455,626 471Q659 487,678 514Q698 541,698 582Q698 643,668 684Q637 725,586 748Q534 772,469 782Q404 792,336 792Z"],"t":[545,"M320 792Q256 792,210 780Q163 769,138 740Q114 712,114 660Q114 650,115 639Q116 628,118 616L158 393L53 393L78 252L192 252L264 92L436 92L407 252L558 252L533 393L382 393L351 570Q350 577,349 584Q348 590,348 596Q348 623,365 637Q382 651,425 651L488 651L466 773Q451 778,423 782Q395 787,367 790Q339 792,320 792Z"],"u":[788,"M262 792Q189 792,141 772Q93 752,69 713Q45 674,45 617Q45 603,46 588Q48 572,51 556L105 252L329 252L279 537Q278 543,278 549Q277 555,277 561Q277 583,286 600Q294 617,312 626Q331 636,360 636Q387 636,411 628Q435 619,454 604Q473 589,486 568Q498 547,502 523L550 252L774 252L681 780L499 780L499 694L490 694Q460 729,422 750Q384 772,343 782Q302 792,262 792Z"],"v":[750,"M208 780L47 252L285 252L335 475Q339 490,342 512Q346 534,350 556Q354 578,356 595L366 595Q375 577,387 554Q399 532,412 510Q424 488,432 473L556 252L797 252L450 780Z"],"w":[1167,"M200 780L47 252L281 252L324 477Q327 492,330 510Q333 528,336 545Q338 562,339 574L348 574Q354 560,362 542Q370 525,378 508Q387 490,393 477L507 252L763 252L794 477Q796 490,798 508Q799 526,800 544Q802 561,803 574L811 574Q818 560,826 542Q835 525,844 508Q853 490,860 477L985 252L1214 252L875 780L648 780L614 549Q611 530,608 511Q606 492,604 476Q603 459,602 448L594 448Q590 459,582 476Q574 493,565 512Q556 532,547 551L434 780Z"],"x":[831,"M-43 780L266 500L74 252L345 252L436 384L442 384L576 252L856 252L571 505L778 780L509 780L402 622L396 622L237 780Z"],"y":[750,"M84 990Q45 990,16 984Q-12 979,-33 972L-13 849L82 849Q119 849,143 840Q167 830,182 814Q197 798,208 780L47 252L286 252L333 485Q336 500,340 522Q343 544,347 566Q351 588,353 605L363 605Q370 592,379 576Q388 559,397 542Q406 525,414 510Q423 494,429 483L556 252L797 252L479 736Q446 786,410 832Q374 877,329 913Q284 949,224 970Q164 990,84 990Z"],"z":[685,"M-21 780L-10 715L318 393L61 393L86 252L696 252L685 314L352 639L638 639L613 780Z"],".":[381,"M13 780L50 574L311 574L274 780Z"],",":[381,"M-19 980L-3 887Q26 885,56 870Q86 856,108 832Q130 808,135 780L16 780L52 574L313 574L281 757Q270 821,242 862Q213 904,172 928Q131 953,82 965Q33 977,-19 980Z"],"?":[743,"M274 514L281 472Q284 454,301 438Q318 423,344 408Q369 394,396 380Q423 365,448 350Q472 334,487 316Q502 298,502 277Q502 260,492 248Q481 237,462 232Q443 226,415 226Q378 226,354 234Q331 241,318 254Q306 266,300 282Q295 297,293 313Q292 317,292 322Q292 326,292 329L81 329Q81 283,98 244Q116 206,148 176Q181 145,226 124Q270 102,325 91Q380 80,442 80Q513 80,570 91Q626 102,667 123Q708 144,730 176Q751 208,751 250Q751 290,734 320Q716 350,688 373Q660 396,628 414Q597 431,568 446Q539 460,520 473Q501 486,499 501L497 514ZM210 780L246 574L507 574L471 780Z"],"!":[391,"M105 508L135 92L406 92L290 508ZM19 780L55 574L316 574L280 780Z"],"'":[324,"M129 398L105 255L133 92L337 92L309 255L235 398Z"],"’":[324,"M55 482L71 393Q96 391,122 378Q149 364,169 339Q189 314,195 280L91 280L124 92L353 92L323 259Q310 334,274 381Q239 428,184 452Q128 475,55 482Z"],"@":[1240,"M541 941Q421 941,326 918Q231 896,166 851Q100 806,66 738Q31 669,31 578Q31 499,52 432Q73 365,114 310Q154 254,212 212Q271 169,346 140Q422 110,514 95Q605 80,711 80Q820 80,912 98Q1005 116,1074 154Q1142 192,1180 251Q1218 310,1218 392Q1218 460,1206 518Q1193 575,1168 620Q1143 666,1104 698Q1065 729,1012 746Q960 762,893 762Q839 762,804 748Q768 735,746 716Q725 697,713 681L706 681Q666 727,618 745Q570 763,522 763Q461 763,414 742Q366 721,339 676Q312 632,312 564Q312 524,318 490Q325 456,335 428Q352 384,378 352Q404 321,437 301Q470 281,507 271Q544 261,582 261Q608 261,638 267Q668 273,695 287Q722 301,738 325L746 325L778 272L941 272L926 368Q925 372,921 394Q917 417,911 450Q905 482,899 514Q893 546,889 570Q885 594,885 599Q885 620,901 627Q917 634,933 634Q973 634,1000 620Q1027 605,1044 580Q1062 556,1072 525Q1082 494,1086 460Q1089 427,1089 396Q1089 319,1044 272Q999 225,914 204Q830 182,711 182Q603 182,516 200Q428 217,362 250Q295 284,250 332Q205 380,182 440Q160 501,160 572Q160 639,185 689Q210 739,262 772Q313 806,392 822Q470 839,576 839Q603 839,640 836Q677 834,716 830Q754 825,788 820Q823 814,846 807L828 910Q790 918,738 926Q686 933,634 937Q581 941,541 941ZM594 621Q629 621,653 608Q677 596,692 574Q707 553,713 527Q714 522,715 517Q716 512,716 507Q717 502,718 497Q718 492,718 487Q718 463,709 444Q700 425,680 414Q661 403,629 403Q592 403,567 418Q542 432,528 455Q515 478,509 504Q508 509,507 514Q506 518,506 523Q505 528,505 532Q505 537,505 542Q505 576,526 598Q547 621,594 621Z"],"+":[750,"M261 780L299 568L74 568L97 436L322 436L360 224L494 224L456 436L681 436L658 568L433 568L395 780Z"],"-":[416,"M37 591L68 419L383 419L352 591Z"],":":[381,"M73 458L109 252L370 252L334 458ZM16 780L52 574L313 574L277 780Z"],"&":[1065,"M473 792Q327 792,234 770Q140 749,96 708Q51 667,51 611Q51 565,73 526Q95 488,134 461Q173 434,225 423L225 419Q184 406,158 372Q132 337,132 293Q132 247,159 208Q186 169,240 140Q293 112,371 96Q449 80,551 80Q680 80,770 100Q861 121,909 158Q957 196,957 247Q957 252,956 262Q956 273,951 293L725 293Q726 290,727 285Q728 280,728 276Q728 261,710 250Q693 238,657 232Q621 225,566 225Q512 225,473 231Q434 237,408 249Q383 261,371 278Q359 294,359 315Q359 332,370 343Q381 354,399 359Q417 364,438 364L592 364L569 495L388 495Q369 495,350 500Q332 505,318 515Q304 525,296 540Q287 555,287 575Q287 598,306 614Q325 630,366 638Q408 647,477 647Q550 647,593 636Q636 624,656 604Q676 585,680 562L715 364L1090 364L1067 495L915 495L904 558Q892 629,844 682Q795 735,704 764Q614 792,473 792Z"],"/":[309,"M-55 828L256 44L392 44L80 828Z"],"$":[747,"M261 847L406 24L503 24L358 847ZM350 713Q291 713,233 704Q175 696,128 678Q81 661,52 633Q24 605,24 566Q24 558,25 550Q26 543,30 533L261 533Q260 537,259 540Q258 544,258 548Q258 563,271 574Q284 584,306 589Q328 594,356 594Q370 594,391 593Q412 592,432 588Q453 584,467 576Q481 567,481 552Q481 539,462 532Q443 525,412 522Q380 518,342 514Q303 511,263 505Q227 499,194 490Q160 480,133 464Q106 447,90 422Q75 398,75 362Q75 303,104 264Q134 225,184 202Q234 180,296 170Q359 161,425 161Q481 161,535 168Q589 176,633 192Q677 208,704 234Q730 259,730 295Q730 302,728 310Q727 319,725 327L496 327Q497 320,497 318Q497 316,497 315Q497 303,485 296Q473 288,454 284Q436 280,416 280Q407 280,389 280Q371 281,352 284Q332 288,318 296Q305 303,305 317Q305 332,331 338Q357 344,399 347Q441 350,488 355Q529 359,568 368Q608 376,640 392Q673 408,692 435Q712 462,712 503Q712 564,682 605Q651 646,600 670Q548 693,483 703Q418 713,350 713Z"],"%":[1166,"M218 780L856 93L980 93L344 780ZM299 438Q189 438,141 396Q93 354,93 290Q93 252,104 218Q115 185,137 158Q156 134,184 116Q212 99,249 90Q286 80,332 80Q442 80,490 122Q538 163,538 228Q538 270,524 308Q511 345,482 374Q463 393,436 408Q409 422,375 430Q341 438,299 438ZM863 792Q753 792,705 750Q657 708,657 644Q657 606,668 572Q679 539,701 512Q720 488,748 470Q776 453,813 444Q850 434,896 434Q1006 434,1054 476Q1102 517,1102 582Q1102 624,1088 662Q1075 699,1046 728Q1027 747,1000 762Q973 776,939 784Q905 792,863 792ZM299 354Q340 354,363 330Q386 305,391 269Q393 255,394 247Q395 239,396 234Q396 229,396 225Q396 198,382 181Q367 164,332 164Q291 164,268 188Q246 213,240 249Q238 263,236 272Q235 280,234 284Q234 289,234 293Q234 320,250 337Q265 354,299 354ZM863 708Q904 708,927 684Q950 659,955 623Q957 609,958 601Q959 593,960 588Q960 583,960 579Q960 552,946 535Q931 518,896 518Q855 518,832 542Q810 567,804 603Q802 617,800 626Q799 634,798 638Q798 643,798 647Q798 674,814 691Q829 708,863 708Z"]},"narrow":{"Y":[481,"M105 780L151 518L63 92L250 92L274 322L280 322L389 92L569 92L334 518L288 780Z"],"E":[462,"M-5 780L115 92L510 92L482 250L270 250L252 352L428 352L400 510L224 510L205 622L422 622L394 780Z"],"T":[475,"M101 780L194 250L62 250L90 92L535 92L507 250L377 250L284 780Z"],"S":[469,"M197 792Q156 792,120 786Q85 779,58 762Q32 745,17 713Q2 681,2 631Q2 614,4 596Q7 578,12 555L186 555Q182 579,181 588Q180 598,180 604Q180 618,184 625Q187 632,194 634Q200 637,208 637Q217 637,224 633Q232 629,238 622Q244 614,247 603Q250 592,250 578Q250 563,242 552Q235 540,222 531Q209 522,193 514Q177 505,160 496Q142 486,124 473Q106 460,92 442Q77 424,68 398Q60 373,60 338Q60 264,82 214Q104 165,140 135Q177 105,220 92Q262 79,303 79Q341 79,374 87Q406 95,430 112Q455 130,468 159Q482 188,482 230Q482 240,481 254Q480 269,472 300L300 300Q304 282,306 273Q307 264,307 258Q307 247,302 242Q298 236,287 236Q276 236,268 243Q260 250,256 262Q253 273,253 288Q253 305,261 318Q269 330,282 340Q295 350,312 358Q328 367,345 376Q363 386,380 398Q398 411,412 428Q426 446,434 470Q443 495,443 528Q443 588,426 636Q410 683,378 718Q346 752,300 771Q255 790,197 792Z"],"K":[510,"M-5 780L115 92L298 92L250 365L385 92L574 92L406 403L458 780L273 780L252 549L210 588L177 780Z"]},"kern":{"77":-10,"A?":-40,"A/":40,"K/":40,"L?":-70,"L/":40,"L’":-160,"T/":-30,"Y/":-30,"f?":20,"f’":20,"r’":20,"/J":-20,"’A":-150,"’c":-60,"’d":-60,"’e":-60,"’g":-40,"’m":-20,"’n":-20,"’o":-60,"’p":-20,"’q":-60,"’r":-20,"’s":-60,"’z":-20,"AC":-40,"AG":-40,"AO":-40,"AQ":-40,"AT":-140,"AU":-20,"AV":-70,"AW":-70,"AX":-40,"AY":-140,"Au":-30,"Av":-50,"Aw":-50,"Ax":-10,"Ay":-55,"A'":-150,"BV":-10,"BW":-10,"BX":-20,"BY":-30,"CA":-30,"CT":-30,"CV":-20,"CW":-20,"CX":-25,"CY":-30,"CZ":-30,"DA":-40,"DT":-30,"DV":-40,"DW":-40,"DX":-70,"DY":-40,"DZ":-10,"D,":-20,"D'":-30,"EJ":-30,"FA":-70,"FJ":-90,"FX":-50,"FY":-40,"FZ":-50,"Fa":-30,"Fc":-30,"Fd":-30,"Fe":-30,"Fo":-30,"Fq":-30,"F,":-60,"F-":-30,"KA":-60,"KC":-80,"KG":-80,"KJ":-60,"KO":-80,"KQ":-80,"KT":-40,"KV":-60,"KW":-60,"KX":-20,"KY":-60,"KZ":-10,"Ka":-50,"Kc":-50,"Kd":-50,"Ke":-50,"Ko":-50,"Kq":-50,"Ku":-50,"Kv":-50,"Kw":-50,"Ky":-50,"K'":-20,"K-":-80,"LC":-50,"LG":-50,"LJ":-30,"LO":-50,"LQ":-50,"LT":-160,"LU":-40,"LV":-110,"LW":-110,"LX":-300,"LY":-190,"LZ":-30,"Lv":-40,"Lw":-40,"Lx":-20,"Ly":-40,"L'":-160,"OA":-40,"OT":-30,"OV":-40,"OW":-40,"OX":-70,"OY":-40,"OZ":-10,"O,":-20,"O'":-30,"PA":-70,"PJ":-80,"PT":-10,"PX":-60,"PY":-30,"PZ":-30,"P,":-90,"QA":-40,"QT":-30,"QV":-40,"QW":-40,"QX":-70,"QY":-40,"QZ":-10,"Q,":-20,"Q'":-30,"RJ":-40,"RT":-10,"RX":-30,"RY":-30,"Ra":-10,"Rc":-10,"Rd":-10,"Re":-10,"Ro":-10,"Rq":-10,"Ru":-10,"SY":-40,"TA":-140,"TC":-30,"TG":-30,"TJ":-150,"TO":-30,"TQ":-30,"TX":-30,"TY":-20,"TZ":-30,"Ta":-100,"Tc":-100,"Td":-100,"Te":-100,"Tm":-70,"Tn":-70,"To":-100,"Tp":-70,"Tq":-100,"Tr":-70,"Ts":-100,"Tt":-40,"Tu":-70,"Tv":-20,"Tw":-20,"Tx":-20,"Ty":-20,"Tz":-20,"T,":-50,"T:":-20,"UA":-20,"VA":-70,"VC":-40,"VG":-40,"VJ":-130,"VO":-40,"VQ":-40,"VX":-20,"VY":-20,"Va":-70,"Vc":-70,"Vd":-70,"Ve":-70,"Vm":-10,"Vn":-10,"Vo":-70,"Vp":-10,"Vq":-70,"Vr":-10,"Vs":-60,"Vu":-60,"Vv":-20,"Vw":-20,"Vx":-30,"Vy":-20,"Vz":-40,"V,":-210,"V-":-90,"V:":-30,"WA":-70,"WC":-40,"WG":-40,"WJ":-130,"WO":-40,"WQ":-40,"WX":-20,"WY":-20,"Wa":-70,"Wc":-70,"Wd":-70,"We":-70,"Wm":-10,"Wn":-10,"Wo":-70,"Wp":-10,"Wq":-70,"Wr":-10,"Ws":-60,"Wu":-60,"Wv":-20,"Ww":-20,"Wx":-30,"Wy":-20,"Wz":-40,"W,":-210,"W-":-90,"W:":-30,"XA":-40,"XC":-70,"XG":-70,"XO":-70,"XQ":-70,"XT":-30,"XV":-20,"XW":-20,"XY":-30,"XZ":-20,"Xa":-30,"Xc":-60,"Xd":-60,"Xe":-60,"Xo":-60,"Xq":-60,"Xs":-50,"Xt":-100,"Xu":-40,"Xv":-60,"Xw":-60,"Xx":-60,"Xy":-60,"Xz":-30,"X-":-80,"YA":-140,"YC":-40,"YG":-40,"YJ":-200,"YO":-40,"YQ":-40,"YS":-40,"YT":-20,"YV":-20,"YW":-20,"YX":-30,"Ya":-160,"Yc":-160,"Yd":-160,"Ye":-160,"Yf":-120,"Yg":-140,"Ym":-120,"Yn":-120,"Yo":-160,"Yp":-120,"Yq":-160,"Yr":-120,"Ys":-150,"Yt":-100,"Yu":-110,"Yv":-70,"Yw":-70,"Yx":-80,"Yz":-90,"Y,":-260,"Y:":-50,"ZC":-10,"ZG":-10,"ZO":-10,"ZQ":-10,"ZT":-30,"ZX":-20,"Z-":-70,"bv":-20,"bw":-20,"bx":-70,"by":-10,"bz":-20,"b'":-20,"ex":-10,"e'":-20,"fa":-10,"fc":-10,"fd":-10,"fe":-10,"fo":-10,"fq":-10,"f7":20,"f,":-110,"f'":10,"f-":-10,"f:":-10,"ka":-30,"kc":-40,"kd":-40,"ke":-40,"ko":-40,"kq":-40,"ks":-30,"kv":-20,"kw":-20,"kx":-40,"ky":-20,"kz":-20,"k-":-80,"ov":-20,"ow":-20,"ox":-70,"oy":-10,"oz":-20,"o'":-20,"pv":-20,"pw":-20,"px":-70,"py":-10,"pz":-20,"p'":-20,"ra":-15,"rc":-15,"rd":-15,"re":-15,"ro":-15,"rq":-15,"r,":-100,"sv":-10,"sw":-10,"sx":-60,"sy":-10,"sz":-10,"vc":-20,"vd":-20,"ve":-20,"vo":-20,"vq":-20,"v,":-140,"v:":-10,"wc":-20,"wd":-20,"we":-20,"wo":-20,"wq":-20,"w,":-140,"w:":-10,"xa":-30,"xc":-70,"xd":-70,"xe":-70,"xo":-70,"xq":-70,"za":-20,"zc":-20,"zd":-20,"ze":-20,"zo":-20,"zq":-20,"0-":40,"1'":-30,"1-":40,"2-":10,"3-":40,"4-":40,"5-":40,"6-":20,"7,":-140,"7-":-40,"8-":30,"9-":40,"-V":-90,"-W":-90,"-X":-80,"-0":40,"-1":40,"-2":40,"-3":40,"-4":40,"-5":40,"-6":40,"-8":30,"-9":20,"'A":-150,"'J":-100,"'c":-20,"'d":-20,"'e":-20,"'o":-20,"'q":-20,"'4":-10,"',":-60}};       // display outlines: Archivo Italic, wide and narrow (brand/tools/outline.py)
+const BRAND={"logo":{"box":"-40 180 4256 820","d":"M84 990Q45 990,16 984Q-12 979,-33 972L-13 849L82 849Q119 849,143 840Q167 830,182 814Q197 798,208 780L47 252L286 252L333 485Q336 500,340 522Q343 544,347 566Q351 588,353 605L363 605Q370 592,379 576Q388 559,397 542Q406 525,414 510Q423 494,429 483L556 252L797 252L479 736Q446 786,410 832Q374 877,329 913Q284 949,224 970Q164 990,84 990ZM1112 792Q1006 792,927 768Q848 744,804 694Q761 643,761 565Q761 500,781 448Q801 396,837 357Q874 317,925 292Q976 266,1038 253Q1100 240,1169 240Q1276 240,1352 264Q1429 287,1470 335Q1511 383,1511 459Q1511 472,1509 493Q1507 514,1499 554L994 554Q993 559,993 564Q993 568,993 573Q993 604,1008 624Q1022 645,1050 655Q1079 665,1121 665Q1151 665,1176 659Q1200 653,1218 642Q1235 632,1246 619Q1256 606,1259 592L1491 592Q1483 642,1450 680Q1416 717,1364 742Q1312 767,1248 780Q1183 792,1112 792ZM1013 452L1277 452Q1278 449,1278 446Q1278 443,1278 440Q1278 420,1266 404Q1253 387,1230 377Q1206 367,1172 367Q1128 367,1096 378Q1063 390,1042 410Q1022 429,1013 452ZM1903 792Q1797 792,1718 768Q1639 744,1595 694Q1552 643,1552 565Q1552 500,1572 448Q1592 396,1628 357Q1665 317,1716 292Q1767 266,1829 253Q1891 240,1960 240Q2067 240,2143 264Q2220 287,2261 335Q2302 383,2302 459Q2302 472,2300 493Q2298 514,2290 554L1785 554Q1784 559,1784 564Q1784 568,1784 573Q1784 604,1799 624Q1813 645,1841 655Q1870 665,1912 665Q1942 665,1967 659Q1991 653,2009 642Q2026 632,2037 619Q2047 606,2050 592L2282 592Q2274 642,2241 680Q2207 717,2155 742Q2103 767,2039 780Q1974 792,1903 792ZM1804 452L2068 452Q2069 449,2069 446Q2069 443,2069 440Q2069 420,2057 404Q2044 387,2021 377Q1997 367,1963 367Q1919 367,1887 378Q1854 390,1833 410Q1813 429,1804 452ZM2632 792Q2568 792,2522 780Q2475 769,2450 740Q2426 712,2426 660Q2426 650,2427 639Q2428 628,2430 616L2470 393L2365 393L2390 252L2504 252L2576 92L2748 92L2719 252L2870 252L2845 393L2694 393L2663 570Q2662 577,2661 584Q2660 590,2660 596Q2660 623,2677 637Q2694 651,2737 651L2800 651L2778 773Q2763 778,2735 782Q2707 787,2679 790Q2651 792,2632 792ZM2906.5 780L2923 688.5L3031.5 688.5L3015.5 780ZM3165 780L3096 516L3191.5 516L3214.5 636.5Q3216.5 646,3218 655.5Q3219.5 665.5,3221 674.5Q3222 683,3222.5 688.5L3227 688.5Q3230 682.5,3234 674Q3238 665.5,3242.5 655.5Q3247.5 645.5,3252 636.5L3313 516L3418.5 516L3436 636.5Q3437 642,3438 651Q3439 660.5,3440 670.5Q3441 680.5,3442 688.5L3446 688.5Q3450 681,3454.5 671.5Q3459 662,3464 652.5Q3468.5 643,3472 636.5L3538 516L3632.5 516L3470.5 780L3377.5 780L3359.5 662Q3358 651.5,3356.5 640.5Q3354.5 629.5,3353.5 620Q3352 610.5,3351.5 604.5L3347.5 604.5Q3344.5 611,3340 621Q3335 631,3329.5 641.5Q3324.5 652.5,3319.5 662.5L3260 780ZM3672 479.5L3683 417.5L3775 417.5L3764.5 479.5ZM3620.5 780L3666.5 516L3759 516L3712.5 780ZM3778 780L3824.5 516L3899 516L3897.5 560L3902 560Q3918.5 541.5,3937.5 531Q3957 520,3977.5 515Q3998 510,4017.5 510Q4052 510,4075.5 519.5Q4098.5 529,4110.5 547.5Q4122 566,4122 594.5Q4122 601.5,4121 609Q4120.5 616.5,4119 625L4091.5 780L3999 780L4025 633.5Q4025.5 630,4026 626.5Q4026 623,4026 619.5Q4026 606,4020.5 597Q4015.5 588,4004.5 583.5Q3994 579,3978.5 579Q3963.5 579,3949.5 583.5Q3935.5 588.5,3924 596.5Q3912.5 605,3904.5 617Q3897 628.5,3894.5 642.5L3870 780Z"},"mark":{"box":"0 0 32 32","d":"M3.5 2.5h7.2l5.3 8.2 5.3-8.2h7.2l-8.4 12.6h5.6L12.2 30.2l2.4-10.9H9.2l3.6-5.2z"}};     // {logo,mark}: the wordmark and the mark as {box,d}
 const Wheel=(function yeetWheelFactory(window){
 'use strict';
 // The XP wheel: a sprung flapper over rim pegs, a slow end with a zoom, a heartbeat and a held breath,
@@ -711,7 +967,7 @@ return {createWheel,geometry,wheelFit,landingFor,rotationAt,snapAt,ease,easeVelo
  BAND,EASE_POWER,SNAP_BACK,MIN_TURNS,WHEEL_ZOOM,DEFAULT_V0,TARGET_S,BULBS,SOUND_KEY};
 })(window);
 const CONFIRM_KEY='yeet/confirm';
-const POLL_MS=5000,POLL_MAX=360,SKEW_MS=2000,MAX_PARTS=99;
+const POLL_MS=5000,POLL_MAX=360,SKEW_MS=2000,MAX_PARTS=99,AMOUNT_MAX=25,MORE_USDC='5';
 const FINAL=new Set(['success','partial','refunded','failed']);
 const SYMBOL=/^[A-Z0-9]{2,12}$/,DECIMAL=/^-?(0|[1-9][0-9]*)(\.[0-9]+)?$/;
 const PROPOSAL_ID=/^p_[a-z0-9]{20}$/,TRADE_ID=/^t_[a-z0-9]{20}$/,CODE=/^[A-Za-z0-9_-]{43}$/;
@@ -727,6 +983,10 @@ let current=null;          // {kind,data}: what the card shows
 let confirm=null;          // {proposal_id,revision,code,expires}: memory only, cleared on use or change
 const spent=new Set();     // proposal revisions already tapped; their code is never accepted again
 let draft=null,busy=false,quoting=false,queuedQuote=null,inlineError=null,note=null,spinWon=null;
+let amountDraft=null;      // the USDC amount set on the slider or in the field, not yet quoted
+let basketUi=null;         // the live basket's nodes, so the slider can repaint without a full render
+let back=null;             // the holdings a basket was opened from, for the Back button
+let shareOpen=false,shareSay=null,lastKind=null,prevKeys=new Map();
 let roster=null;           // {proposal_id,symbols}: every coin of the YEET basket, also those stepped to 0 parts
 let hold=null;             // {title,text}: why the stepped parts can't be quoted yet (a coin under the minimum, or no parts)
 let wheel=null,wheelBox=null,spinBusy=false,spinLanding=null,spinRecalled=false;
@@ -736,6 +996,11 @@ let expiryTimer=null,pollTimer=null,polls=0,pollFailures=0,lastKey=null,lastHeig
 const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined&&text!==null)n.textContent=String(text);return n};
 const has=(o,k)=>o!==null&&typeof o==='object'&&Object.hasOwn(o,k);
 const now=()=>Date.now();
+const NS='http://www.w3.org/2000/svg';
+const svg=(tag,attrs,kids)=>{const n=document.createElementNS(NS,tag);for(const k of Object.keys(attrs||{}))n.setAttribute(k,attrs[k]);if(kids)n.append(...kids);return n};
+const REDUCED=typeof window.matchMedia==='function'&&!!window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const mark=(n,k,text)=>{n.dataset.k=k;if(text)n.dataset.t='1';return n};
+const newId=()=>typeof window.crypto?.randomUUID==='function'?window.crypto.randomUUID():`r${now()}${Math.random().toString(36).slice(2)}`;
 
 // ---- Host bridge: the Apps JSON-RPC channel first, ChatGPT's window.openai second -----------------
 function request(method,params,timeoutMs=4000){return new Promise((resolve,reject)=>{const id=++sequence;const timer=window.setTimeout(()=>{pending.delete(id);reject(Error('timeout'))},timeoutMs);pending.set(id,{resolve,reject,timer});window.parent.postMessage({jsonrpc:'2.0',id,method,params},'*')})}
@@ -807,13 +1072,15 @@ function show(data,meta){
   const cur=current?.kind==='basket'?current.data:null;
   if(cur&&cur.proposal_id===data.proposal_id&&data.revision<cur.revision)return;
   if(state.trade_id&&state.proposal_id===data.proposal_id){current={kind:'receipt',data:{trade_id:state.trade_id,direction:data.direction,status:'submitted',legs:[]}};render();poll(0);return}
-  takeConfirm(data,meta);keepRoster(data);if(!hold)draft=null;inlineError=null;
+  takeConfirm(data,meta);keepRoster(data);if(!hold){draft=null;amountDraft=null}inlineError=null;
  }
  if(kind==='receipt'&&data.status==='requote_required'&&data.requote){note='The price moved. Check the new quote, then tap again.';return show(data.requote,meta)}
  if(kind==='receipt'&&TRADE_ID.test(data.trade_id)){if(state.trade_id!==data.trade_id){polls=0;pollFailures=0}saveState({trade_id:data.trade_id,...(PROPOSAL_ID.test(data.proposal_id??'')?{proposal_id:data.proposal_id}:{})});if(!FINAL.has(data.status))poll(POLL_MS);else window.clearTimeout(pollTimer)}
  if(kind==='spin'){spinWon=data;saveState({spin:spinToday(data)??undefined});if(current?.kind==='home'){const x=current.data.xp||{};const m=x.next_streak_milestone&&x.next_streak_milestone.days>data.streak_days?x.next_streak_milestone:null;current.data={...current.data,xp:{...x,total:data.total,streak_days:data.streak_days,spin_available:false,next_streak_milestone:m}};render();return}}
  if(kind!=='basket'&&kind!=='receipt'){confirm=null;window.clearTimeout(expiryTimer)}
  if(kind!=='receipt')note=kind==='basket'?note:null;
+ if(kind!=='basket')back=null;
+ if(kind!==current?.kind){shareOpen=false;shareSay=null}
  current={kind:kind??'error',data:kind?data:{error:'TEMPORARILY_UNAVAILABLE'}};
  render();
 }
@@ -829,7 +1096,7 @@ function receive(structured,meta,isError,raw){
 }
 
 // ---- Actions -----------------------------------------------------------------------------------
-function canTap(p){return !!confirm&&confirm.proposal_id===p.proposal_id&&confirm.revision===p.revision&&now()<confirm.expires-SKEW_MS&&!busy&&!quoting&&!draft&&canCall()}
+function canTap(p){return !!confirm&&confirm.proposal_id===p.proposal_id&&confirm.revision===p.revision&&now()<confirm.expires-SKEW_MS&&!busy&&!quoting&&!draft&&amountDraft===null&&canCall()}
 async function tap(){
  const p=current?.data;if(current?.kind!=='basket'||!canTap(p))return;
  const c=confirm;confirm=null;window.clearTimeout(expiryTimer);spent.add(`${c.proposal_id}:${c.revision}`);
@@ -852,14 +1119,14 @@ async function requestQuote(args){
  if(current?.kind==='basket'){inlineError=typeof u.data?.error==='string'?u.data.error:'TEMPORARILY_UNAVAILABLE';render();return}
  current={kind:'error',data:u.data,proposal_id:args.proposal_id};render();
 }
-function refresh(proposal_id){confirm=null;draft=null;hold=null;note=null;if(current?.kind!=='basket')current={kind:'waiting'};requestQuote({proposal_id})}
+function refresh(proposal_id){confirm=null;draft=null;amountDraft=null;hold=null;note=null;if(current?.kind!=='basket')current={kind:'waiting'};requestQuote({proposal_id})}
 // Stepper rule: parts are a free ratio of whole numbers, 0 to 99 per coin; a coin's share is parts / sum(parts).
 // "+" and "−" only change their own coin. A coin at 0 is dimmed and left out of the trade, and stays on the card.
 function step(parts,i,delta){const p=parts.slice();const v=(p[i]??0)+delta;if(v<0||v>MAX_PARTS)return null;p[i]=v;return p}
 function keepRoster(p){
  if(p.direction!=='yeet'){roster=null;return}
  const syms=p.legs.map(l=>safeSymbol(l.symbol)).filter(Boolean).slice(0,5);
- if(!roster||roster.proposal_id!==p.proposal_id){roster={proposal_id:p.proposal_id,symbols:syms};draft=null;hold=null;return}
+ if(!roster||roster.proposal_id!==p.proposal_id){roster={proposal_id:p.proposal_id,symbols:syms};draft=null;amountDraft=null;hold=null;return}
  for(const s of syms)if(!roster.symbols.includes(s)&&roster.symbols.length<5){roster.symbols.push(s);if(draft)draft.push(p.legs.find(l=>l.symbol===s)?.parts??0)}
 }
 const legOf=(p,sym)=>p.legs.find(l=>l.symbol===sym)||null;
@@ -874,10 +1141,10 @@ function split(total,parts){
 const usdMicro=raw=>usdFmt.format(Number(raw)/1e6);
 const listOf=a=>a.length<2?a.join(''):`${a.slice(0,-1).join(', ')} and ${a.at(-1)}`;
 /** Why these parts can't be quoted, in words that say what to change; null when they can. */
-function holdFor(p,parts,symbols){
+function holdFor(p,parts,symbols,usdc=p.amount_usdc){
  const sum=parts.reduce((a,b)=>a+b,0);
  if(sum<=0)return {title:ERRORS.PARTS_EMPTY?.[0]??'Pick at least one coin',text:'Every coin is at 0 parts. Tap + on a coin to put it back in the basket.'};
- const min=micro(p.min_leg_usdc),total=micro(p.amount_usdc),shares=split(total,parts);
+ const min=micro(p.min_leg_usdc),total=micro(usdc),shares=split(total,parts);
  if(min===null||!shares)return null;
  const low=parts.map((x,k)=>k).filter(k=>parts[k]>0&&shares[k]<min);
  if(!low.length)return null;
@@ -886,16 +1153,55 @@ function holdFor(p,parts,symbols){
  const names=low.map(k=>symbols[k]??'?');const one=names.length===1;
  const said=listOf(low.map(k=>`${symbols[k]??'?'} (${usdMicro(shares[k])})`));
  return {title:ERRORS.AMOUNT_TOO_SMALL?.[0]??'A coin gets too little',
-  text:`${said} ${one?'is':'are'} under the ${usdMicro(min)} minimum per coin. Give ${one?names[0]:'them'} more parts, set ${one?'it':'them'} to 0, or ask in the chat for at least ${usdMicro(need)} in total.`};
+  text:`${said} ${one?'is':'are'} under the ${usdMicro(min)} minimum per coin. Give ${one?names[0]:'them'} more parts, set ${one?'it':'them'} to 0, or ${need<=BigInt(Math.max(AMOUNT_MAX,Math.ceil(Number(p.amount_usdc)||0)))*1000000n?`raise the amount to at least ${usdMicro(need)}.`:`ask in the chat for at least ${usdMicro(need)} in total.`}`};
 }
+// What to ask yeet_quote for: the stepped parts and the new amount, each only when it was changed on the card.
+function quoteArgs(p){return {proposal_id:p.proposal_id,...(draft?{legs:roster.symbols.map((s,k)=>({symbol:s,parts:draft[k]}))}:{}),...(amountDraft!==null?{amount_usdc:amountDraft}:{})}}
 function onStep(i,delta){
  const p=current?.data;if(current?.kind!=='basket'||busy||!roster)return;
  const next=step(partsOf(p),i,delta);if(!next)return;
  draft=next;confirm=null;window.clearTimeout(expiryTimer);inlineError=null;
- hold=holdFor(p,next,roster.symbols);
+ hold=holdFor(p,next,roster.symbols,amountOf(p));
  if(hold){queuedQuote=null;render();return}
- requestQuote({proposal_id:p.proposal_id,legs:roster.symbols.map((s,k)=>({symbol:s,parts:next[k]}))});
+ requestQuote(quoteArgs(p));
 }
+// ---- Amount: a field and a slider, 3 USDC per coin up to 25. The word on the button gets wider with the amount. ----
+const amountOf=p=>amountDraft??p.amount_usdc;
+const trimAmount=n=>String(Math.round(n*100)/100);
+function amountBounds(p,parts){
+ const coins=Math.max(1,parts.filter(x=>x>0).length),leg=Number(p.min_leg_usdc)||3,cur=Number(p.amount_usdc)||0;
+ let min=Math.ceil(leg*coins);if(cur>0&&cur<min)min=Math.max(1,Math.floor(cur));
+ return {min,max:Math.max(AMOUNT_MAX,Math.ceil(cur),min)};
+}
+const widthAt=(v,b)=>b.max>b.min?Math.min(1,Math.max(0,(v-b.min)/(b.max-b.min))):1;
+function touchAmount(){confirm=null;window.clearTimeout(expiryTimer);inlineError=null;note=null}
+/** While the slider moves or digits are typed: repaint the shares and the word in place. No quote yet. */
+function onAmountInput(raw,from){
+ const p=current?.data,ui=basketUi;if(current?.kind!=='basket'||p.direction==='skeet'||busy||!ui||!roster)return;
+ const n=Number(raw);if(raw===''||!Number.isFinite(n))return;
+ const v=Math.min(ui.bounds.max,Math.max(ui.bounds.min,Math.round(n*100)/100));
+ touchAmount();amountDraft=trimAmount(v);
+ if(from==='field'&&v!==n){ui.trade.disabled=true;return}
+ if(from!=='field')ui.num.value=amountDraft;
+ if(from!=='range')ui.range.value=String(Math.round(v));
+ paintRange(ui.range,ui.bounds);ui.range.setAttribute('aria-valuetext',`${amountDraft} USDC`);
+ const parts=partsOf(p),sum=parts.reduce((a,c)=>a+c,0),shares=split(micro(amountDraft),parts);
+ ui.shares.forEach((node,i)=>{if(node&&parts[i]>0)node.textContent=`${pct(sum>0?parts[i]*100/sum:NaN)??'—'} · ${shares?usdMicro(shares[i]):'—'}`});
+ ui.trade.disabled=true;ui.spend.textContent=`Spend ${usdFmt.format(v)}`;ui.totals.classList.add('stale');
+ stretchTo(ui.word,widthAt(v,ui.bounds),from==='field');
+ if(ui.note)ui.note.textContent='New amount. The quote updates when you let go.';
+}
+/** The slider was let go, or the field was left: ask for a quote at the new amount. */
+function onAmountCommit(raw){
+ const p=current?.data,ui=basketUi;if(current?.kind!=='basket'||p.direction==='skeet'||busy||!ui||!roster)return;
+ if(raw!==undefined){const n=Number(raw);if(raw===''||!Number.isFinite(n)){amountDraft=null;render();return}
+  touchAmount();amountDraft=trimAmount(Math.min(ui.bounds.max,Math.max(ui.bounds.min,n)))}
+ if(amountDraft===null)return;
+ hold=holdFor(p,partsOf(p),roster.symbols,amountDraft);
+ if(hold){queuedQuote=null;render();return}
+ requestQuote(quoteArgs(p));
+}
+function paintRange(range,b){const v=Number(range.value);range.style.setProperty('--fill',`${(widthAt(v,b)*100).toFixed(1)}%`)}
 function poll(delay){
  window.clearTimeout(pollTimer);
  const id=state.trade_id;if(!id||!canCall()||polls>=POLL_MAX)return;
@@ -907,16 +1213,21 @@ function poll(delay){
   pollFailures=0;note=null;show(u.data,u.meta);
  },delay);
 }
-async function skeet(symbol,button){
- button.disabled=true;
- const id=typeof window.crypto?.randomUUID==='function'?window.crypto.randomUUID():`r${now()}${Math.random().toString(36).slice(2)}`;
- let u;try{u=unwrap(await callTool('skeet_propose',{request_id:id,legs:[{symbol,percent:100}]}))}catch{u={data:{error:'TEMPORARILY_UNAVAILABLE'}}}
+// Holdings: SKEET sells the whole coin; YEET more opens a buy for that coin, and the slider on the basket sets how much.
+async function fromHolding(tool,args,button){
+ for(const b of button.parentElement?.querySelectorAll('button')??[button])b.disabled=true;
+ button.classList.add('wait');const from=current;
+ let u;try{u=unwrap(await callTool(tool,{request_id:newId(),...args}))}catch{u={data:{error:'TEMPORARILY_UNAVAILABLE'}}}
+ back=from?.kind==='portfolio'?from:null;
  show(u.data,u.meta);
 }
+const skeet=(symbol,button)=>fromHolding('skeet_propose',{legs:[{symbol,percent:100}]},button);
+const yeetMore=(symbol,button)=>fromHolding('yeet_propose',{amount_usdc:MORE_USDC,legs:[{symbol,parts:1}]},button);
+function goBack(){if(!back||busy)return;current=back;back=null;draft=null;amountDraft=null;hold=null;note=null;inlineError=null;window.clearTimeout(expiryTimer);render()}
 // ---- Daily spin: the wheel starts on the tap, the server draws, the wheel lands on the slice it names --------
-const WHEEL_COLORS=[{color:'#ff3d8b',deep:'#8a0f4f',ink:'#ffffff'},{color:'#3ee8ff',deep:'#0a6378',ink:'#0b0814'},{color:'#9dff4f',deep:'#2f6b08',ink:'#0b0814'},
- {color:'#8b5cf6',deep:'#3f1f99',ink:'#ffffff'},{color:'#ff8a2e',deep:'#9a3a06',ink:'#0b0814'}];
-const WHEEL_TOP={color:'#ffe14d',deep:'#a87a05',ink:'#3b2500'};
+const WHEEL_COLORS=[{color:'#2430FF',deep:'#141A9E',ink:'#ffffff'},{color:'#EEF0FF',deep:'#AEB5F2',ink:'#0F1240'},{color:'#FF4D8D',deep:'#B3205A',ink:'#0F1240'},
+ {color:'#4A55FF',deep:'#1820C4',ink:'#ffffff'},{color:'#22E27A',deep:'#0B8C47',ink:'#0F1240'}];
+const WHEEL_TOP={color:'#FFE03A',deep:'#C79A00',ink:'#0F1240'};
 /** One slice per base + bonus value from the contract, small and large alternating round the wheel; tier 0..5 by size. */
 const SLICES=(()=>{
  const base=Number.isInteger(SPIN?.base_xp)?SPIN.base_xp:0;
@@ -972,7 +1283,7 @@ async function recallSpin(){
 }
 function spinPanel(h){
  const won=spinWon;const box=el('div','spin');
- const top=el('div','spin-head');top.append(el('h2',null,'Daily spin'));
+ const top=el('div','spin-head');top.append(display('h2','Daily spin','spin'));mark(box,'spin');
  box.append(top);
  const node=wheelNode(won);if(!node)return null;
  {const b=button('quiet small sound',wheel.sound.on?'Sound on':'Sound off',null);b.setAttribute('aria-pressed',String(wheel.sound.on));b.onclick=()=>{wheel.sound.set(!wheel.sound.on);render()};top.append(b)}
@@ -998,42 +1309,195 @@ function shortAddr(a){return typeof a==='string'&&a.length>12?`${a.slice(0,6)}�
 function clock(iso){const t=new Date(iso);return Number.isFinite(t.getTime())?new Intl.DateTimeFormat('en-US',{hour:'numeric',minute:'2-digit'}).format(t):null}
 function safeSymbol(s){return typeof s==='string'&&SYMBOL.test(s)?s:null}
 function coinName(s){return s&&Object.hasOwn(COINS,s)?COINS[s]:null}
-function avatar(symbol){
- const a=el('span','avatar',symbol?symbol[0]:'?');a.setAttribute('aria-hidden','true');
- let h=0;for(const ch of symbol||'?')h=(h*31+ch.charCodeAt(0))>>>0;a.dataset.tone=String(h%6);return a;
-}
 function txUrl(hash,chain){if(chain==='base'&&EVM_TX.test(hash))return `https://basescan.org/tx/${hash}`;if(chain==='solana'&&SOL_TX.test(hash))return `https://solscan.io/tx/${hash}`;return null}
 function safeUrl(v){try{const u=new URL(v);return u.protocol==='https:'&&!u.username&&!u.password&&EXPLORERS.has(u.hostname)?u.href:null}catch{return null}}
 // Where to add funds: any https page without credentials (the server names it; the card only opens it on a tap).
 function fundUrl(v){if(typeof v!=='string'||v.length>2048||/\s/.test(v))return null;try{const u=new URL(v);return u.protocol==='https:'&&!u.username&&!u.password?u.href:null}catch{return null}}
+
+// ---- Brand parts, lifted from apps/landing/ui.js and brand/kit.html: outlines, icons, coin chips, living buttons ----
+const ICONS={
+ bolt:[['path',{d:'M14.2 1.5 4.5 13.6h6.1L9 22.5l10.5-12.7h-6.4z',fill:'currentColor',stroke:'currentColor','stroke-width':'1.2','stroke-linejoin':'round'}]],
+ flame:[['path',{d:'M12 2c1 4 5 5.5 5 11a5 5 0 0 1-10 0c0-2.5 1.2-3.8 2.2-4.8.2 1.6.9 2.6 1.8 3.1C10.6 8.4 11 5 12 2z',fill:'currentColor'}]],
+ crown:[['path',{d:'M3 18 2 7l5.5 4L12 4l4.5 7L22 7l-1 11z',fill:'currentColor'}]],
+ check:[['path',{d:'m4 12.5 5 5L20 6',fill:'none',stroke:'currentColor','stroke-width':'3.2','stroke-linecap':'round','stroke-linejoin':'round'}]],
+ share:[['path',{d:'M12 19V5M6 11l6-6 6 6',fill:'none',stroke:'currentColor','stroke-width':'2.8','stroke-linecap':'round','stroke-linejoin':'round'}]],
+};
+function icon(name,cls){const s=svg('svg',{viewBox:'0 0 24 24','aria-hidden':'true',focusable:'false'},ICONS[name].map(([t,a])=>svg(t,a)));if(cls)s.setAttribute('class',cls);return s}
+function brandMark(which,cls){const b=BRAND[which];const s=svg('svg',{viewBox:b.box,'aria-hidden':'true',focusable:'false'},[svg('path',{d:b.d})]);s.setAttribute('class',cls);return s}
+// Display type: Archivo outlines, one svg per word. The words stay in the page as hidden text for readers and tests.
+const NUM=/-?\d+(?:\.\d+)?/g;
+function shift(d,dx){return d.replace(/(-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)/g,(m,x,y)=>`${Math.round((+x+dx)*10)/10} ${y}`)}
+function setLine(set,text,track,kern){
+ let x=0,d='',prev='';
+ for(const ch of text){const g=set[ch];if(!g){x+=TYPE.space;prev='';continue}
+  if(kern&&prev&&TYPE.kern[prev+ch])x+=TYPE.kern[prev+ch];
+  d+=shift(g[1],x);x+=g[0]+track;prev=ch}
+ return {d,w:x-track};
+}
+function canSet(text){if(!TYPE||!text)return false;for(const c of text)if(c!==' '&&!Object.hasOwn(TYPE.wide,c))return false;return true}
+function display(tag,text,em){
+ const h=el(tag,'display');if(!canSet(text)){h.textContent=text;return h}
+ const vis=el('span','set');vis.setAttribute('aria-hidden','true');
+ for(const w of text.split(' ').filter(Boolean)){
+  const L=setLine(TYPE.wide,w,-34,true);const s=svg('svg',{viewBox:`0 0 ${Math.round(L.w)} ${TYPE.em}`,focusable:'false'},[svg('path',{d:L.d})]);
+  s.style.width=`${(L.w/TYPE.em).toFixed(3)}em`;const span=el('span',em&&w.toLowerCase().replace(/[^a-z]/g,'')===em.toLowerCase()?'yw em':'yw');span.append(s);vis.append(span);
+ }
+ h.append(el('span','sr',text),vis);return h;
+}
+// The word on a button: outlines that run between the narrow cut (0) and the wide cut (1). The button keeps its size.
+const MORPH=new Map();
+function morph(text){
+ if(MORPH.has(text))return MORPH.get(text);
+ let m=null;
+ if(TYPE&&[...text].every(c=>Object.hasOwn(TYPE.wide,c)&&Object.hasOwn(TYPE.narrow,c))){
+  const A=setLine(TYPE.wide,text,-6,true),B=setLine(TYPE.narrow,text,10,false);
+  const dB=shift(B.d,Math.round((A.w-B.w)/2));
+  const wide=A.d.match(NUM).map(Number),narrow=dB.match(NUM).map(Number),glue=A.d.split(NUM);
+  if(wide.length===narrow.length&&dB.split(NUM).join()===glue.join())m={w:Math.round(A.w),wideD:A.d,narrowD:dB,
+   at:t=>{let d=glue[0];for(let i=0;i<wide.length;i+=1)d+=`${Math.round((narrow[i]+(wide[i]-narrow[i])*t)*10)/10}${glue[i+1]}`;return d}};
+ }
+ MORPH.set(text,m);return m;
+}
+/** Puts the word on a button as outlines at width t (0 narrow, 1 wide); with `idle` it runs between the two on its own. */
+function wordLabel(b,text,t,idle){
+ const m=morph(text);if(!m)return null;
+ const path=svg('path',{d:m.at(t)});
+ const s=svg('svg',{viewBox:`0 ${TYPE.base-700} ${m.w} 720`,focusable:'false'},[path]);s.style.aspectRatio=`${m.w} / 720`;
+ if(idle&&!REDUCED)path.append(svg('animate',{attributeName:'d',dur:'5.2s',begin:'-2.6s',repeatCount:'indefinite',calcMode:'spline',keyTimes:'0;0.5;1',keySplines:'.45 0 .2 1;.45 0 .2 1',values:`${m.wideD};${m.narrowD};${m.wideD}`}));
+ const wrap=el('span','lbl');wrap.setAttribute('aria-hidden','true');wrap.append(s);
+ b.replaceChildren(el('span','sr',text),wrap);
+ return {path,m,t,frame:null};
+}
+function stretchTo(word,t,smooth){
+ if(!word)return;
+ if(word.frame!==null){window.cancelAnimationFrame?.(word.frame);word.frame=null}
+ if(!smooth||REDUCED||typeof window.requestAnimationFrame!=='function'){word.t=t;word.path.setAttribute('d',word.m.at(t));return}
+ const from=word.t,t0=window.performance?.now?.()??0,ms=220;
+ const tick=()=>{const k=Math.min(1,((window.performance?.now?.()??t0+ms)-t0)/ms),e=1-(1-k)*(1-k);word.t=from+(t-from)*e;word.path.setAttribute('d',word.m.at(word.t));word.frame=k<1?window.requestAnimationFrame(tick):null};
+ word.frame=window.requestAnimationFrame(tick);
+}
+/** The living button: breathing glow, a light that runs the border, a moving fill and a glint. All CSS. */
+function liven(b){const fx=el('span','fx');fx.setAttribute('aria-hidden','true');const ring=el('i','fx-ring');ring.append(el('b'));const fill=el('i','fx-fill');fill.append(el('b','fx-flow'),el('b','fx-sheen'));fx.append(el('i','fx-glow'),ring,fill);b.classList.add('zap');b.prepend(fx);return b}
+function coinChip(symbol,cls){
+ const usd=symbol==='USDC';const a=el('span',`coin${usd?' usd':''}${cls?` ${cls}`:''}`,usd?'$':symbol?symbol.slice(0,3):'?');a.setAttribute('aria-hidden','true');
+ if(!usd){let h=0;for(const ch of symbol||'?')h=(h*31+ch.charCodeAt(0))>>>0;if(h%5)a.classList.add(`c${h%5+1}`)}
+ return a;
+}
+const COIN_FILL=['#FFB238','#F27BB3','#9C84FF','#38D1C0','#E3A86B'];
+function coinFill(symbol){let h=0;for(const ch of symbol||'?')h=(h*31+ch.charCodeAt(0))>>>0;return COIN_FILL[h%5]}
 // Add funds: the host opens it (ui/open-link, then window.openai.openExternal); with neither, it is a plain link.
-function fundButton(url){const a=el('a','btn primary fund','Add funds');a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.dataset.role='fund';
+function fundButton(url){const a=el('a','btn primary fund','Add funds');a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.dataset.role='fund';liven(a);
  a.onclick=async e=>{if(!host.canOpen&&typeof window.openai?.openExternal!=='function')return;e.preventDefault();try{await openLink(url)}catch{note='This link couldn’t open here.';render()}};
- const box=el('div','actions');box.append(a);return box}
+ const box=el('div','actions');box.append(a);return mark(box,'fund')}
 function link(text,url){const a=el('a','tx',text);a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.onclick=async e=>{e.preventDefault();try{await openLink(url)}catch{note='This link couldn’t open here.';render()}};return a}
 function button(cls,text,onclick){const b=el('button',`btn ${cls}`,text);b.type='button';if(onclick)b.onclick=onclick;return b}
-function head(title,sub){const h=el('div','head');h.append(el('h1',null,title));if(sub)h.append(el('span','sub',sub));return h}
-function noteLine(text,cls='note'){const n=el('p',cls,text);n.setAttribute('role','status');return n}
+function head(title,sub,em){const h=el('div','head');const t=el('div','title');t.append(brandMark('mark','mark'),display('h1',title,em));h.append(t);if(sub)h.append(el('span','sub',sub));return mark(h,'head',true)}
+function noteLine(text,cls='note'){const n=el('p',cls,text);n.setAttribute('role','status');return mark(n,'note',true)}
+function xpChip(text){const x=el('p','xp');x.append(icon('bolt'),document.createTextNode(text));return mark(x,'xp',true)}
+
+// ---- Share: a 1200 x 630 picture drawn on a canvas. The logo, the coins and yeet.win; never an address or a balance. ----
+function shareScene(){
+ const c=current;if(!c||typeof document.createElement('canvas').getContext!=='function')return null;
+ if(c.kind==='receipt'&&(c.data.status==='success'||c.data.status==='partial')){
+  const t=c.data,skeet=t.direction==='skeet';
+  const coins=skeet?(Array.isArray(t.legs)?t.legs:[]).filter(l=>l?.status==='SUCCESS').map(l=>safeSymbol(l.symbol)).filter(Boolean)
+   :(Array.isArray(t.received)?t.received:[]).map(r=>safeSymbol(r?.symbol)).filter(Boolean);
+  return coins.length?{lines:skeet?['Cashed','out.']:['I got a','win.'],coins}:null;
+ }
+ if(c.kind==='portfolio'){
+  const coins=(Array.isArray(c.data.solana?.holdings)?c.data.solana.holdings:[]).map(h=>safeSymbol(h?.symbol)).filter(Boolean);
+  return coins.length?{lines:['My','coins.'],coins}:null;
+ }
+ return null;
+}
+function paintShare(cv,scene){
+ let ctx=null;try{ctx=cv.getContext('2d')}catch{/* no canvas here */}
+ if(!ctx||typeof window.Path2D!=='function'||!TYPE)return false;
+ const W=1200,H=630,TAU=Math.PI*2,RAD=Math.PI/180;cv.width=W;cv.height=H;
+ const outline=(d,x,y,k,fill)=>{ctx.save();ctx.translate(x,y);ctx.scale(k,k);ctx.fillStyle=fill;ctx.fill(new window.Path2D(d));ctx.restore()};
+ const disc=(x,y,r,fill)=>{ctx.beginPath();ctx.arc(x,y,r,0,TAU);ctx.fillStyle=fill;ctx.fill()};
+ let g=ctx.createLinearGradient(0,0,W,0);g.addColorStop(.2,'#06071C');g.addColorStop(.7,'#1820C4');g.addColorStop(1,'#2430FF');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+ // The wheel, cut off at the right edge, under the dark side of the ground.
+ const cx=1152,cy=269,r=408;disc(cx,cy,r+26,'#FFE03A');disc(cx,cy,r+19,'#0F1240');
+ ['#FFE03A','#2430FF','#EEF0FF','#1820C4','#FF4D8D','#4A55FF','#FFE03A','#2430FF','#EEF0FF','#1820C4','#22E27A','#4A55FF'].forEach((c,i)=>{
+  ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,r,(i*30-98)*RAD,(i*30-68)*RAD);ctx.closePath();ctx.fillStyle=c;ctx.fill()});
+ disc(cx,cy,74,'#FFE03A');disc(cx,cy,64,'#0F1240');outline(BRAND.mark.d,cx-40,cy-40,2.5,'#FFE03A');
+ ctx.save();ctx.beginPath();ctx.arc(cx,cy,r+27,0,TAU);ctx.clip();
+ g=ctx.createLinearGradient(700,0,1060,0);g.addColorStop(0,'rgba(6,7,28,.9)');g.addColorStop(1,'rgba(6,7,28,0)');ctx.fillStyle=g;ctx.fillRect(690,0,380,H);ctx.restore();
+ for(const [x,y,s,c] of [[628,92,15,'#FFFFFF'],[548,214,10,'#FFE03A'],[664,402,13,'#FFFFFF'],[452,84,9,'#FFFFFF'],[600,566,11,'#FFE03A']]){
+  ctx.beginPath();[[0,-1],[.2,-.2],[1,0],[.2,.2],[0,1],[-.2,.2],[-1,0],[-.2,-.2]].forEach(([a,b],i)=>ctx[i?'lineTo':'moveTo'](x+a*s,y+b*s));ctx.closePath();ctx.fillStyle=c;ctx.fill()}
+ // The wordmark.
+ const [lx,ly,,lh]=BRAND.logo.box.split(/[ ,]+/).map(Number),lk=66/lh;outline(BRAND.logo.d,72-lx*lk,60-ly*lk,lk,'#FFFFFF');
+ // Two lines of display type, the last one yellow.
+ const set=scene.lines.map(t=>setLine(TYPE.wide,t,-34,true));const k=Math.min(.144,600/Math.max(...set.map(L=>L.w)));
+ set.forEach((L,i)=>outline(L.d,72,184+i*124*(k/.144)+(.144-k)*500,k,i===set.length-1?'#FFE03A':'#FFFFFF'));
+ // The coins, then the address of the site.
+ const coins=scene.coins.slice(0,5);
+ coins.forEach((sym,i)=>{const x=114+i*98,y=520;disc(x,y,44,'#0F1240');disc(x,y,38,coinFill(sym));
+  ctx.fillStyle='#0F1240';ctx.font='italic 900 25px ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(sym.slice(0,3),x,y+1)});
+ if(scene.coins.length>coins.length){ctx.fillStyle='#F4F5FF';ctx.font='800 30px ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(`+${scene.coins.length-coins.length}`,114+coins.length*98-34,521)}
+ const U=setLine(TYPE.wide,'yeet.win',-34,true),uk=.034,pw=U.w*uk+52,px=W-72-pw,py=488,ph=64;
+ const pill=(x,y,w,h,fill)=>{const q=h/2;ctx.beginPath();ctx.moveTo(x+q,y);ctx.lineTo(x+w-q,y);ctx.arc(x+w-q,y+q,q,-Math.PI/2,Math.PI/2);ctx.lineTo(x+q,y+h);ctx.arc(x+q,y+q,q,Math.PI/2,Math.PI*1.5);ctx.closePath();ctx.fillStyle=fill;ctx.fill()};
+ pill(px-5,py-5,pw+10,ph+10,'#0F1240');pill(px,py,pw,ph,'#FFE03A');outline(U.d,px+26,py+ph/2-TYPE.em*uk*.56,uk,'#0F1240');
+ return true;
+}
+async function sendPicture(mode,cv){
+ let blob=null;try{blob=await new Promise(done=>cv.toBlob(done,'image/png'))}catch{/* handled below */}
+ if(!blob){shareSay='This picture can’t be saved here. Take a screenshot of it.';render();return}
+ const nav=window.navigator;
+ if(mode==='share'){
+  try{const file=new window.File([blob],'yeet-win.png',{type:'image/png'});const data={files:[file],title:'YEET',text:'yeet.win'};
+   if(typeof nav.canShare==='function'&&!nav.canShare(data))throw Error('unsupported');
+   await nav.share(data);return}
+  catch(e){if(e?.name==='AbortError')return}
+ }
+ try{const url=window.URL.createObjectURL(blob);const a=el('a');a.href=url;a.download='yeet-win.png';a.rel='noopener';document.body.append(a);a.click();a.remove();
+  window.setTimeout(()=>window.URL.revokeObjectURL(url),60000);shareSay='Saved as yeet-win.png. If no download starts, take a screenshot of it.'}
+ catch{shareSay='This picture can’t be saved here. Take a screenshot of it.'}
+ render();
+}
+function shareButton(){const b=button('quiet small',null,()=>{shareOpen=!shareOpen;shareSay=null;render()});if(!shareOpen)b.append(icon('share','ico'));b.append(document.createTextNode(shareOpen?'Close':'Share'));b.dataset.role='share';b.setAttribute('aria-expanded',String(shareOpen));return b}
+function sharePanel(scene){
+ const box=mark(el('div','share-panel'),'share');const cv=el('canvas');cv.setAttribute('role','img');cv.setAttribute('aria-label',`YEET share picture: ${scene.lines.join(' ')} ${listOf(scene.coins.slice(0,5))}`);
+ box.append(cv);
+ if(!paintShare(cv,scene)){cv.remove();box.append(el('p','note','A picture can’t be made in this window.'));return box}
+ const acts=el('div','actions');
+ if(typeof window.navigator?.share==='function'){const s=button('small','Share picture',()=>sendPicture('share',cv));s.dataset.role='share-send';acts.append(s)}
+ const save=button('small','Save picture',()=>sendPicture('save',cv));save.dataset.role='share-save';acts.append(save);
+ box.append(acts);if(shareSay)box.append(el('p','note',shareSay));
+ return box;
+}
 
 // ---- Views -------------------------------------------------------------------------------------
 const WARN={COST_HIGH:'Cost is above 3%',LEG_SMALL:'One coin is near the minimum',BALANCE_LOW:'Not enough funds yet',SIGNER_MISSING:'Wallet needs set-up'};
+/** The trade wire: USDC on Base, through NEAR Intents, to the coins on Solana (the other way for a SKEET). */
+function route(direction,symbols,state){
+ const skeet=direction==='skeet';const box=mark(el('div','route'),'route');box.dataset.state=state;box.dataset.direction=skeet?'skeet':'yeet';box.setAttribute('aria-hidden','true');
+ const node=(ic,title,sub)=>{const n=el('div','nd');n.append(ic,el('b',null,title),document.createTextNode(sub));return n};
+ const usdc=()=>{const i=coinChip('USDC','ic');return node(i,'USDC','Base')};
+ const coins=()=>{const i=coinChip(symbols[0]??null,'ic');return node(i,symbols.length===1?symbols[0]:`${symbols.length} coins`,'Solana')};
+ const near=el('span','ic');near.style.background=state==='off'?'var(--line-strong)':'var(--yeet)';near.style.color='var(--ink)';near.append(icon(state==='done'?'check':'bolt'));
+ box.append(skeet?coins():usdc(),el('div','wire'),node(near,'NEAR','Intents'),el('div','wire'),skeet?usdc():coins());
+ return box;
+}
 function renderBasket(p){
  const skeet=p.direction==='skeet';
  if(!skeet&&(!roster||roster.proposal_id!==p.proposal_id))keepRoster(p);
  const parts=skeet?[]:partsOf(p);
  const rows=skeet?p.legs.slice(0,5).map(l=>({sym:safeSymbol(l.symbol),leg:l})):roster.symbols.map(s=>({sym:s,leg:legOf(p,s)}));
  const inTrade=skeet?rows.length:parts.filter(x=>x>0).length;
- const sum=parts.reduce((a,b)=>a+b,0);const shares=skeet?null:split(micro(p.amount_usdc),parts);
+ const sum=parts.reduce((a,b)=>a+b,0);const shares=skeet?null:split(micro(amountOf(p)),parts);
  const card=el('section','card basket');card.dataset.direction=skeet?'skeet':'yeet';
- card.append(head(skeet?'SKEET to USDC':'⚡ YEET basket',skeet?`${inTrade} coin${inTrade>1?'s':''} → USDC`:`${amount(p.amount_usdc)??"—"} USDC · ${inTrade} coin${inTrade===1?'':'s'}`));
+ card.append(head(skeet?'SKEET to USDC':'YEET basket',`${inTrade} coin${inTrade===1?'':'s'}`,skeet?'skeet':'yeet'));
+ const ui={shares:[],bounds:null,num:null,range:null,trade:null,word:null,note:null,spend:null,totals:null};
  const list=el('ul','rows');
  rows.forEach(({sym,leg:l},i)=>{
   const off=!skeet&&parts[i]===0;
-  const li=el('li',off?'row off':'row');li.append(avatar(sym));
+  const li=mark(el('li',off?'row off':'row'),`row:${sym}`);li.append(coinChip(sym));
   const who=el('div','who');who.append(el('span','sym',sym??'?'));
-  if(!skeet){const share=el('span','share',off?'0% · not in this trade':`${pct(sum>0?parts[i]*100/sum:NaN)??'—'} · ${shares?usdMicro(shares[i]):'—'}`);share.dataset.role='share';who.append(share)}
+  if(!skeet){const share=el('span','share',off?'0% · not in this trade':`${pct(sum>0?parts[i]*100/sum:NaN)??'—'} · ${shares?usdMicro(shares[i]):'—'}`);share.dataset.role='share';who.append(share);ui.shares[i]=share}
   const name=coinName(sym);if(name)who.append(el('span','name',name));li.append(who);
-  const est=el('div','est');
+  const est=el('div',skeet?'est end':'est');
   if(skeet){est.append(el('span','amt',`${amount(l.amount_in)??'—'} ${sym??''}`.trim()),el('span','usd',`≈ ${money(l.est_out_usd)??'—'}`))}
   else if(off||!l){est.classList.add('muted');est.append(el('span','amt','—'))}
   else{est.append(el('span','amt',`≈ ${amount(l.est_out)??'—'}`),el('span','usd',money(l.est_out_usd)??'—'))}
@@ -1048,45 +1512,70 @@ function renderBasket(p){
   list.append(li);
  });
  card.append(list);
- const t=p.totals||{};const totals=el('p','totals');
- totals.append(el('span',null,`${skeet?'Sell':'Spend'} ${money(t.in_usd)??'—'}`),el('span',null,`Get ≈ ${money(t.out_usd)??'—'}`),el('span',(p.warnings||[]).includes('COST_HIGH')?'cost high':'cost',`Cost ${pct(t.cost_pct)??'—'}`));
- card.append(totals);
+ if(!skeet){
+  // Amount: the field and the slider set the same number. Parts stay as they are; the quote follows on release.
+  const b=amountBounds(p,parts),cur=Number(amountOf(p))||0;ui.bounds=b;
+  const box=mark(el('div','amount'),'amount');
+  const field=el('label','field');const num=el('input');num.type='number';num.inputMode='decimal';num.min=String(b.min);num.max=String(b.max);num.step='0.5';num.value=trimAmount(cur);num.setAttribute('aria-label','Amount in USDC');
+  field.append(num,el('span',null,'USDC'));
+  const slide=el('div','slide');const range=el('input');range.type='range';range.min=String(b.min);range.max=String(b.max);range.step='1';range.value=String(Math.min(b.max,Math.max(b.min,Math.round(cur))));
+  range.setAttribute('aria-label','Amount in USDC, slider');range.setAttribute('aria-valuetext',`${trimAmount(cur)} USDC`);range.dataset.role='amount';paintRange(range,b);
+  const ends=el('div','ends');ends.setAttribute('aria-hidden','true');ends.append(el('span',null,String(b.min)),el('span',null,`${b.max} USDC`));
+  slide.append(range,ends);box.append(field,slide);
+  num.disabled=range.disabled=busy||!canCall();
+  range.oninput=()=>onAmountInput(range.value,'range');range.onchange=()=>onAmountCommit();
+  num.oninput=()=>onAmountInput(num.value,'field');num.onchange=()=>onAmountCommit(num.value);
+  ui.num=num;ui.range=range;card.append(box);
+ }
+ const t=p.totals||{};const totals=mark(el('p','totals'),'totals');if(amountDraft!==null||draft)totals.classList.add('stale');
+ const spend=el('span',null,`${skeet?'Sell':'Spend'} ${amountDraft!==null?usdFmt.format(Number(amountDraft)):money(t.in_usd)??'—'}`);
+ totals.append(spend,el('span',null,`Get ≈ ${money(t.out_usd)??'—'}`),el('span',(p.warnings||[]).includes('COST_HIGH')?'cost high':'cost',`Cost ${pct(t.cost_pct)??'—'}`));
+ ui.spend=spend;ui.totals=totals;card.append(totals);
  const warns=(Array.isArray(p.warnings)?p.warnings:[]).filter(w=>Object.hasOwn(WARN,w)&&w!=='COST_HIGH');
- if(warns.length){const box=el('div','chips');for(const w of warns)box.append(el('span','chip',WARN[w]));card.append(box)}
- if(hold){const box=el('div','inline-error');box.setAttribute('role','alert');box.dataset.role='hold';box.append(el('strong',null,hold.title),el('span',null,hold.text));card.append(box)}
- else if(inlineError){const e=ERRORS[inlineError]||ERRORS.TEMPORARILY_UNAVAILABLE;const box=el('div','inline-error');box.setAttribute('role','alert');box.append(el('strong',null,e[0]),el('span',null,e[1]));card.append(box)}
- const actions=el('div','actions');
+ if(warns.length){const box=mark(el('div','chips'),'warns');for(const w of warns)box.append(el('span','chip plain',WARN[w]));card.append(box)}
+ if(hold){const box=mark(el('div','inline-error'),'hold');box.setAttribute('role','alert');box.dataset.role='hold';box.append(el('strong',null,hold.title),el('span',null,hold.text));card.append(box)}
+ else if(inlineError){const e=ERRORS[inlineError]||ERRORS.TEMPORARILY_UNAVAILABLE;const box=mark(el('div','inline-error'),'problem');box.setAttribute('role','alert');box.append(el('strong',null,e[0]),el('span',null,e[1]));card.append(box)}
+ if(busy)card.append(route(p.direction,rows.filter((r,i)=>skeet||parts[i]>0).map(r=>r.sym).filter(Boolean),'run'));
+ const actions=mark(el('div','actions'),'actions');
  const live=canTap(p);
- const primary=button(`primary ${skeet?'skeet':'yeet'}`,busy?'Sending…':skeet?'SKEET':'⚡ YEET',()=>tap());primary.disabled=!live;primary.dataset.role='trade';
- actions.append(primary);
- const expired=!busy&&!quoting&&!draft&&!live;
+ const primary=button(`primary ${skeet?'skeet':'yeet'}`,busy?'Sending…':skeet?'SKEET':'YEET',()=>tap());primary.disabled=!live;primary.dataset.role='trade';
+ if(!busy)ui.word=wordLabel(primary,skeet?'SKEET':'YEET',skeet?1:widthAt(Number(amountOf(p))||0,ui.bounds),skeet);
+ liven(primary);ui.trade=primary;actions.append(primary);
+ const expired=!busy&&!quoting&&!draft&&amountDraft===null&&!live;
  if(expired&&canCall()){const r=button('quiet','Refresh quote',()=>refresh(p.proposal_id));r.dataset.role='refresh';actions.append(r)}
+ if(back&&!busy){const r=button('quiet','Back',goBack);r.dataset.role='back';actions.append(r)}
  card.append(actions);
- if(note)card.append(noteLine(note));
- else if(hold)card.append(noteLine('Change the parts above to get a new quote.'));
- else if(quoting||draft)card.append(noteLine('Updating quote…'));
- else if(busy)card.append(noteLine('Sending your trade…'));
- else if(!canCall())card.append(noteLine('Open this card in the chat to trade.'));
- else if(expired)card.append(noteLine('Quote expired. Refresh for live numbers.'));
- else card.append(noteLine(`Ready${Number.isInteger(t.time_estimate_s)?` · about ${Math.max(1,Math.round(t.time_estimate_s/60))} min to land`:''}`));
+ let said;
+ if(note)said=noteLine(note);
+ else if(hold)said=noteLine(skeet?'Change the coins to get a new quote.':'Change the parts or the amount to get a new quote.');
+ else if(quoting||draft||amountDraft!==null)said=noteLine('Updating quote…');
+ else if(busy)said=noteLine('Sending your trade…');
+ else if(!canCall())said=noteLine('Open this card in the chat to trade.');
+ else if(expired)said=noteLine('Quote expired. Refresh for live numbers.');
+ else said=noteLine(`Ready${Number.isInteger(t.time_estimate_s)?` · about ${Math.max(1,Math.round(t.time_estimate_s/60))} min to land`:''}`);
+ ui.note=said;card.append(said);
  card.append(el('p','fine','Meme coins can go to zero. Only your tap trades.'));
+ basketUi=skeet?null:ui;
  return card;
 }
-const TRADE_TITLE={signing:'Signing…',submitted:'Sent',settling:'Swapping…',success:'Done',partial:'Partly done',refunded:'Refunded',failed:'Didn’t go through',requote_required:'Price moved'};
+const TRADE_TITLE={signing:'Signing',submitted:'Sent',settling:'Swapping',success:'Done',partial:'Partly done',refunded:'Refunded',failed:'Didn’t go through',requote_required:'Price moved'};
 /** Where a leg's funds are at each status: [YEET, SKEET]. FAILED has no line; the refund reason covers it. */
 const FUNDS_AT={not_sent:['still in your Base wallet','still in your Solana wallet'],sent:['on the way to the 1Click deposit address','on the way to the 1Click deposit address'],PENDING_DEPOSIT:['on the way to the 1Click deposit address','on the way to the 1Click deposit address'],KNOWN_DEPOSIT_TX:['at the 1Click deposit address','at the 1Click deposit address'],INCOMPLETE_DEPOSIT:['at the 1Click deposit address, short of the quote','at the 1Click deposit address, short of the quote'],PROCESSING:['being swapped on NEAR Intents','being swapped on NEAR Intents'],SUCCESS:['in your Solana wallet','in your Base wallet'],REFUNDED:['refunded to your Base wallet','refunded to your Solana wallet']};
 const LEG_STATUS={PENDING_DEPOSIT:['Waiting for deposit','wait'],KNOWN_DEPOSIT_TX:['Deposit seen','wait'],INCOMPLETE_DEPOSIT:['Deposit short','bad'],PROCESSING:['Swapping','wait'],SUCCESS:['Received','ok'],REFUNDED:['Refunded','bad'],FAILED:['Failed','bad'],sent:['Sent','wait'],failed:['Failed','bad'],not_sent:['Not sent','bad']};
+const ROUTE_STATE={success:'done',partial:'part',refunded:'off',failed:'off'};
 function renderReceipt(t){
  const skeet=t.direction==='skeet';const final=FINAL.has(t.status);
  const card=el('section','card receipt');card.dataset.status=t.status??'';
- card.append(head(TRADE_TITLE[t.status]??'Your trade',skeet?'SKEET':'⚡ YEET'));
+ card.append(head(TRADE_TITLE[t.status]??'Your trade',skeet?'SKEET':'YEET'));
  const legs=Array.isArray(t.legs)?t.legs.slice(0,5):[];
+ const syms=legs.map(l=>safeSymbol(l.symbol)).filter(Boolean);
+ if(syms.length)card.append(route(t.direction,syms,ROUTE_STATE[t.status]??'run'));
  const list=el('ul','rows');
  for(const l of legs){
-  const sym=safeSymbol(l.symbol);const li=el('li','row');li.append(avatar(sym));
+  const sym=safeSymbol(l.symbol);const li=mark(el('li','row'),`row:${sym}`);li.append(coinChip(sym));
   const who=el('div','who');who.append(el('span','sym',sym??'?'));
-  const [label,tone]=LEG_STATUS[l.status]??['Pending','wait'];const badge=el('span',`status ${tone}`,label);who.append(badge);li.append(who);
-  const right=el('div','est');
+  const [label,tone]=LEG_STATUS[l.status]??['Pending','wait'];const badge=mark(el('span',`status ${tone}`,label),`status:${sym}`,true);who.append(badge);li.append(who);
+  const right=el('div','est end');
   if(has(l,'amount_out')&&amount(l.amount_out))right.append(el('span','amt',`+${amount(l.amount_out)} ${skeet?'USDC':sym??''}`.trim()));
   else if(amount(l.amount_in))right.append(el('span','usd',`${amount(l.amount_in)} ${skeet?sym??'':'USDC'} in`.trim()));
   const links=el('span','links');
@@ -1097,93 +1586,120 @@ function renderReceipt(t){
   if(links.childElementCount)right.append(links);
   li.append(right);
   const at=Object.hasOwn(FUNDS_AT,l.status)?FUNDS_AT[l.status][skeet?1:0]:null;
-  if(at)li.append(el('p','where',`Funds ${at}`));
+  if(at)li.append(mark(el('p','where',`Funds ${at}`),`where:${sym}`,true));
   if(typeof l.refund_reason==='string'&&l.refund_reason)li.append(el('p','reason',l.refund_reason.slice(0,200)));
   list.append(li);
  }
  if(legs.length)card.append(list);
  const got=(Array.isArray(t.received)?t.received:[]).filter(r=>safeSymbol(r?.symbol)&&amount(r?.amount));
- if(got.length){const p=el('p','got');p.append(el('span','label','You got'));for(const r of got)p.append(el('strong',null,`${amount(r.amount)} ${r.symbol}`));card.append(p)}
- if(t.xp_award&&Number.isInteger(t.xp_award.points))card.append(el('p','xp',`+${t.xp_award.points} XP · ${Number(t.xp_award.total).toLocaleString('en-US')} total`));
+ if(got.length){const p=mark(el('p','got'),'got');p.append(el('span','label','You got'));for(const r of got)p.append(el('strong',null,`${amount(r.amount)} ${r.symbol}`));card.append(p)}
+ if(t.xp_award&&Number.isInteger(t.xp_award.points))card.append(xpChip(`+${t.xp_award.points} XP · ${Number(t.xp_award.total).toLocaleString('en-US')} total`));
+ const scene=final?shareScene():null;
+ if(scene){const acts=mark(el('div','actions'),'actions');acts.append(shareButton());card.append(acts);if(shareOpen)card.append(sharePanel(scene))}
  if(note)card.append(noteLine(note));
  else if(!final)card.append(noteLine(canCall()?'Updating every 5 s…':'Ask in the chat for your trade status.'));
  const when=clock(t.updated_at);if(when)card.append(el('p','fine',`Updated ${when}`));
  return card;
 }
 const READY={ready:['Ready to YEET','ok'],needs_signer:['Finish wallet set-up','wait'],needs_funds:['Add USDC on Base','wait'],paused:['Trading paused','bad']};
+/** XP, the streak chip and one square per day up to the next streak bonus (seven days when none is ahead). */
+function streakBox(xp){
+ const box=mark(el('div','xpbox'),'xpbox');const top=el('div','top');
+ top.append(mark(el('span','xpnum',`${xp.total.toLocaleString('en-US')} XP`),'xpnum',true));
+ const days=Number.isInteger(xp.streak_days)?xp.streak_days:0;
+ if(days>0){const chip=mark(el('span','stchip'),'stchip',true);chip.append(icon('flame'),document.createTextNode(`${days}-day streak`));top.append(chip)}
+ box.append(top);
+ const m=xp.next_streak_milestone;const ahead=m&&Number.isInteger(m.days)&&Number.isInteger(m.xp)&&m.days>days&&m.xp>0;
+ const slots=ahead&&m.days<=10?m.days:7,first=ahead&&m.days<=10?1:Math.max(1,days-(xp.spin_available?5:6));
+ const strip=el('div','days');strip.setAttribute('aria-hidden','true');
+ for(let d=first;d<first+slots;d+=1){
+  const on=d<=days,today=d===days+1&&xp.spin_available===true,goal=ahead&&d===m.days;
+  const cell=el('div',`dd${on?' on':''}${today?' today':''}${goal?' goal':''}`);const sq=el('i');if(on)sq.append(icon('flame'));
+  cell.append(sq,document.createTextNode(goal?`+${m.xp}`:String(d)));strip.append(cell);
+ }
+ box.append(strip);
+ if(ahead)box.append(el('span','streak next',`Day ${m.days}: +${m.xp} XP streak bonus`));
+ return box;
+}
 function renderHome(h){
  const card=el('section','card home');const [label,tone]=READY[h.ready]??['Checking…','wait'];
- const top=head('YEET');top.append(el('span',`status ${tone}`,label));card.append(top);
+ const top=mark(el('div','head'),'head',true);const logo=el('h1','logo');logo.append(el('span','sr','YEET'),brandMark('logo','wordmark'));
+ top.append(logo,el('span',`status ${tone}`,label));card.append(top);
  const list=el('ul','rows');
- const base=el('li','row');base.append(avatar('USDC'));const bw=el('div','who');bw.append(el('span','sym','USDC on Base'),el('span','name',shortAddr(h.wallets?.base?.address)));base.append(bw);
- const bal=el('div','est');bal.append(el('span','amt',money(h.wallets?.base?.usdc)??'—'));base.append(bal);list.append(base);
- const sol=el('li','row');sol.append(avatar('SOL'));const sw=el('div','who');sw.append(el('span','sym','Solana wallet'),el('span','name',shortAddr(h.wallets?.solana?.address)));sol.append(sw);
- sol.append(el('div','est muted','Coins land here'));list.append(sol);
+ const base=mark(el('li','row'),'row:base');base.append(coinChip('USDC'));const bw=el('div','who');bw.append(el('span','sym','USDC on Base'),el('span','name',shortAddr(h.wallets?.base?.address)));base.append(bw);
+ const bal=el('div','est end');bal.append(el('span','amt',money(h.wallets?.base?.usdc)??'—'));base.append(bal);list.append(base);
+ const sol=mark(el('li','row'),'row:sol');sol.append(coinChip('SOL'));const sw=el('div','who');sw.append(el('span','sym','Solana wallet'),el('span','name',shortAddr(h.wallets?.solana?.address)));sol.append(sw);
+ sol.append(el('div','est end muted','Coins land here'));list.append(sol);
  card.append(list);
- if(h.xp&&Number.isInteger(h.xp.total)){
-  const xp=el('div','xpbox');const wheel=el('span','wheel');wheel.setAttribute('aria-hidden','true');
-  const words=el('div','who');words.append(el('span','xpnum',`${h.xp.total.toLocaleString('en-US')} XP`));
-  if(h.xp.streak_days>0)words.append(el('span','streak',`🔥 ${h.xp.streak_days}-day streak`));
-  const m=h.xp.next_streak_milestone;
-  if(m&&Number.isInteger(m.days)&&Number.isInteger(m.xp)&&m.days>h.xp.streak_days&&m.xp>0)words.append(el('span','streak next',`Day ${m.days}: +${m.xp} XP streak bonus`));
-  xp.append(wheel,words);
-  card.append(xp);
- }
+ if(h.xp&&Number.isInteger(h.xp.total))card.append(streakBox(h.xp));
  const fund=h.ready==='needs_funds'?fundUrl(h.fund_url):null;
  if(fund)card.append(fundButton(fund));
  let panel=null;
  if(h.xp&&Number.isInteger(h.xp.total)&&canWheel()&&(spinWon||spinBusy||(h.xp.spin_available&&canCall())))panel=spinPanel(h);
- if(panel)card.append(panel);else if(spinWon)card.append(el('p','xp',`+${spinWon.xp_won} XP from today’s spin`));
+ if(panel)card.append(panel);else if(spinWon)card.append(xpChip(`+${spinWon.xp_won} XP from today’s spin`));
  if(h.xp&&h.xp.spin_available===false&&!spinWon&&canCall())recallSpin();
  const wins=(Array.isArray(h.recent_wins)?h.recent_wins:[]).filter(w=>safeSymbol(w?.symbol)&&typeof w.pct==='number').slice(0,3);
- if(wins.length){const box=el('div','chips');for(const w of wins)box.append(el('span',`chip ${w.pct>=0?'up':'down'}`,`${w.symbol} ${w.pct>=0?'+':'−'}${pct(Math.abs(w.pct))}`));card.append(box)}
+ if(wins.length){const box=mark(el('div','chips'),'wins');for(const w of wins){const c=el('span',`chip ${w.pct>=0?'up':'down'}`);c.append(coinChip(w.symbol,'mini'),document.createTextNode(`${w.symbol} ${w.pct>=0?'+':'−'}${pct(Math.abs(w.pct))}`));box.append(c)}card.append(box)}
  if(note)card.append(noteLine(note));
- card.append(el('p','fine','Say “yeet me a win” to start.'));
+ const say=el('p','fine');say.append(document.createTextNode('Type '),el('span','mention','@yeet'),document.createTextNode(' me a win in the chat to start.'));card.append(say);
  return card;
 }
 function renderSpin(s){
  const card=el('section','card home');
  const panel=canWheel()?spinPanel(null):null;
  if(panel)card.append(panel);
- else{card.append(head('Daily spin'),el('p','big',`+${s.xp_won} XP`));const next=clock(s.next_spin_at);if(next)card.append(el('p','fine',`Next spin after ${next}`))}
+ else{card.append(head('Daily spin',null,'spin'),el('p','big',`+${s.xp_won} XP`));const next=clock(s.next_spin_at);if(next)card.append(el('p','fine',`Next spin after ${next}`))}
  card.append(el('p','note',`${s.total.toLocaleString('en-US')} XP total · ${s.streak_days}-day streak`));
  return card;
 }
 function renderPortfolio(d){
- const card=el('section','card portfolio');card.append(head('Your coins',money(d.total_usd)?`${money(d.total_usd)} total`:null));
+ const card=el('section','card portfolio');card.append(head('Your coins',money(d.total_usd)?`${money(d.total_usd)} total`:null,'coins'));
  const list=el('ul','rows');
- const base=el('li','row');base.append(avatar('USDC'));const bw=el('div','who');bw.append(el('span','sym','USDC'),el('span','name','On Base, ready to YEET'));base.append(bw);
- const bv=el('div','est');bv.append(el('span','amt',money(d.base?.usdc)??'—'));base.append(bv);list.append(base);
+ const base=mark(el('li','row'),'row:usdc');base.append(coinChip('USDC'));const bw=el('div','who');bw.append(el('span','sym','USDC'),el('span','name','On Base, ready to YEET'));base.append(bw);
+ const bv=el('div','est end');bv.append(el('span','amt',money(d.base?.usdc)??'—'));base.append(bv);list.append(base);
  const rows=(Array.isArray(d.solana?.holdings)?d.solana.holdings:[]).filter(h=>safeSymbol(h?.symbol)).slice(0,25);
  rows.sort((a,b)=>(Number(b.usd)||0)-(Number(a.usd)||0));
  for(const h of rows){
-  const li=el('li','row');li.append(avatar(h.symbol));
+  const li=mark(el('li','row'),`row:${h.symbol}`);li.append(coinChip(h.symbol));
   const who=el('div','who');who.append(el('span','sym',h.symbol));const n=coinName(h.symbol);if(n)who.append(el('span','name',n));li.append(who);
-  const est=el('div','est');est.append(el('span','amt',amount(h.amount)??'—'),el('span','usd',money(h.usd)??'No price'));li.append(est);
-  if(canCall()){const b=button('skeet small','SKEET',null);b.onclick=()=>skeet(h.symbol,b);b.setAttribute('aria-label',`SKEET ${h.symbol}`);li.append(b)}
+  const est=el('div','est end');est.append(el('span','amt',amount(h.amount)??'—'),el('span','usd',money(h.usd)??'No price'));li.append(est);
+  if(canCall()){
+   // Two actions per coin, side by side: YEET more buys it again, SKEET sells it.
+   const pair=el('div','pair');
+   const more=button('yeet small','YEET more',null);more.onclick=()=>yeetMore(h.symbol,more);more.setAttribute('aria-label',`YEET more ${h.symbol}`);
+   const sell=button('skeet small','SKEET',null);sell.onclick=()=>skeet(h.symbol,sell);sell.setAttribute('aria-label',`SKEET ${h.symbol}`);
+   pair.append(more,sell);li.append(pair);
+  }
   list.append(li);
  }
  card.append(list);
- if(!rows.length)card.append(el('p','note','No coins yet. Say “yeet me a win”.'));
+ if(!rows.length)card.append(el('p','note','No coins yet. Type @yeet me a win in the chat.'));
+ const scene=shareScene();
+ if(scene){const acts=mark(el('div','actions'),'actions');acts.append(shareButton());card.append(acts);if(shareOpen)card.append(sharePanel(scene))}
  if(note)card.append(noteLine(note));
  const when=clock(d.priced_at);if(when)card.append(el('p','fine',`Prices as of ${when}`));
  return card;
 }
 function renderLeaderboard(d){
  const card=el('section','card leaderboard');card.append(head('Leaderboard','XP'));
- const list=el('ol','board');
- for(const r of (Array.isArray(d.rows)?d.rows:[]).slice(0,50)){
-  const li=el('li','line');li.append(el('span','rank',Number.isInteger(r.rank)?`#${r.rank}`:'—'),el('span','who-name',typeof r.name==='string'?r.name.slice(0,32):'—'),el('span','pts',Number.isInteger(r.xp)?r.xp.toLocaleString('en-US'):'—'));list.append(li);
- }
+ const list=el('ol','lb');
+ (Array.isArray(d.rows)?d.rows:[]).slice(0,50).forEach((r,i)=>{
+  const top=Number.isInteger(r.rank)&&r.rank<=3;
+  const li=mark(el('li',top?'lr top':'lr'),`lr:${i}`);const av=el('span',`av${i%6?` g${i%6}`:''}`);av.setAttribute('aria-hidden','true');if(r.rank===1)av.append(icon('crown'));
+  li.append(el('span','rk',Number.isInteger(r.rank)?String(r.rank):'—'),av,el('span','nm',typeof r.name==='string'?r.name.slice(0,32):'—'),el('span','pts',Number.isInteger(r.xp)?`${r.xp.toLocaleString('en-US')} XP`:'—'));list.append(li);
+ });
  card.append(list);
- const me=d.me||{};card.append(el('p','me',`You: ${Number.isInteger(me.rank)?`#${me.rank}`:'not ranked yet'} · ${Number.isInteger(me.xp)?me.xp.toLocaleString('en-US'):0} XP`));
+ const me=d.me||{};const mine=mark(el('div','lb'),'me');
+ const row=el('div','lr me');const av=el('span','av');av.setAttribute('aria-hidden','true');av.append(icon('bolt'));
+ row.append(el('span','rk',Number.isInteger(me.rank)?String(me.rank):'—'),av,el('span','nm',Number.isInteger(me.rank)?'You':'You · not ranked yet'),el('span','pts',`${Number.isInteger(me.xp)?me.xp.toLocaleString('en-US'):0} XP`));
+ const gap=el('div','gap','· · ·');gap.setAttribute('aria-hidden','true');mine.append(gap,row);card.append(mine);
  return card;
 }
 const REFRESHABLE=new Set(['REQUOTE_REQUIRED','CONFIRMATION_REQUIRED','COST_TOO_HIGH','TEMPORARILY_UNAVAILABLE']);
 function renderError(d,proposal_id){
  const code=typeof d?.error==='string'&&Object.hasOwn(ERRORS,d.error)?d.error:'TEMPORARILY_UNAVAILABLE';const [title,body,retryable]=ERRORS[code];
  const card=el('section','card problem');card.dataset.code=code;card.setAttribute('role','alert');
- card.append(el('h1',null,title),el('p',null,body));
+ card.append(display('h1',title),el('p',null,body));
  const fund=code==='BALANCE_LOW'?fundUrl(d.fund_url):null;
  if(fund)card.append(fundButton(fund));
  const pid=proposal_id||state.proposal_id;
@@ -1191,15 +1707,67 @@ function renderError(d,proposal_id){
  if(note)card.append(noteLine(note));
  return card;
 }
+// ---- Render: every card enters with an animation, changed parts tick, and what leaves fades out ------------------
+const clockS=()=>(((window.performance?.now?.()??0)/1000)%3600).toFixed(2);
+const STARS=[[64,22,9,5.2,-1.4,'#FFFFFF'],[72,64,6,4.4,-3.1,'#FFE03A'],[56,10,5,6.1,-.6,'#FFFFFF'],[68,84,7,5.6,-4.2,'#FFFFFF']];
+/** Adds the card's trim (stars, the light on the top edge) and numbers its parts for the staggered entrance. */
+function dress(card){
+ const stars=el('div','stars');stars.setAttribute('aria-hidden','true');
+ for(const [x,y,s,t,dl,c] of STARS){const i=el('i','tw');i.style.cssText=`--x:${x}%;--y:${y}%;--s:${s}px;--t:${t}s;--dl:${dl}s;--c:${c}`;stars.append(i)}
+ const edge=el('div','edge-line');edge.setAttribute('aria-hidden','true');
+ let i=0;for(const child of [...card.children]){child.style.setProperty('--i',String(i));i+=1;
+  if(child.matches('.rows,.lb')){let j=0;for(const li of child.children){li.style.setProperty('--i',String(i-1));li.style.setProperty('--j',String(j));j+=1}i+=Math.min(j,4)}}
+ card.prepend(stars,edge);
+}
+function fadeOut(node,frames,after){
+ let a=null;try{a=node.animate(frames,{duration:260,easing:'cubic-bezier(.6,0,.9,.4)',fill:'forwards'})}catch{/* no animation here */}
+ const done=()=>{node.remove();after?.()};
+ if(a&&typeof a.finished?.then==='function')a.finished.then(done,done);else done();
+}
+/** A copy of something that just left the card, to animate out. Never a live control: no roles, keys, ids or focus. */
+function copyOf(node,cls){
+ const g=node.cloneNode(true);g.classList.remove('enter','in','tick');g.classList.add(cls);g.setAttribute('aria-hidden','true');g.inert=true;
+ for(const n of [g,...g.querySelectorAll('[data-role],[data-k],[id]')]){n.removeAttribute('data-role');n.removeAttribute('data-k');n.removeAttribute('id')}
+ return g;
+}
+function leavers(old,card){
+ const keep=new Set([...card.querySelectorAll('[data-k]')].map(n=>n.dataset.k));
+ for(const o of old.querySelectorAll('[data-k]')){
+  if(keep.has(o.dataset.k))continue;
+  const parent=o.parentElement,target=parent===old?card:parent?.matches?.('.rows')&&parent.parentElement===old?card.querySelector('.rows'):null;
+  const h=o.getBoundingClientRect().height;if(!target||!(h>0))continue;
+  let next=o.nextElementSibling,before=null;
+  while(next&&!before){if(next.dataset?.k&&keep.has(next.dataset.k))before=[...target.children].find(n=>n.dataset.k===next.dataset.k)??null;next=next.nextElementSibling}
+  const g=copyOf(o,'going');g.style.minHeight='0';target.insertBefore(g,before);
+  const gap=parseFloat(window.getComputedStyle(target).rowGap)||0;
+  fadeOut(g,[{opacity:1,height:`${h}px`,marginBottom:'0px'},{opacity:0,height:'0px',marginBottom:`${-gap}px`,paddingTop:'0px',paddingBottom:'0px'}],reportHeight);
+ }
+}
 function render(){
- let node;
- if(!current||current.kind==='waiting')node=el('p','waiting',WAITING[VIEW]??'Loading…');
+ let node;const kind=!current||current.kind==='waiting'?'waiting':current.kind;
+ if(kind==='waiting')node=el('p','waiting',WAITING[VIEW]??'Loading…');
  else try{
   node=current.kind==='basket'?renderBasket(current.data):current.kind==='receipt'?renderReceipt(current.data):current.kind==='home'?renderHome(current.data)
    :current.kind==='portfolio'?renderPortfolio(current.data):current.kind==='leaderboard'?renderLeaderboard(current.data):current.kind==='spin'?renderSpin(current.data)
    :renderError(current.data,current.proposal_id);
  }catch{node=renderError({error:'TEMPORARILY_UNAVAILABLE'})}
- root.replaceChildren(node);reportHeight();
+ if(kind!=='basket')basketUi=null;
+ const old=[...root.children].find(c=>!c.classList.contains('ghost'))??null;
+ const ghosts=[...root.children].filter(c=>c.classList.contains('ghost'));
+ const moving=!REDUCED&&!!old&&old.getBoundingClientRect().height>0;
+ const keys=new Map([...node.querySelectorAll('[data-k]')].map(n=>[n.dataset.k,n.textContent]));
+ root.style.setProperty('--clk',clockS());
+ if(node.matches('.card'))dress(node);
+ if(kind!==lastKind){
+  node.classList.add('enter');
+  if(moving){const g=copyOf(old,'ghost');ghosts.push(g);fadeOut(g,[{opacity:1,transform:'none'},{opacity:0,transform:'translateX(16px) skewX(-4deg)'}])}
+ }else{
+  for(const n of node.querySelectorAll('[data-k]')){const k=n.dataset.k;if(!prevKeys.has(k))n.classList.add('in');else if(n.dataset.t&&prevKeys.get(k)!==n.textContent)n.classList.add('tick')}
+  if(moving)leavers(old,node);
+ }
+ lastKind=kind;prevKeys=keys;
+ root.replaceChildren(node,...ghosts);reportHeight();
+ if(shareOpen&&moving){const p=node.querySelector('.share-panel');p?.scrollIntoView?.({block:'nearest',behavior:'smooth'})}
 }
 
 // ---- Wiring ------------------------------------------------------------------------------------
@@ -1209,7 +1777,7 @@ window.addEventListener('message',event=>{
  if(msg.method==='ping'&&has(msg,'id'))window.parent.postMessage({jsonrpc:'2.0',id:msg.id,result:{}},'*');
  if(msg.method==='ui/notifications/tool-result'){const p=msg.params||{};receive(p.structuredContent,p._meta,p.isError===true,p)}
  if(msg.method==='ui/notifications/host-context-changed'&&msg.params?.safeAreaInsets)applyInsets(msg.params.safeAreaInsets);
- if(msg.method==='ui/notifications/tool-cancelled'&&!current){root.replaceChildren(el('p','waiting','Cancelled.'));reportHeight()}
+ if(msg.method==='ui/notifications/tool-cancelled'&&!current){lastKind='cancelled';root.replaceChildren(el('p','note','Cancelled.'));reportHeight()}
 });
 window.addEventListener('openai:set_globals',event=>{
  const g=event.detail?.globals;if(!g)return;if(g.safeArea)applyInsets(g.safeArea.insets);
