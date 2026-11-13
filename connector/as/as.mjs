@@ -312,7 +312,7 @@ function authDocument(res, title, body) {
   res.set(
     "Content-Security-Policy",
     // Privy sign-in plus embedded wallets: auth API, wallet RPC hosts, the wallet iframe and the Turnstile challenge.
-    privyPageCsp(nonce, { formAction: "'self' https://chatgpt.com" }),
+    privyPageCsp(nonce, { formAction: "'self' https://chatgpt.com", telegram: true }),
   );
   return document(title, body, nonce);
 }

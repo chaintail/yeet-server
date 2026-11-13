@@ -5,9 +5,15 @@ import {
   usePrivy,
   useLoginWithEmail,
   useLoginWithOAuth,
+  useLoginWithTelegram,
+  usePrivyClient_experimental,
   useSigners,
 } from "@privy-io/react-auth";
-import { PROVIDERS, embeddedWallets, privyConfig } from "./privy-app.jsx";
+import { embeddedWallets, privyConfig } from "./privy-app.jsx";
+import { NO_METHOD_LINE, enabledMethods, introLine } from "./login-methods.js";
+
+// How long the page keeps asking the Privy client for the app configuration after Privy reports ready.
+const CONFIG_WAIT_MS = 5000;
 
 // How long the page waits for Privy to create the wallets at login (createOnLogin) before it offers a reload.
 // A reload signs in again from the stored session, and Privy then creates any wallet that is still missing.
@@ -43,7 +49,7 @@ function EndSession() {
 
 /**
  * Lets the YEET server sign for both embedded wallets, within the YEET policies (one policy per chain).
- * Runs for every sign-in method (email, Google, Apple) when /account/identity-config returns a signer id, so
+ * Runs for every sign-in method (email, Google, Apple, X, Telegram) when /account/identity-config returns a signer id, so
  * sign-in keeps working before the signer is registered. A wallet that already has a delegated signer is left
  * as it is, so a retry after a partial failure only adds what is missing.
  */
@@ -68,18 +74,53 @@ const onEnter = (action) => (e) => {
   action();
 };
 
-/** Email one-time code, then Google and Apple. The fields have no name, so the page form never posts them. */
-function ChooseMethod() {
+/**
+ * The sign-in methods the Privy app has on, read from the app configuration the Privy client loaded at page load.
+ * Null while it is still loading; [] when nothing is on or the configuration cannot be read.
+ */
+function useEnabledMethods() {
+  const { ready } = usePrivy();
+  const client = usePrivyClient_experimental();
+  const [methods, setMethods] = useState(null);
+  useEffect(() => {
+    if (!ready) return;
+    const started = Date.now();
+    let timer;
+    const look = () => {
+      let config;
+      try {
+        config = client?.app?.getConfig();
+      } catch {
+        config = undefined;
+      }
+      if (config || Date.now() - started >= CONFIG_WAIT_MS) return setMethods(enabledMethods(config));
+      timer = setTimeout(look, 250);
+    };
+    look();
+    return () => clearTimeout(timer);
+  }, [ready, client]);
+  return methods;
+}
+
+/**
+ * Email one-time code, then Google, Apple, X and Telegram, each only when the app has it on. The fields have no
+ * name, so the page form never posts them.
+ */
+function ChooseMethod({ methods }) {
   const { ready } = usePrivy();
   const { initOAuth, loading } = useLoginWithOAuth();
   const { sendCode, loginWithCode, state } = useLoginWithEmail();
+  const { login: loginWithTelegram, state: telegramState } = useLoginWithTelegram();
   const [email, setEmail] = useState(""),
     [code, setCode] = useState(""),
     [sentTo, setSentTo] = useState(""),
     [error, setError] = useState("");
   const sending = state.status === "sending-code",
-    checking = state.status === "submitting-code";
-  const busy = !ready || loading || sending || checking;
+    checking = state.status === "submitting-code",
+    telegramBusy = telegramState?.status === "loading";
+  const busy = !ready || loading || sending || checking || telegramBusy;
+  const emailOn = methods.some((m) => m.id === "email");
+  const others = methods.filter((m) => m.id !== "email");
 
   async function send() {
     const address = email.trim();
@@ -117,6 +158,15 @@ function ChooseMethod() {
       setError("Sign in could not start. Please try again.");
     }
   }
+  async function telegram() {
+    setError("");
+    try {
+      await loginWithTelegram({ disableSignup: false });
+    } catch {
+      setError("Telegram sign in did not finish. Please try again.");
+    }
+  }
+  const start = (m) => (m.oauth ? social(m.id) : telegram());
 
   const notice = (
     <p role="alert" className={error ? "notice" : undefined}>
@@ -163,36 +213,43 @@ function ChooseMethod() {
         </>
       ) : (
         <>
-          <label htmlFor="yeet-email">Email</label>
-          <input
-            id="yeet-email"
-            type="email"
-            inputMode="email"
-            autoComplete="email"
-            autoCapitalize="none"
-            spellCheck={false}
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            onKeyDown={onEnter(send)}
-          />
-          <button type="button" disabled={busy} onClick={send}>
-            {sending ? "Sending code…" : "Email me a code"}
-          </button>
-          {notice}
-          <p className="divider">
-            <span>or</span>
-          </p>
-          {PROVIDERS.map(([provider, label]) => (
+          {emailOn ? (
+            <>
+              <label htmlFor="yeet-email">Email</label>
+              <input
+                id="yeet-email"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                autoCapitalize="none"
+                spellCheck={false}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={onEnter(send)}
+              />
+              <button type="button" disabled={busy} onClick={send}>
+                {sending ? "Sending code…" : "Email me a code"}
+              </button>
+              {notice}
+            </>
+          ) : null}
+          {emailOn && others.length ? (
+            <p className="divider">
+              <span>or</span>
+            </p>
+          ) : null}
+          {others.map((m, i) => (
             <button
-              key={provider}
+              key={m.id}
               type="button"
-              className="secondary"
+              className={emailOn || i > 0 ? "secondary" : undefined}
               disabled={busy}
-              onClick={() => social(provider)}
+              onClick={() => start(m)}
             >
-              Continue with {label}
+              {m.id === "telegram" && telegramBusy ? "Waiting for Telegram…" : `Continue with ${m.label}`}
             </button>
           ))}
+          {emailOn ? null : notice}
         </>
       )}
     </>
@@ -282,13 +339,16 @@ function FinishSignIn({ config }) {
 
 function SignIn({ config }) {
   const { ready, authenticated } = usePrivy();
+  const methods = useEnabledMethods();
   if (!ready) return <p role="status">Loading secure sign in…</p>;
-  return authenticated ? (
-    <FinishSignIn config={config} />
-  ) : (
+  // Every sign-in method ends here, so the YEET signer step runs after email, Google, Apple, X and Telegram alike.
+  if (authenticated) return <FinishSignIn config={config} />;
+  if (methods === null) return <p role="status">Loading secure sign in…</p>;
+  if (!methods.length) return <p role="status">{NO_METHOD_LINE}</p>;
+  return (
     <>
-      <p>Sign in with your email, Google or Apple. New here? Signing in creates your YEET account and wallets.</p>
-      <ChooseMethod />
+      <p>{introLine(methods)}</p>
+      <ChooseMethod methods={methods} />
     </>
   );
 }

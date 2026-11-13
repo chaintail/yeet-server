@@ -28,7 +28,7 @@ hits.length=0;
 // 1. Whole files whose text is shown to people (pages, consent copy, card and tool text, error catalogue, login bundle).
 const files=['as/as.mjs','as/auth-pages.mjs','as/consent-selection.mjs','as/account-recovery.mjs','as/viewer/auth-pages.css',
  'mcp/instructions.mjs','mcp/widgets.mjs','mcp/errors.mjs','mcp/tool-registration.mjs',
- 'vendor/yeet-win/contracts/yeet-tools.json','contracts/errors.mjs','core/failure.mjs','core/coins.mjs','core/trade/proposals.mjs','core/trade/tracker.mjs','core/trade/engine.mjs','core/xp/ledger.mjs','core/xp/board.mjs','core/xp/spin.mjs','core/xp/xp.mjs','login/src.jsx','login/build.mjs','login/fund.jsx','login/privy-app.jsx','login/fund-balance.js','as/fund-page.mjs'];
+ 'vendor/yeet-win/contracts/yeet-tools.json','contracts/errors.mjs','core/failure.mjs','core/coins.mjs','core/trade/proposals.mjs','core/trade/tracker.mjs','core/trade/engine.mjs','core/xp/ledger.mjs','core/xp/board.mjs','core/xp/spin.mjs','core/xp/xp.mjs','login/src.jsx','login/build.mjs','login/fund.jsx','login/privy-app.jsx','login/fund-balance.js','login/login-methods.js','as/fund-page.mjs'];
 const widgetDir=new URL('vendor/yeet-win/widget/',C);
 if(existsSync(widgetDir))for(const f of readdirSync(widgetDir))files.push(`vendor/yeet-win/widget/${f}`);
 for(const f of files)check(`connector/${f}`,readFileSync(new URL(f,C),'utf8'));
@@ -67,7 +67,7 @@ if(pathHits.length!==2){console.error('text gate path self-test failed');process
 pathHits.length=0;
 const routeFiles=['as/as.mjs','as/fund-page.mjs','as/auth-pages.mjs','as/consent-selection.mjs','as/account-recovery.mjs','as/provider-csp.mjs',
  'mcp/mcp.mjs','mcp/widgets.mjs','mcp/tool-registration.mjs','mcp/authenticate.mjs','core/fund-link.mjs',
- 'login/src.jsx','login/fund.jsx','login/privy-app.jsx','login/build.mjs'];
+ 'login/src.jsx','login/fund.jsx','login/privy-app.jsx','login/login-methods.js','login/build.mjs'];
 // Absolute paths in string literals (routes, redirects, script/style/fetch targets) and in src/href attributes.
 const ROUTE_RE=/(?:["'`]|(?:src|href|action)=\\?["'])(\/[A-Za-z0-9._~\-\/]*)(?:[?"'`\\]|\$\{)/g;
 let routeCount=0;

@@ -89,3 +89,13 @@ test("sign-in return target accepts only the fund page", () => {
   }
   assert.equal(nextField("fund"), '<input type="hidden" name="next" value="fund">');
 });
+
+test("sign-in CSP: Telegram adds only Privy's widget script and oauth.telegram.org; the fund page keeps neither", () => {
+  const d = directives(privyPageCsp("n", { formAction: "'self' https://chatgpt.com", telegram: true }));
+  assert.deepEqual(d["script-src"], ["'self'", "'nonce-n'", "https://challenges.cloudflare.com", "https://auth.privy.io"]);
+  assert.deepEqual(d["frame-src"], ["https://auth.privy.io", "https://challenges.cloudflare.com", "https://oauth.telegram.org"]);
+  assert.deepEqual(d["child-src"], ["https://auth.privy.io", "https://challenges.cloudflare.com", "https://oauth.telegram.org"]);
+  assert.deepEqual(d["connect-src"], ["'self'", "https://auth.privy.io", "https://*.rpc.privy.systems", "https://oauth.telegram.org"]);
+  assert.deepEqual(d["form-action"], ["'self'", "https://chatgpt.com"]);
+  assert.ok(!fundCsp("n").includes("telegram"));
+});

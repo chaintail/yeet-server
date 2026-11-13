@@ -1,14 +1,9 @@
 // Shared by the sign-in page (src.jsx) and the fund page (fund.jsx): one Privy configuration for both.
 import React from "react";
+import { LOGIN_METHODS } from "./login-methods.js";
 
-/** Social sign-in buttons, below the email code form. No wallet, X or Telegram sign-in. */
-export const PROVIDERS = [
-  ["google", "Google"],
-  ["apple", "Apple"],
-];
-
-/** Every way to sign in, as Privy's PrivyClientConfig.loginMethods names them (3.47.0 types). */
-export const LOGIN_METHODS = ["email", ...PROVIDERS.map(([provider]) => provider)];
+// Every way to sign in (email, Google, Apple, X, Telegram), as PrivyClientConfig.loginMethods names them (3.47.0
+// types). The sign-in page shows only the ones the Privy app has on; see login-methods.js. No wallet sign-in.
 
 /** The person's YEET embedded wallets (created on login), one per chain. */
 export function embeddedWallets(user) {
@@ -34,7 +29,7 @@ export function privyConfig() {
       accentColor: "#ffe14d",
       walletList: [],
     },
-    loginMethods: LOGIN_METHODS,
+    loginMethods: [...LOGIN_METHODS],
     // PrivyClientConfig.embeddedWallets (3.47.0): one Ethereum (Base) and one Solana wallet for every user at login.
     embeddedWallets: {
       disableAutomaticMigration: true,

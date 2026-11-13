@@ -12,16 +12,20 @@ export const BASE_RPC_ORIGIN = "https://mainnet.base.org";
 
 /**
  * Content-Security-Policy for pages that run the Privy bundle: auth API, wallet RPC hosts, the wallet iframe and the
- * Turnstile challenge. `connect` adds connect-src origins, `formAction` replaces form-action.
+ * Turnstile challenge. `connect` adds connect-src origins, `formAction` replaces form-action. `telegram` allows
+ * Privy's Telegram sign-in: PrivyProvider adds https://auth.privy.io/js/telegram-login.js (Telegram's login widget),
+ * which frames and calls https://oauth.telegram.org and opens its sign-in window there.
  */
-export function privyPageCsp(nonce, { connect = [], formAction = "'self'" } = {}) {
+export const TELEGRAM_ORIGIN = "https://oauth.telegram.org";
+export function privyPageCsp(nonce, { connect = [], formAction = "'self'", telegram = false } = {}) {
+  const tg = telegram ? [TELEGRAM_ORIGIN] : [];
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' https://challenges.cloudflare.com`,
+    [`script-src 'self' 'nonce-${nonce}' https://challenges.cloudflare.com`, ...(telegram ? ["https://auth.privy.io"] : [])].join(" "),
     `style-src 'self' 'nonce-${nonce}'`,
-    ["connect-src 'self' https://auth.privy.io https://*.rpc.privy.systems", ...connect].join(" "),
-    "frame-src https://auth.privy.io https://challenges.cloudflare.com",
-    "child-src https://auth.privy.io https://challenges.cloudflare.com",
+    ["connect-src 'self' https://auth.privy.io https://*.rpc.privy.systems", ...connect, ...tg].join(" "),
+    ["frame-src https://auth.privy.io https://challenges.cloudflare.com", ...tg].join(" "),
+    ["child-src https://auth.privy.io https://challenges.cloudflare.com", ...tg].join(" "),
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
     "object-src 'none'",
