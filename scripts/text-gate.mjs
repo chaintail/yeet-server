@@ -67,7 +67,7 @@ if(pathHits.length!==2){console.error('text gate path self-test failed');process
 pathHits.length=0;
 const routeFiles=['as/as.mjs','as/fund-page.mjs','as/auth-pages.mjs','as/consent-selection.mjs','as/account-recovery.mjs','as/provider-csp.mjs',
  'mcp/mcp.mjs','mcp/widgets.mjs','mcp/tool-registration.mjs','mcp/authenticate.mjs','core/fund-link.mjs',
- 'login/src.jsx','login/fund.jsx','login/privy-app.jsx','login/login-methods.js','login/build.mjs'];
+ 'login/src.jsx','login/fund.jsx','login/privy-app.jsx','login/login-methods.js','login/wallet-setup.js','login/setup-screen.jsx','login/build.mjs'];
 // Absolute paths in string literals (routes, redirects, script/style/fetch targets) and in src/href attributes.
 const ROUTE_RE=/(?:["'`]|(?:src|href|action)=\\?["'])(\/[A-Za-z0-9._~\-\/]*)(?:[?"'`\\]|\$\{)/g;
 let routeCount=0;

@@ -1,23 +1,38 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   PrivyProvider,
   usePrivy,
+  useCreateWallet,
   useLoginWithEmail,
   useLoginWithOAuth,
   useLoginWithTelegram,
   usePrivyClient_experimental,
   useSigners,
+  useUser,
 } from "@privy-io/react-auth";
-import { embeddedWallets, privyConfig } from "./privy-app.jsx";
+// Privy 3.47.0: the Solana embedded wallet is created through the /solana entry's useCreateWallet.
+import { useCreateWallet as useCreateSolanaWallet } from "@privy-io/react-auth/solana";
+import { privyConfig } from "./privy-app.jsx";
 import { NO_METHOD_LINE, enabledMethods, introLine } from "./login-methods.js";
+import {
+  CHAINS,
+  attachYeetSigner,
+  embeddedWallets,
+  ensureWallets,
+  setupErrorReport,
+} from "./wallet-setup.js";
+import { SetupProgress } from "./setup-screen.jsx";
 
 // How long the page keeps asking the Privy client for the app configuration after Privy reports ready.
 const CONFIG_WAIT_MS = 5000;
 
-// How long the page waits for Privy to create the wallets at login (createOnLogin) before it offers a reload.
-// A reload signs in again from the stored session, and Privy then creates any wallet that is still missing.
-const WALLET_WAIT_MS = 15000;
+// How long wallet setup may run before the page shows the "taking longer" notice and a Try again button.
+const WALLET_WAIT_MS = 20000;
+
+// Right after sign-in Privy may still be creating the wallets itself (createOnLogin). The page waits this long and
+// re-reads the user before it creates a missing wallet; a create that meets an existing wallet counts as done.
+const LOGIN_CREATE_GRACE_MS = 2500;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function EndSession() {
@@ -45,26 +60,6 @@ function EndSession() {
       <p role="status">{error}</p>
     </>
   );
-}
-
-/**
- * Lets the YEET server sign for both embedded wallets, within the YEET policies (one policy per chain).
- * Runs for every sign-in method (email, Google, Apple, X, Telegram) when /account/identity-config returns a signer id, so
- * sign-in keeps working before the signer is registered. A wallet that already has a delegated signer is left
- * as it is, so a retry after a partial failure only adds what is missing.
- */
-async function attachYeetSignerIfConfigured({ config, user, addSigners }) {
-  if (!config.signerId) return;
-  const wallets = embeddedWallets(user);
-  if (!wallets.base || !wallets.solana) throw Error("wallets-not-ready");
-  for (const [chain, wallet] of Object.entries(wallets)) {
-    if (wallet.delegated) continue;
-    const policy = config.policyIds?.[chain];
-    await addSigners({
-      address: wallet.address,
-      signers: [{ signerId: config.signerId, ...(policy ? { policyIds: [policy] } : {}) }],
-    });
-  }
 }
 
 /** Enter in a field inside the page's sign-in form runs `action` instead of posting that form. */
@@ -256,32 +251,105 @@ function ChooseMethod({ methods }) {
   );
 }
 
-/** Signed in: wait for both wallets, give the YEET signer access, then hand the session to the page form. */
+/** Puts the Privy access token on the page form and submits it; the server then opens the YEET session. */
+async function submitSession(getAccessToken) {
+  const token = await getAccessToken();
+  if (!token) throw Error("no-token");
+  const form = document.getElementById("privy-login").closest("form");
+  const input = document.createElement("input");
+  input.type = "hidden";
+  input.name = "privy_access_token";
+  input.value = token;
+  form.append(input);
+  form.requestSubmit();
+}
+
+/**
+ * Signed in. When a wallet is missing (the person signed up while Privy did not create wallets at login), the page
+ * creates it, links both wallets to the YEET signer and continues on its own, showing each step. When both wallets
+ * are already there, the person taps Continue to YEET, which links them (if needed) and continues.
+ */
 function FinishSignIn({ config }) {
   const { ready, user, getAccessToken, logout } = usePrivy();
+  const { refreshUser } = useUser();
   const { addSigners } = useSigners();
-  const [busy, setBusy] = useState(false),
-    [setupFailed, setSetupFailed] = useState(false),
-    [error, setError] = useState(""),
-    [waitedTooLong, setWaitedTooLong] = useState(false);
+  const { createWallet: createBase } = useCreateWallet();
+  const { createWallet: createSolana } = useCreateSolanaWallet();
+  const userRef = useRef(user);
+  userRef.current = user;
   const wallets = embeddedWallets(user);
-  const walletsPending = !!config.signerId && (!wallets.base || !wallets.solana);
+  // Decided once: a person who arrives without both wallets goes through the automatic setup screen.
+  const [setup] = useState(() => !wallets.base || !wallets.solana);
+  const [step, setStep] = useState("check"),
+    [done, setDone] = useState([]),
+    [attempt, setAttempt] = useState(0),
+    [slow, setSlow] = useState(false),
+    [setupFailed, setSetupFailed] = useState(false),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  const running = useRef(false);
+
+  async function runSetup(first) {
+    running.current = true;
+    setSetupFailed(false);
+    setStep("check");
+    try {
+      if (first) await new Promise((resolve) => setTimeout(resolve, LOGIN_CREATE_GRACE_MS));
+      let current = (await refreshUser().catch(() => null)) || userRef.current;
+      current = await ensureWallets({
+        user: current,
+        createBase: () => createBase(),
+        createSolana: () => createSolana(),
+        refreshUser,
+        onStep: (chain) => {
+          setStep(chain);
+          setDone(CHAINS.slice(0, CHAINS.indexOf(chain)));
+        },
+      });
+      setDone([...CHAINS]);
+      setStep("link");
+      await attachYeetSigner({ config, user: current, addSigners });
+      setDone([...CHAINS, "link"]);
+      await submitSession(getAccessToken);
+    } catch (e) {
+      // No client-error endpoint on the server yet: a structured, secret-free line in the browser console.
+      console.error(JSON.stringify(setupErrorReport(e, userRef.current)));
+      setSetupFailed(true);
+    } finally {
+      running.current = false;
+    }
+  }
 
   useEffect(() => {
-    if (!walletsPending) return;
-    const timer = setTimeout(() => setWaitedTooLong(true), WALLET_WAIT_MS);
+    if (!setup || !ready || running.current) return;
+    runSetup(attempt === 0);
+    // runSetup reads the latest hooks; it runs once per attempt.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setup, ready, attempt]);
+
+  useEffect(() => {
+    if (!setup) return;
+    setSlow(false);
+    const timer = setTimeout(() => setSlow(true), WALLET_WAIT_MS);
     return () => clearTimeout(timer);
-  }, [walletsPending]);
+  }, [setup, attempt]);
+
+  function retry() {
+    // A create call that is still open cannot be cancelled; reloading starts clean from the stored session.
+    if (running.current) return location.reload();
+    setAttempt((n) => n + 1);
+  }
 
   async function continueLogin() {
     setBusy(true);
     setError("");
     try {
-      await attachYeetSignerIfConfigured({ config, user, addSigners });
+      await attachYeetSigner({ config, user, addSigners });
     } catch (e) {
+      console.error(JSON.stringify(setupErrorReport(e, user)));
       setSetupFailed(true);
       setError(
-        e?.message === "wallets-not-ready"
+        e?.code === "wallets-not-ready"
           ? "Your YEET wallets are still being set up. Try again in a moment."
           : "YEET could not finish setting up trading on your wallets. Nothing was charged. Tap Try again.",
       );
@@ -290,43 +358,30 @@ function FinishSignIn({ config }) {
     }
     setSetupFailed(false);
     try {
-      const token = await getAccessToken();
-      if (!token) throw Error();
-      const form = document.getElementById("privy-login").closest("form");
-      const input = document.createElement("input");
-      input.type = "hidden";
-      input.name = "privy_access_token";
-      input.value = token;
-      form.append(input);
-      form.requestSubmit();
+      await submitSession(getAccessToken);
     } catch {
       setError("Sign in could not continue. Please try again.");
       setBusy(false);
     }
   }
 
-  const label = busy
-    ? "Setting up…"
-    : walletsPending
-      ? "Setting up your YEET wallets…"
-      : setupFailed
-        ? "Try again"
-        : "Continue to YEET";
+  if (setup)
+    return (
+      <>
+        <p>You are signed in. YEET sets up your wallets on Base and Solana, then you go back to ChatGPT.</p>
+        <SetupProgress step={step} done={done} slow={slow} failed={setupFailed} onRetry={retry} />
+        <button type="button" className="secondary" onClick={logout}>
+          Use another account
+        </button>
+      </>
+    );
+
   return (
     <>
       <p>You are signed in. YEET sets up your wallets on Base and Solana, then you go back to ChatGPT.</p>
-      {walletsPending && waitedTooLong ? (
-        <>
-          <p role="alert" className="notice">Setting up your wallets is taking longer than usual.</p>
-          <button type="button" onClick={() => location.reload()}>
-            Try again
-          </button>
-        </>
-      ) : (
-        <button type="button" disabled={!ready || busy || walletsPending} onClick={continueLogin}>
-          {label}
-        </button>
-      )}
+      <button type="button" disabled={!ready || busy} onClick={continueLogin}>
+        {busy ? "Setting up…" : setupFailed ? "Try again" : "Continue to YEET"}
+      </button>
       <button type="button" className="secondary" disabled={busy} onClick={logout}>
         Use another account
       </button>

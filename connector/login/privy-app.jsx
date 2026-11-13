@@ -5,19 +5,8 @@ import { LOGIN_METHODS } from "./login-methods.js";
 // Every way to sign in (email, Google, Apple, X, Telegram), as PrivyClientConfig.loginMethods names them (3.47.0
 // types). The sign-in page shows only the ones the Privy app has on; see login-methods.js. No wallet sign-in.
 
-/** The person's YEET embedded wallets (created on login), one per chain. */
-export function embeddedWallets(user) {
-  const wallets = (user?.linkedAccounts || []).filter(
-    (a) =>
-      a.type === "wallet" &&
-      (a.walletClientType === "privy" || a.walletClientType === "privy-v2") &&
-      !a.imported,
-  );
-  return {
-    base: wallets.find((w) => w.chainType === "ethereum"),
-    solana: wallets.find((w) => w.chainType === "solana"),
-  };
-}
+/** The person's YEET embedded wallets, one per chain (created at login, or by the sign-in page; wallet-setup.js). */
+export { embeddedWallets } from "./wallet-setup.js";
 
 /** PrivyProvider config; the CSP nonce comes from the page's csp-nonce meta tag. */
 export function privyConfig() {
