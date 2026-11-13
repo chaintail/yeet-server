@@ -31,6 +31,12 @@ export function fakeRpc(o={}){
   async receipt(h){return s.receipts.get(h)??null},
   async transaction(h){return s.txs.get(h)??null},
   async broadcast(bytes){s.broadcasts.push(bytes);if(s.broadcastError)throw Error(s.broadcastError);return keccak256(bytes)},
+  async blockNumber(){return s.block??100n},
+  async transferLogs({from,to,fromBlock}){
+   if(s.logsError)throw Error(s.logsError);
+   return [...s.receipts.entries()].flatMap(([h,r])=>(r.logs??[]).map(l=>({...l,transactionHash:h,blockNumber:r.blockNumber??1n})))
+    .filter(l=>l.blockNumber>=fromBlock&&l.topics?.[1]===pad(from)&&l.topics?.[2]===pad(to));
+  },
  };
 }
 
@@ -45,8 +51,9 @@ export async function mine(rpc,bytes,{success=true,logs,gasUsed=50_000n,price=5_
   const rec='0x'+p.data.slice(34,74),amt=BigInt('0x'+p.data.slice(74));
   out=[{address:USDC_BASE,topics:[TRANSFER_TOPIC,pad(from),pad(rec)],data:'0x'+amt.toString(16).padStart(64,'0')}];
  }
- s.receipts.set(h,{status:success?'success':'reverted',gasUsed,effectiveGasPrice:price,l1Fee,logs:out??[],blockNumber:1n});
- s.txs.set(h,{from,to,value:p.value??0n,input:p.data??'0x',nonce:p.nonce,blockNumber:1n});
+ const block=s.block??100n;
+ s.receipts.set(h,{status:success?'success':'reverted',gasUsed,effectiveGasPrice:price,l1Fee,logs:out??[],blockNumber:block});
+ s.txs.set(h,{from,to,value:p.value??0n,input:p.data??'0x',nonce:p.nonce,blockNumber:block});
  return h;
 }
 

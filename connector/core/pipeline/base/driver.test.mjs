@@ -317,8 +317,8 @@ test('an unmined top-up is replaced at the same nonce with both fees raised at l
  const after=topups(w);assert.equal(after[1].state,'confirmed');assert.equal(after[0].state,'failed');assert.equal(after[0].code,'SUPERSEDED_SIBLING');
  assert.equal(w.rpc.s.broadcasts.at(-1),f.signed);
 });
-test('replacement whose raised fee passes YEET_BASE_MAX_FEE_WEI is not signed; the stored bytes are replayed', async()=>{
- const w=world({rpc:{gasPrice:60_000_000n}}),f=await preparedAndSigned(w);await w.driver.submit({...f.args,dryRun:false});
+test('replacement whose raised fee passes YEET_BASE_TOPUP_REPLACE_MAX_FEE_WEI is not signed; the stored bytes are replayed', async()=>{
+ const w=world({rpc:{gasPrice:60_000_000n},env:{YEET_BASE_TOPUP_REPLACE_MAX_FEE_WEI:'100000000'}}),f=await preparedAndSigned(w);await w.driver.submit({...f.args,dryRun:false});
  await w.driver.recover({now:T0+31_000});
  assert.equal(topups(w).length,1);assert.equal(w.rpc.s.broadcasts.length,2);assert.equal(w.rpc.s.broadcasts[1],w.rpc.s.broadcasts[0]);
 });

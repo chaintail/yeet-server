@@ -11,6 +11,8 @@
 //   YEET_BASE_TOPUP_GLOBAL_DAILY_RAW   all wallets, wei per UTC day (default 0.001 ETH)      -> TOPUP_CAP_EXCEEDED
 //   YEET_BASE_GAS_FLOOR_RAW            gas wallet balance kept after a top-up (0.0005 ETH)   -> TOPUP_UNAVAILABLE
 //   YEET_BASE_MAX_FEE_WEI              maxFeePerGas cap for both transactions (0.1 gwei)     -> INVALID_TRANSACTION_BUDGET
+//   YEET_BASE_TOPUP_REPLACE_MAX_FEE_WEI  maxFeePerGas ceiling for replacing a stuck top-up (1 gwei)
+export const STUCK_TOPUP_ALERT_AFTER=3;
 import os from 'node:os';
 import path from 'node:path';
 
@@ -52,5 +54,8 @@ export function readBaseConfig(env=process.env){
   globalDailyRaw:wei(env,'YEET_BASE_TOPUP_GLOBAL_DAILY_RAW','1000000000000000'),
   floorRaw:wei(env,'YEET_BASE_GAS_FLOOR_RAW','500000000000000'),
   maxFeeWei:wei(env,'YEET_BASE_MAX_FEE_WEI','100000000'),
+  // Review finding 4: a stuck top-up is replaced up to this higher ceiling (still inside guards 9 and 10), so one
+  // top-up signed just before a fee spike cannot hold guard 12 for every wallet until fees fall.
+  replaceMaxFeeWei:wei(env,'YEET_BASE_TOPUP_REPLACE_MAX_FEE_WEI','1000000000'),
  });
 }

@@ -5,7 +5,7 @@
 // YEET_LIVE=1, YEET_KILL_SWITCH is off and YEET_BASE_PAUSE is off: a second lock behind the driver's own guards.
 import {createPublicClient,http,parseAbi,TransactionReceiptNotFoundError,TransactionNotFoundError} from 'viem';
 import {limitsFromEnv} from '../../trade/limits.mjs';
-import {readBaseConfig,USDC_BASE} from './config.mjs';
+import {readBaseConfig,USDC_BASE,TRANSFER_TOPIC} from './config.mjs';
 import {GAS_PRICE_ORACLE} from './fees.mjs';
 
 const ERC20=parseAbi(['function balanceOf(address) view returns (uint256)']);
@@ -42,6 +42,13 @@ export function createBaseRpc({url,env=process.env,fetchFn}={}){
    try{t=await client.getTransaction({hash})}
    catch(e){if(e instanceof TransactionNotFoundError)return null;throw e}
    return {from:t.from,to:t.to,value:t.value,input:t.input,nonce:t.nonce,blockNumber:t.blockNumber};
+  },
+  blockNumber:()=>client.getBlockNumber(),
+  /** USDC Transfer(from, to) logs since `fromBlock` (review finding 1: a transfer the wallet sent outside our bytes). */
+  async transferLogs({from,to,fromBlock}){
+   const pad=a=>'0x'+String(a).toLowerCase().slice(2).padStart(64,'0');
+   const logs=await client.request({method:'eth_getLogs',params:[{address:USDC_BASE,fromBlock:'0x'+BigInt(fromBlock).toString(16),toBlock:'latest',topics:[TRANSFER_TOPIC,pad(from),pad(to)]}]});
+   return (logs??[]).map(l=>({address:l.address,topics:l.topics,data:l.data,transactionHash:String(l.transactionHash).toLowerCase(),blockNumber:BigInt(l.blockNumber)}));
   },
   broadcast(serializedTransaction){
    if(!broadcastAllowed(env))throw Error('SOURCE_EXECUTION_DISABLED');

@@ -6,6 +6,7 @@
 // the same non-zero tip as a top-up because we cannot re-price a transaction the user signed.
 import {refuse} from '../../trade/util.mjs';
 import {USDC_BASE,TOPUP_GAS} from './config.mjs';
+import {safeError} from './safe-error.mjs';
 
 export const GAS_PRICE_ORACLE='0x420000000000000000000000000000000000000F';
 /** An EIP-1559 USDC transfer is about 110 bytes unsigned; the upper bound is read for this size (a top-up is smaller). */
@@ -36,7 +37,7 @@ export async function readFees(rpc,capWei){
 export async function quoteTransfer(rpc,{wallet,data,capWei,maxGas}){
  let est;
  try{est=BigInt(await rpc.estimateGas({from:wallet,to:USDC_BASE,data,value:0n}))}
- catch(e){refuse('SIMULATION_FAILED',`estimateGas: ${String(e?.message??e).slice(0,120)}`)}
+ catch(e){refuse('SIMULATION_FAILED',`estimateGas: ${safeError(e)}`)}
  const gas=est+(est+3n)/4n;
  if(est<=0n||gas>maxGas)refuse('INVALID_TRANSACTION_BUDGET',`gas ${gas}`);
  const fees=await readFees(rpc,capWei),l1Fee=BigInt(await rpc.l1FeeUpperBound(TRANSFER_TX_BYTES));

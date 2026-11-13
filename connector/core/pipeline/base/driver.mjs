@@ -19,7 +19,8 @@
 import {limitsFromEnv,accountLive,spentToday} from '../../trade/limits.mjs';
 import {refuse,TradeError,sha256,utcDay} from '../../trade/util.mjs';
 import {readBaseConfig,BASE_CHAIN_ID,USDC_BASE,TOPUP_GAS,MAX_USER_GAS,SIGN_WINDOW_MS,DEADLINE_MARGIN_MS,MAX_FAILED_TOPUPS,
- MAX_TOPUPS_PER_ACCOUNT_DAY,REBROADCAST_INTERVAL_MS} from './config.mjs';
+ MAX_TOPUPS_PER_ACCOUNT_DAY,REBROADCAST_INTERVAL_MS,STUCK_TOPUP_ALERT_AFTER} from './config.mjs';
+import {safeError} from './safe-error.mjs';
 import {quoteTransfer,quoteTopup,replacementFees} from './fees.mjs';
 import {prepareTopup} from './gas-ledger.mjs';
 import {loadGasWallet,assertTopupBytes} from './gas-wallet.mjs';
@@ -91,6 +92,36 @@ export function createBaseDriver({db,rpc,env=process.env,now=Date.now,alert=()=>
   transition(a,'cancelled',{code});
   return resultOf(out);
  }
+ /** Review finding 1: the wallet's nonce moved past the attempt under a different hash. Before cancelling, look for a
+  * Transfer(wallet, deposit_address, amount_raw) from pinned USDC since prepare: if the wallet paid the deposit
+  * address with other bytes (a fee-bumped twin, a direct send), the attempt is confirmed with the observed hash, the
+  * daily spend stays held and deposit/submit follows. Null = the search could not run (retry on the next tick).
+  * Review finding 7: a cancel that follows a confirmed top-up for this leg means our ETH paid for something else;
+  * the account gets no further top-ups. */
+ async function nonceChanged(a){
+  let seen;
+  try{
+   const from=JSON.parse(a.evidence_json||'{}').from_block;
+   if(from===undefined||!rpc.transferLogs)throw Error('no search start');
+   seen=(await rpc.transferLogs({from:a.wallet,to:a.deposit_address,fromBlock:BigInt(from)})).find(l=>transferLogMatches([l],{wallet:a.wallet,depositAddress:a.deposit_address,amountRaw:a.amount_raw}));
+  }catch(e){log('base_source_transition',{attempt_id:s12(a.id),stage:'nonce_changed_search',error:safeError(e)});return null}
+  if(seen){
+   const out=store.atomic(()=>{
+    const cur=store.attempt(a.id);if(!OPEN.includes(cur.state))return cur;
+    const l=store.ledger(cur.wallet);l.release(cur.id);store.saveLedger(cur.wallet,l);
+    const ev={...JSON.parse(cur.evidence_json),observed_transfer:true,signed_hash:cur.tx_hash??null};
+    return store.update(cur.id,{state:'confirmed',code:'OBSERVED_TRANSFER',tx_hash:seen.transactionHash,evidence_json:JSON.stringify(ev)},OPEN);
+   });
+   transition(a,'confirmed',{tx_hash:seen.transactionHash,code:'OBSERVED_TRANSFER'});
+   alert({kind:'base_transfer_outside_bytes',chain:'base',attempt_id:a.id,tx_hash:seen.transactionHash});
+   return {state:'confirmed',txHash:out.tx_hash,code:'OBSERVED_TRANSFER'};
+  }
+  if(store.legTopups(a.trade_id,a.leg_idx).some(x=>x.state==='confirmed')&&store.flag(`topup_blocked:${a.account_id}`)!=='1'){
+   store.setFlag(`topup_blocked:${a.account_id}`,'1');
+   alert({kind:'base_topup_misused',chain:'base',account_id:a.account_id,attempt_id:a.id});
+  }
+  return cancel(a,'NONCE_CHANGED');
+ }
  function capCheck(l,amount){
   /*G4*/if(amount<l.minLegRaw)refuse('AMOUNT_TOO_SMALL','leg under minimum');
   /*G4*/if(amount>l.maxTradeRaw)refuse('LIMIT_EXCEEDED','over per-trade cap');
@@ -126,6 +157,7 @@ export function createBaseDriver({db,rpc,env=process.env,now=Date.now,alert=()=>
    account_id:a.account_id,wallet:s12(a.wallet),needed_raw:String(outstanding),shortfall_raw:String(shortfall),outcome,...extra});
   if(shortfall<=0n){decision('not_needed');return {needed:outstanding,shortfall:0n,amount:0n}}
   const c=cfg(),legTopups=store.legTopups(a.trade_id,a.leg_idx);
+  /*F7*/if(store.flag(`topup_blocked:${a.account_id}`)==='1'){decision('blocked');refuse('TOPUP_CAP_EXCEEDED','account blocked: an earlier top-up paid for another transaction')}
   /*G12*/if(legTopups.filter(x=>x.state==='failed'&&x.code!=='SUPERSEDED_SIBLING').length>=MAX_FAILED_TOPUPS){decision('exhausted');refuse('TOPUP_ATTEMPTS_EXHAUSTED')}
   /*G12*/if(store.liveTopups().length){decision('pending');refuse('TOPUP_PENDING')}
   /*G8*/const call=prepareTopup(a.wallet,c.gasWallet??undefined,shortfall);
@@ -173,7 +205,7 @@ export function createBaseDriver({db,rpc,env=process.env,now=Date.now,alert=()=>
  }
  async function sendTopup(row){
   try{if(String(await rpc.broadcast(row.signed_raw)).toLowerCase()!==row.tx_hash)throw Error('SUBMISSION_HASH_MISMATCH')}
-  catch(e){log('base_gas_topup',{attempt_id:s12(row.id),stage:'uncertain',tx_ref:s12(row.tx_hash),error:String(e?.message??e).slice(0,120)});
+  catch(e){log('base_gas_topup',{attempt_id:s12(row.id),stage:'uncertain',tx_ref:s12(row.tx_hash),error:safeError(e)});
    store.update(row.id,{state:'uncertain'},['prepared','submitted','uncertain'])}
  }
  async function sendTransfer(a,t){
@@ -181,7 +213,7 @@ export function createBaseDriver({db,rpc,env=process.env,now=Date.now,alert=()=>
   const row=store.update(a.id,{state:'submitted',sent_at:t,broadcast_at:t},['signed','awaiting_gas']);
   transition(a,'submitted');
   try{if(String(await rpc.broadcast(row.signed_raw)).toLowerCase()!==row.tx_hash)throw Error('SUBMISSION_HASH_MISMATCH')}
-  catch(e){log('base_source_transition',{attempt_id:s12(a.id),state_to:'uncertain',tx_ref:s12(a.tx_hash),error:String(e?.message??e).slice(0,120)});
+  catch(e){log('base_source_transition',{attempt_id:s12(a.id),state_to:'uncertain',tx_ref:s12(a.tx_hash),error:safeError(e)});
    store.update(a.id,{state:'uncertain'},['submitted','uncertain'])}
   return {state:'sent',txHash:row.tx_hash};
  }
@@ -193,7 +225,7 @@ export function createBaseDriver({db,rpc,env=process.env,now=Date.now,alert=()=>
   if(t>a.deadline-DEADLINE_MARGIN_MS)return cancel(a,'SIGN_EXPIRED');
   if(gateRefusal(a.account_id)){if(a.state==='signed')store.update(a.id,{state:'awaiting_gas'},['signed']);return resultOf(store.attempt(id))}
   const latest=Number(await rpc.nonce(a.wallet,'latest'));
-  if(latest>a.nonce)return cancel(a,'NONCE_CHANGED');
+  if(latest>a.nonce)return (await nonceChanged(a))??resultOf(store.attempt(id));
   const lower=store.walletTransfers(a.wallet,OPEN).filter(x=>x.id!==a.id&&x.nonce>=latest&&x.nonce<a.nonce);
   if(new Set(lower.map(x=>x.nonce)).size<a.nonce-latest)return cancel(a,'NONCE_CHANGED');// a nonce below ours will never be used
   if(lower.some(x=>UNBROADCAST.includes(x.state))){if(a.state==='signed')store.update(a.id,{state:'awaiting_gas'},['signed']);return resultOf(store.attempt(id))}
@@ -207,7 +239,7 @@ export function createBaseDriver({db,rpc,env=process.env,now=Date.now,alert=()=>
     a=store.attempt(id);
     if(!(e instanceof TradeError)||SOFT.has(e.code)){
      if(a.state==='signed')store.update(a.id,{state:'awaiting_gas'},['signed']);
-     if(!(e instanceof TradeError))log('base_topup_decision',{attempt_id:s12(id),outcome:'error',error:String(e?.message??e).slice(0,120)});
+     if(!(e instanceof TradeError))log('base_topup_decision',{attempt_id:s12(id),outcome:'error',error:safeError(e)});
      return resultOf(store.attempt(id));
     }
     return cancel(a,e.code);
@@ -237,12 +269,15 @@ export function createBaseDriver({db,rpc,env=process.env,now=Date.now,alert=()=>
    refuse('SOURCE_ATTEMPT_BLOCKED','attempt id used');
   }
   if(store.legTransfers(v.tradeId,v.legIdx).some(a=>a.state!=='prepared'&&a.state!=='cancelled'&&a.state!=='failed'))refuse('SOURCE_ATTEMPT_BLOCKED','leg already signed');
+  // Review finding 3: a broadcast transfer still pending past its deadline holds a nonce; nothing new queues behind it.
+  if(store.walletTransfers(w,['submitted','uncertain']).some(a=>t>a.deadline-DEADLINE_MARGIN_MS))refuse('SOURCE_ATTEMPT_BLOCKED','an earlier transfer from this wallet is stuck');
   const expiresAt=Math.min(t+SIGN_WINDOW_MS,v.deadline-DEADLINE_MARGIN_MS);
   /*G4*/if(!(expiresAt>t))refuse('SIGN_EXPIRED','deposit deadline too close');
   capCheck(limits(),v.amountRaw);
   /*G5*/if(String(await rpc.code(w)??'0x')!=='0x')refuse('WALLET_HAS_CODE');
   const q=await quoteTransfer(rpc,{wallet:w,data:transferData(v.depositAddress,v.amountRaw),capWei:c.maxFeeWei,maxGas:MAX_USER_GAS});
   const pending=Number(await rpc.nonce(w,'pending'));
+  const fromBlock=String(await rpc.blockNumber());// where the finding-1 Transfer search starts
   const row=store.atomic(()=>{
    for(const o of store.legTransfers(v.tradeId,v.legIdx).filter(a=>a.state==='prepared'))store.update(o.id,{state:'cancelled',code:'SUPERSEDED'},['prepared']);
    // YEET: the smallest nonce at or above the chain's pending nonce that no open attempt of this wallet holds.
@@ -251,7 +286,7 @@ export function createBaseDriver({db,rpc,env=process.env,now=Date.now,alert=()=>
    const tx=buildTransfer({depositAddress:v.depositAddress,amountRaw:v.amountRaw,nonce,gas:q.gas,maxFeePerGas:q.maxFeePerGas,maxPriorityFeePerGas:q.maxPriorityFeePerGas});
    return store.insert({id:attemptId,kind:'transfer',trade_id:v.tradeId,leg_idx:v.legIdx,seq:Number(attemptNo??0),account_id:v.accountId,wallet:w,sender:w,
     nonce,tx_json:txJson(tx),payload_sha256:sha256(payloadOf(tx)),deposit_address:v.depositAddress,amount_raw:String(v.amountRaw),
-    needed_raw:String(q.needed),expires_at:expiresAt,deadline:v.deadline,state:'prepared',evidence_json:JSON.stringify({l1_fee_raw:String(q.l1Fee)}),created_at:t,updated_at:t});
+    needed_raw:String(q.needed),expires_at:expiresAt,deadline:v.deadline,state:'prepared',evidence_json:JSON.stringify({l1_fee_raw:String(q.l1Fee),from_block:fromBlock}),created_at:t,updated_at:t});
   });
   transition({...row,state:null},'prepared');
   return signRequest(row);
@@ -280,7 +315,7 @@ export function createBaseDriver({db,rpc,env=process.env,now=Date.now,alert=()=>
   /*G5*/if(String(await rpc.code(a.wallet)??'0x')!=='0x')refuse('WALLET_HAS_CODE');
   const ahead=store.walletTransfers(a.wallet,OPEN).filter(x=>x.id!==a.id&&x.nonce<a.nonce&&['signed','awaiting_gas','submitted','uncertain'].includes(x.state));
   /*G5*/if(BigInt(await rpc.tokenBalance(a.wallet))<ahead.reduce((s,x)=>s+BigInt(x.amount_raw),v.amountRaw))refuse('PRINCIPAL_SHORT');
-  /*G5*/if(Number(await rpc.nonce(a.wallet,'latest'))>a.nonce){if(dry)return {state:'not_sent',code:'NONCE_CHANGED',dryRun:true};return cancel(a,'NONCE_CHANGED')}
+  /*G5*/if(Number(await rpc.nonce(a.wallet,'latest'))>a.nonce){if(dry)return {state:'not_sent',code:'NONCE_CHANGED',dryRun:true};return (await nonceChanged(a))??resultOf(store.attempt(a.id))}
   let sim;try{sim=String(await rpc.call({from:a.wallet,to:USDC_BASE,data:tx.data}))}catch{sim=''}
   /*G6*/if(!/^0x0{63}1$/.test(sim))refuse('SIMULATION_FAILED','transfer eth_call');
   // Hard top-up refusals surface here, before the signature is stored; TOPUP_PENDING only means waiting.
@@ -307,9 +342,14 @@ export function createBaseDriver({db,rpc,env=process.env,now=Date.now,alert=()=>
   if(gateRefusal(row.account_id))return false;
   let wallet;try{wallet=loadWallet(c)}catch{return false}
   const prior=txFromJson(row.tx_json);
-  let fresh;try{fresh=await quoteTopup(rpc,{capWei:c.maxFeeWei})}catch{return false}
+  // Review finding 4: replacements are priced under their own, higher ceiling; guards 9 and 10 still bound the cost.
+  let fresh;try{fresh=await quoteTopup(rpc,{capWei:c.replaceMaxFeeWei})}catch{return false}
   const tx={...prior,...replacementFees(prior,fresh)},fields={attempt_id:s12(row.id),nonce:row.nonce,max_fee_per_gas:String(tx.maxFeePerGas)};
-  /*G7*/if(tx.maxFeePerGas>c.maxFeeWei){log('base_topup_decision',{...fields,stage:'replace',outcome:'fee_cap'});return false}
+  const replaced=store.legTopups(row.trade_id,row.leg_idx).filter(x=>x.nonce===row.nonce&&x.replaces).length;
+  if(replaced>=STUCK_TOPUP_ALERT_AFTER&&store.flag(`topup_stuck:${row.trade_id}:${row.leg_idx}`)!=='1'){
+   store.setFlag(`topup_stuck:${row.trade_id}:${row.leg_idx}`,'1');alert({kind:'gas_topup_stuck',chain:'base',attempt_id:row.id,replacements:replaced});
+  }
+  /*G7*/if(tx.maxFeePerGas>c.replaceMaxFeeWei){log('base_topup_decision',{...fields,stage:'replace',outcome:'fee_cap'});return false}
   const cost=tx.value+tx.gas*tx.maxFeePerGas+fresh.l1Fee,delta=tx.gas*(tx.maxFeePerGas-prior.maxFeePerGas),day=utcDay(t);
   /*G9*/if(walletTopupSpent(row.wallet,row.id)+cost>c.topupCapRaw){
    log('base_topup_decision',{...fields,stage:'replace',outcome:'cap_exceeded'});
@@ -382,9 +422,18 @@ export function createBaseDriver({db,rpc,env=process.env,now=Date.now,alert=()=>
   }
   if(Number(await rpc.nonce(a.wallet,'latest'))>a.nonce){
    if((await rpc.transaction(a.tx_hash))?.blockNumber!=null)return null;
-   return cancel(a,'NONCE_CHANGED');
+   return nonceChanged(a);
   }
-  if(cfg().paused||t>a.deadline-DEADLINE_MARGIN_MS)return null;// never broadcast after deadline - 120 s
+  if(t>a.deadline-DEADLINE_MARGIN_MS){// never broadcast after deadline - 120 s
+   // Review finding 3: past the deadline an unknown transaction is cancelled so the next prepare reuses its nonce (a
+   // late copy pays an expired deposit address and 1Click refunds to the wallet); a transaction still pending in the
+   // mempool raises an alert once, and prepare refuses new transfers for this wallet while it stays.
+   const info=await rpc.transaction(a.tx_hash);
+   if(!info)return cancel(a,'DEADLINE_PASSED_UNSENT');
+   if(info.blockNumber==null&&store.flag(`stuck:${a.id}`)!=='1'){store.setFlag(`stuck:${a.id}`,'1');alert({kind:'base_transfer_stuck',chain:'base',attempt_id:a.id,wallet:a.wallet})}
+   return null;
+  }
+  if(cfg().paused)return null;
   if(a.state==='uncertain'||t-(a.broadcast_at??a.sent_at)>=REBROADCAST_INTERVAL_MS){
    const cur=store.update(a.id,{state:'submitted',broadcast_at:t},['submitted','uncertain']);
    try{if(String(await rpc.broadcast(cur.signed_raw)).toLowerCase()!==cur.tx_hash)throw Error('SUBMISSION_HASH_MISMATCH')}
@@ -396,7 +445,7 @@ export function createBaseDriver({db,rpc,env=process.env,now=Date.now,alert=()=>
  async function recover({now:at}={}){
   const t=at??now(),out=[];
   const emit=(a,r)=>{if(r&&r.state!=='pending')out.push({tradeId:a.trade_id,legIdx:a.leg_idx,attemptId:a.id,state:r.state,txHash:r.txHash,code:r.code})};
-  const safe=async(a,fn)=>{try{return await fn()}catch(e){log('base_recover_error',{attempt_id:s12(a.id),code:e?.code,error:String(e?.message??e).slice(0,120)});return null}};
+  const safe=async(a,fn)=>{try{return await fn()}catch(e){log('base_recover_error',{attempt_id:s12(a.id),code:e?.code,error:safeError(e)});return null}};
   for(const row of store.unresolvedTopups())await safe(row,()=>reconcileTopup(row,t));
   for(const a of store.transfersIn(['submitted','uncertain']))emit(a,await safe(a,()=>reconcileTransfer(a,t)));
   for(const a of store.transfersIn(['prepared']))if(t>a.expires_at)emit(a,cancel(a,'SIGN_EXPIRED'));
