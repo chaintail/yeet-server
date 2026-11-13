@@ -31,6 +31,7 @@ import {
   AuthorizationExpired,
   requireFreshBinding,
   bindInteraction,
+  chatgptRedirect,
 } from "./security-policy.mjs";
 import { SQLiteAdapter as Adapter } from "./adapter.mjs";
 import Provider, { errors } from "oidc-provider";
@@ -371,6 +372,17 @@ async function eligible(id, client) {
     client,
   });
 }
+// PUBLIC: an interaction whose redirect is not on chatgpt.com is refused before any binding, sign-in or consent.
+async function foreignClient(d) {
+  if (!PUBLIC) return false;
+  let uri = d.params.redirect_uri;
+  if (!uri) {
+    const c = await provider.Client.find(d.params.client_id);
+    uri = c?.redirectUris?.length === 1 ? c.redirectUris[0] : undefined;
+  }
+  return !chatgptRedirect(uri);
+}
+const foreignClientBody = "<p>Only ChatGPT can connect to YEET. Start again from ChatGPT.</p>";
 function interactionBinding(d, s) {
   const db = read("interaction-bindings.json");
   const binding = bindInteraction(db, d, s);
@@ -484,6 +496,8 @@ app.get("/interaction/:uid", async (q, r, next) => {
   try {
     const d = await provider.interactionDetails(q, r);
     if (d.uid !== q.params.uid) return r.sendStatus(403);
+    if (await foreignClient(d))
+      return r.status(400).type("html").send(authDocument(r, "Connection refused", foreignClientBody));
     const s = await prepareInteractionSession(d,session(q),{
       eligible,retire: current=>retireDemoSession(current,r),
     });
@@ -545,6 +559,7 @@ app.post("/interaction/:uid", async (q, r, next) => {
   try {
     const d = await provider.interactionDetails(q, r);
     if (d.uid !== q.params.uid) return r.sendStatus(403);
+    if (await foreignClient(d)) return r.sendStatus(400);
     if (!equal(q.body.csrf, csrf(d.uid)) || !originOK(q))
       return r.sendStatus(403);
     if (d.prompt.name === "login") {

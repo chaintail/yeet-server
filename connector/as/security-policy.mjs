@@ -19,6 +19,17 @@ export function operatorAccountExists(policy) {
 export function exactOrigin(origin, base) {
   return origin === new URL(base).origin;
 }
+// Public deployments only authorize ChatGPT: the redirect must be https://chatgpt.com (registration and CIMD are
+// open, and the consent page speaks of ChatGPT).
+export const CHATGPT_ORIGIN = "https://chatgpt.com";
+export function chatgptRedirect(uri) {
+  try {
+    const u = new URL(uri);
+    return u.origin === CHATGPT_ORIGIN && !u.username && !u.password;
+  } catch {
+    return false;
+  }
+}
 export function sameOwner(existing, id) {
   return !existing || existing.id === id;
 }

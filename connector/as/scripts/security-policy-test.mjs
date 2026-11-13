@@ -6,7 +6,21 @@ import {
   boundBrowser,
   refreshFamilyTTL,
   operatorClient,
+  chatgptRedirect,
 } from "../security-policy.mjs";
+assert.ok(chatgptRedirect("https://chatgpt.com/connector_platform_oauth_redirect"));
+for (const uri of [
+  undefined,
+  "",
+  "https://attacker.example/cb",
+  "https://chatgpt.com.attacker.example/cb",
+  "https://attacker.example/https://chatgpt.com/",
+  "http://chatgpt.com/cb",
+  "https://chatgpt.com:8443/cb",
+  "https://user@chatgpt.com/cb",
+  "https://sub.chatgpt.com/cb",
+])
+  assert.equal(chatgptRedirect(uri), false, String(uri));
 const policy = { eligible: true, clients: { blocked: true } };
 assert.ok(allowedAccount(policy, { privy: true, client: "ok" }));
 for (const p of [
