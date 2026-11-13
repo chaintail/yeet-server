@@ -140,7 +140,25 @@ test('a basket answer with the account facts: they ride in card-only _meta["yeet
   }
   // An answer without the facts (Privy did not answer): no key at all, the card keeps its own step.
   const plain=await connect(ENV);
-  try{const r=await plain.client.callTool({name:'yeet_propose',arguments:CALLS.yeet_propose});assert.equal(r._meta[ACCOUNT_META_KEY],undefined)}
+  try{
+   const r=await plain.client.callTool({name:'yeet_propose',arguments:CALLS.yeet_propose});assert.equal(r._meta[ACCOUNT_META_KEY],undefined);
+   const s=await plain.client.callTool({name:'trade_status',arguments:CALLS.trade_status});assert.equal(s._meta[ACCOUNT_META_KEY],undefined);
+  }
   finally{await plain.close()}
  }finally{await client.close();await server.close()}
+});
+
+test('trade_status with the account facts (the person confirmed an email on the YEET page while the card follows the trade): card-only _meta again, the answer the model reads is unchanged',async()=>{
+ const linked={user:'did:privy:gina',email:'gina@gmail.example',masked:'g•••@g•••.example',google:true,apple:false,wallets:[]};
+ const server=createMcpServer({token:{scope:allScopes.join(' ')},callCore:async route=>(/^\/trades\/t_/.test(route)?{...statusAnswer,card_account:linked}:core(route)),env:ENV});
+ const client=new Client({name:'status-account-meta',version:'1'});const [a,b]=InMemoryTransport.createLinkedPair();await server.connect(a);await client.connect(b);
+ const plain=await connect(ENV);
+ try{
+  const r=await client.callTool({name:'trade_status',arguments:CALLS.trade_status});
+  assert.equal(r.isError,undefined,JSON.stringify(r.content));
+  assert.deepEqual(r._meta[ACCOUNT_META_KEY],linked);
+  assert.doesNotMatch(JSON.stringify([r.structuredContent,r.content]),/card_account|did:privy|yeet\/account|gmail/,'the account never reaches the model');
+  const before=await plain.client.callTool({name:'trade_status',arguments:CALLS.trade_status});
+  assert.deepEqual(r.structuredContent,before.structuredContent);assert.deepEqual(r.content,before.content);
+ }finally{await plain.close();await client.close();await server.close()}
 });

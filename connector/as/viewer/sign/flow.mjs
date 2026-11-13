@@ -19,8 +19,15 @@
 //   loading      asking for the trade
 //   ready        the trade and its open requests: the person presses and holds
 //   sending      the wallet is answering / YEET is taking the answers
-//   done         every request went out (`failed`: some coins were not sent). `link`: the optional email step
-//   nothing      no open request: already sent (`sent`), or the trade closed with nothing sent
+//   done         every request went out (`failed`: some coins were not sent). `link`: the email step (below)
+//   nothing      no open request: already sent (`sent`, with `link` as in done), or the trade closed with nothing sent
+//
+// state.link (only for an account with no email login, once its trade is out; null otherwise). The trade always comes
+// first; this step never stands between the person and the press and hold:
+//   stage    offer (the address and "Email me a code") | code (the 6-digit code) | done (linked) | skipped ("Not now":
+//            nothing is remembered, so the next visit of the page offers it again)
+//   email    the address the code goes to; `fixed`: it is the one Google or Apple gave and is shown, not typed;
+//            `relay`: it is an Apple private relay address (shown, editable, with a line saying what happens)
 //   mismatch     the session here is another account than the trade's (`who`: masked), or the trade does not exist
 //   unavailable  a refusal or an outage, with its `message`
 export const UNSUPPORTED_7702 = 'unsupported';
@@ -67,9 +74,24 @@ export const COPY = {
   link_bad_email: 'Enter your email address, like name@example.com.',
   link_send_failed: 'The code didn’t go out. Check the email and try again.',
   link_bad_code: 'Enter the 6-digit code from the email.',
-  link_refused: 'That code didn’t work. Check the latest email from YEET and try again.',
-  link_taken: 'That email already belongs to another YEET account. Use a different email, or skip this.',
+  link_refused: 'That code didn’t work or has expired. Check the latest email from YEET, or press Send again.',
+  link_rate: 'Too many tries just now. Wait a minute, then try again.',
+  link_taken: 'This email belongs to a different YEET account, so it can’t be added to this one. Your trade is not affected. Try another email, or choose Not now.',
+  linked: 'This device is trusted. Your next trades finish inside ChatGPT. Go back to ChatGPT.',
 };
+const RELAY = /@privaterelay\.appleid\.com$/i;
+/**
+ * Why Privy refused a step of the email link (PrivyApiError: `code`, `status`, `message`): `taken` (the address is a
+ * login of ANOTHER Privy user: linked_to_another_user), `has_one` (this user already has an email login:
+ * cannot_link_more_of_type), `rate` (too_many_requests, 429), else null (a wrong or expired code, or an outage).
+ */
+export function linkProblem(e) {
+  const text = `${e?.code ?? ''} ${e?.privyErrorCode ?? ''} ${e?.status ?? ''} ${e?.message ?? ''}`;
+  if (/linked_to_another_user|another user|already (linked|exists|in use)|account_transfer_required/i.test(text)) return 'taken';
+  if (/cannot_link_more/i.test(text)) return 'has_one';
+  if (/too_many_requests|too many|rate.?limit|\b429\b/i.test(text)) return 'rate';
+  return null;
+}
 
 export function createSignFlow({signer, post, wr, tradeId, onChange = () => {}, startMs = 20000, wait = (ms) => new Promise((r) => setTimeout(r, ms))}) {
   const {privyRpcBodies, signedFromWallets} = wr;
@@ -115,7 +137,8 @@ export function createSignFlow({signer, post, wr, tradeId, onChange = () => {}, 
     const reqs = trade.sign_requests ?? [];
     if (!reqs.length) {
       const anySent = trade.legs.some((l) => SENT.has(l.send_status));
-      return set({view: 'nothing', sent: anySent, message: anySent ? COPY.nothing_left : COPY.nothing_sent, kind: anySent ? 'ok' : 'bad'});
+      // A trade that is already out (the person came back to the page, or said "Not now" before): the email step again.
+      return set({view: 'nothing', sent: anySent, message: anySent ? COPY.nothing_left : COPY.nothing_sent, kind: anySent ? 'ok' : 'bad', link: anySent ? offer() : null});
     }
     set({view: 'ready', canRetry: true});
   }
@@ -177,12 +200,16 @@ export function createSignFlow({signer, post, wr, tradeId, onChange = () => {}, 
         set({});
       }
       const failed = [...local.values()].some((s) => s === 'not_sent' || s === 'failed');
-      // The optional step, once the trade is out: an account with no email login (Google or Apple) can add one here,
-      // and the card's emailed code works for it from then on.
-      const offer = !failed && person && !person.email && (person.google || person.apple) && typeof signer.linkEmail === 'function';
-      set({view: 'done', failed, message: failed ? COPY.done_partly : COPY.done, kind: failed ? 'bad' : 'ok',
-        link: offer ? {stage: 'offer', email: person.oauthEmail ?? '', error: null, wait: false} : null});
+      // Once the trade is out, and never before: an account with no email login (Google or Apple) confirms its email
+      // here, and the card's emailed code works for it from then on.
+      set({view: 'done', failed, message: failed ? COPY.done_partly : COPY.done, kind: failed ? 'bad' : 'ok', link: failed ? null : offer()});
     } finally { busy = false; }
+  }
+  /** The email step for who is here, or null (an account that has an email login, or is not Google or Apple). */
+  function offer() {
+    if (!person || person.email || !(person.google || person.apple) || typeof signer.linkEmail !== 'function') return null;
+    const given = person.oauthEmail ?? '', relay = RELAY.test(given);
+    return {stage: 'offer', email: given, fixed: !!given && !relay, relay, error: null, wait: false};
   }
 
   /** Another account is here than the trade's: end this session, the page shows the sign-in methods again. */
@@ -195,12 +222,16 @@ export function createSignFlow({signer, post, wr, tradeId, onChange = () => {}, 
   // ---- The optional email step (Privy: an email can be linked to the signed-in user with a code; one per user) ----
   const link = (patch) => set({link: {...st.link, ...patch}});
   async function linkSend(email) {
-    if (!st.link || st.link.wait) return;
+    if (!st.link || st.link.wait || (st.link.stage !== 'offer' && st.link.stage !== 'code')) return;
     const address = String(email ?? '').trim();
     if (!EMAIL.test(address)) return link({error: COPY.link_bad_email});
     link({wait: true, error: null, email: address});
     try { await signer.sendCode(address); link({stage: 'code', wait: false}); }
-    catch { link({wait: false, error: COPY.link_send_failed}); }
+    catch (e) {
+      const why = linkProblem(e);
+      // An address of another account can be typed over, also when it was the one Google or Apple gave.
+      link({wait: false, error: why === 'taken' ? COPY.link_taken : why === 'rate' ? COPY.link_rate : COPY.link_send_failed, ...(why === 'taken' ? {stage: 'offer', fixed: false} : {})});
+    }
   }
   async function linkConfirm(code) {
     if (!st.link || st.link.wait || st.link.stage !== 'code') return;
@@ -210,15 +241,19 @@ export function createSignFlow({signer, post, wr, tradeId, onChange = () => {}, 
     let user;
     try { user = await signer.linkEmail(st.link.email, value); }
     catch (e) {
-      const taken = /linked_to_another_user|another user|already (linked|exists|in use)|cannot_link_more/i.test(`${e?.code ?? ''} ${e?.message ?? ''}`);
-      return link({wait: false, error: taken ? COPY.link_taken : COPY.link_refused, ...(taken ? {stage: 'offer'} : {})});
+      const why = linkProblem(e);
+      // The trade is out either way: nothing here touches it.
+      if (why === 'taken') return link({wait: false, error: COPY.link_taken, stage: 'offer', fixed: false});
+      // This user already has an email login (linked in another tab): that is the end this step is for.
+      if (why === 'has_one') { try { user = await signer.session(); } catch { user = null; } }
+      if (!personOf(user).email) return link({wait: false, error: why === 'rate' ? COPY.link_rate : COPY.link_refused});
     }
     const now = personOf(user);
     if (now.id && now.email) person = now;
     // Tell the server at once (it drops its cached answer about this account). Best effort: it reads Privy again
     // within a minute either way.
     try { await api('email-linked', {}); } catch { /* the next basket still finds the email, a minute later at most */ }
-    link({stage: 'done', wait: false, masked: maskEmail(st.link.email)});
+    set({message: COPY.linked, kind: 'ok', link: {...st.link, stage: 'done', wait: false, error: null, masked: maskEmail(now.email ?? st.link.email)}});
   }
   const linkSkip = () => { if (st.link && st.link.stage !== 'done') link({stage: 'skipped', error: null}); };
 

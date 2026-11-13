@@ -269,12 +269,15 @@ app.post('/proposals/:id/quote',trade(null,basketCard((e,ctx,_a,q)=>{const a=inp
 app.post('/trades',trade('execute_trade',(e,ctx,a)=>e.execute(ctx,a)));
 // submit_trade_signature: bytes the person's own wallet signed for one leg (pipeline.submit checks and sponsors them).
 app.post('/trades/:id/signature',trade(null,(e,ctx,_a,q)=>{const a=inputs.submit_trade_signature.safeParse({...q.body,trade_id:q.params.id});if(!a.success)throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});return e.submit(ctx,a.data)}));
-app.get('/trades/:id',trade(null,(e,ctx,_a,q)=>{
+// trade_status carries the card-only account facts as well, but only the ones already known (it never waits for
+// Privy): a card that follows a trade finished on the YEET page then sees the email the person confirmed there.
+const statusCard=withCardAccount({lookup:()=>(accountLogin??=createAccountLogin()),didOf:ctx=>didFor(ctx.accountId),wait:false});
+app.get('/trades/:id',trade(null,statusCard((e,ctx,_a,q)=>{
  const view=e.status(ctx,q.params.id);
  if(!p2On())return view;
  if(view.direction==='yeet')xpSafe('lucky_status',()=>luckyClaim(e,ctx.accountId,view.trade_id,view));
  return {...view,xp_award:xpSafe('trade',()=>xpRuntime().tradeAward(ctx.accountId,view),null)};
-}));
+})));
 app.get('/portfolio',trade('yeet_portfolio',(e,ctx)=>e.portfolio(ctx)));
 // The first-party signing page (as/sign-page.mjs, CARD-SIGNING.md section 2.5). Only the sign-in server reaches these,
 // and only after it verified the person's Privy access token and looked up the account already linked to it: that

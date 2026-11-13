@@ -25,15 +25,20 @@ export function loginFacts(user){
 // card's emailed code starts working for that person even when that notice is lost.
 const TTL_MS=10*60_000,NO_EMAIL_TTL_MS=60_000,MAX=2000;
 /** lookup(did) -> loginFacts or null (never throws: the card then falls back to its own check). Cached (see above).
- *  lookup.forget(did) drops the cached answer. */
+ *  lookup.forget(did) drops the cached answer.
+ *  lookup.peek(did) answers at once: the cached facts while they are fresh, else null, and then starts one read in
+ *  the background (one at a time per user) so the next peek has them. For answers that are asked every few seconds
+ *  (trade_status while a card follows a trade): they never wait for Privy. */
 export function createAccountLogin({env=process.env,fetch=globalThis.fetch,api,now=Date.now}={}){
- const cache=new Map();
+ const cache=new Map(),reading=new Set();
  const config=api?null:privyConfig(env);
  const client=api??(config?createPrivyApi({config,fetch,timeoutMs:4000}):null);
+ const known=did=>!!client&&typeof did==='string'&&/^did:privy:[A-Za-z0-9_-]{1,128}$/.test(did);
+ const fresh=did=>{const hit=cache.get(did);return hit&&now()-hit.at<(hit.value.email?TTL_MS:NO_EMAIL_TTL_MS)?hit.value:null};
  async function lookup(did){
-  if(!client||typeof did!=='string'||!/^did:privy:[A-Za-z0-9_-]{1,128}$/.test(did))return null;
-  const hit=cache.get(did);
-  if(hit&&now()-hit.at<(hit.value.email?TTL_MS:NO_EMAIL_TTL_MS))return hit.value;
+  if(!known(did))return null;
+  const hit=fresh(did);
+  if(hit)return hit;
   try{
    const value=loginFacts(await client.app('GET',`/v1/users/${did}`));
    cache.set(did,{at:now(),value});if(cache.size>MAX)cache.delete(cache.keys().next().value);
@@ -41,6 +46,13 @@ export function createAccountLogin({env=process.env,fetch=globalThis.fetch,api,n
   }catch{return null}
  }
  lookup.forget=did=>{cache.delete(did)};
+ lookup.peek=did=>{
+  if(!known(did))return null;
+  const hit=fresh(did);
+  if(hit)return hit;
+  if(!reading.has(did)){reading.add(did);lookup(did).finally(()=>reading.delete(did))}
+  return null;
+ };
  return lookup;
 }
 /**
@@ -51,11 +63,16 @@ export function createAccountLogin({env=process.env,fetch=globalThis.fetch,api,n
  * answered: with no facts the answer is returned as it is and the card keeps its own step. The facts are read while
  * the handler runs; they never delay a refusal and never fail the call.
  *   withCardAccount({lookup: () => lookup function, didOf: ctx => did or null})(handler) -> handler
+ *
+ * `wait: false` (trade_status, which a card asks every few seconds while it follows a trade): only facts that are
+ * already known are added (lookup.peek), so the answer never waits for Privy. That is how a card that is following a
+ * trade learns that the person confirmed their email on the YEET page meanwhile: the page's notice drops the cached
+ * facts, the next status answer starts a fresh read, and the one after it carries the email.
  */
-export function withCardAccount({lookup,didOf}){
+export function withCardAccount({lookup,didOf,wait=true}){
  const facts=async ctx=>{
   try{
-   const did=didOf(ctx),login=did?await lookup()(did):null;
+   const did=didOf(ctx),login=did?(wait?await lookup()(did):lookup().peek(did)):null;
    return login?{user:did,email:login.email,masked:login.masked,google:login.google===true,apple:login.apple===true,wallets:[]}:null;
   }catch{return null}
  };

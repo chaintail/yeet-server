@@ -113,8 +113,19 @@ test('page assets: script, flow, styles and the wallet-request contract module, 
       // The money action is a press and hold, with the card's timing.
       assert.match(text, /const HOLD_MS = 800\b/); assert.match(text, /holdable\(btn, \(\) => flow\.approve\(\), word\)/);
       assert.doesNotMatch(text, /btn\.onclick = \(\) => flow\.approve/);
+      // The email step after the trade: its heading, its one line, the three controls, and a code field a phone can
+      // fill from the message.
+      assert.match(text, /const LINK_TITLE = 'Trust this device\?'/);
+      assert.match(text, /'Confirm your email once and your next trades finish right inside ChatGPT, without opening this window\.'/);
+      for (const label of ['Trust this device', 'Send again', 'Not now']) assert.ok(text.includes(`'${label}'`), label);
+      assert.match(text, /f\.id = 'link-code'; f\.inputMode = 'numeric'; f\.autocomplete = 'one-time-code'; f\.maxLength = 6/);
+      // It is drawn only for a trade that is out (the views done and nothing), never in front of the press and hold.
+      assert.match(text, /if \(\(s\.view === 'done' \|\| s\.view === 'nothing'\) && linking\(s\)\) return showLinkStep\(s\)/);
+      assert.equal(text.match(/showLinkStep\(s\)/g).length, 2, 'one place draws the step');
     }
-    if (path === '/sign/flow.mjs') { assert.match(text, /done: 'Done\. Go back to ChatGPT\.'/); assert.doesNotMatch(text.replace(/^\s*\/\/.*$/gm, ''), /document\.|window\./, 'no DOM in the flow'); }
+    if (path === '/sign/flow.mjs') { assert.match(text, /done: 'Done\. Go back to ChatGPT\.'/);
+      assert.match(text, /linked: 'This device is trusted\. Your next trades finish inside ChatGPT\. Go back to ChatGPT\.'/);
+      assert.match(text, /link_taken: 'This email belongs to a different YEET account, so it can’t be added to this one\. Your trade is not affected\./); assert.doesNotMatch(text.replace(/^\s*\/\/.*$/gm, ''), /document\.|window\./, 'no DOM in the flow'); }
     if (path === '/sign/wallet-request.mjs') assert.match(text, /export function privyRpcBody/);
   }
   assert.ok(sentences > 25, `${sentences} sentences checked`);

@@ -468,6 +468,8 @@ h1{margin:0}
 .hold-hint{margin:8px 0 0;text-align:center;font:600 12.5px var(--mono);color:var(--yc-mute)}
 .hold-hint.nudge{color:var(--yc-accent);animation:holdnudge .45s var(--spring,ease-out)}
 .hold-hint.warn{color:var(--rose)}
+/* The trade button when the trade finishes on the YEET page: a tap, with a small lock after the mark. */
+.btn .ic.lock,.btn.cta.yeet .ic.lock,.btn.cta.skeet .ic.lock{width:.5em;height:.58em;margin-left:-.1em;opacity:.85;animation:none}
 @keyframes holdnudge{0%{transform:scale(1)}40%{transform:scale(1.08)}100%{transform:scale(1)}}
 .signin-label{display:block;margin:10px 0 4px;font-size:12.5px;font-weight:600;color:var(--yc-mute)}.ov-lead{margin:6px 0 10px;font-size:14.5px;line-height:1.4}
 
@@ -491,6 +493,7 @@ h1{margin:0}
 <symbol id="i-bolt" viewBox="0 0 20 28"><path d="M12.6 0 0 16.2h7.4L5.6 28 20 10.6h-7.6z" fill="currentColor"/></symbol>
 <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.4" fill="none" stroke="currentColor" stroke-width="2.8"/><circle cx="12" cy="12" r="3.3" fill="currentColor"/><path d="M12 .8v4M12 19.2v4M.8 12h4M19.2 12h4" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></symbol>
 <symbol id="i-flame" viewBox="0 0 24 24"><path d="M12.4 1.5c.6 3.6 5.6 6 5.6 11.8A6 6 0 0 1 6 13.6c0-2.9 1.5-4.6 2.7-5.7.1 1.9.9 3.1 2 3.6-.5-3.6.4-7.2 1.7-10z" fill="currentColor"/></symbol>
+<symbol id="i-lock" viewBox="0 0 16 18"><path d="M4.6 8.2V5.6a3.4 3.4 0 0 1 6.8 0v2.6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><rect x="2" y="8" width="12" height="9" rx="2.4" fill="currentColor"/></symbol>
 <symbol id="i-check" viewBox="0 0 16 16"><path d="m3 8.4 3.2 3.2L13 4.6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
 <symbol id="i-send" viewBox="0 0 20 20"><path d="M10 16.5v-13M4.5 9 10 3.5 15.5 9" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
 <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 2.5v11M2.5 8h11" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
@@ -515,7 +518,7 @@ const BRAND={"logo":{"box":"-40 180 4256 820","d":"M84 990Q45 990,16 984Q-12 979
 const WheelCard=(()=>({logic:{normalizeSpin:()=>null,normalizeLucky:()=>null}}))(window); // src/wheel-card.js: the daily wheel (views home and wheel) and the lucky wheel (view lucky)
 const SIGNING=(()=>null)(null);   // src/trade-signing.js over src/vendor/wallet-request.mjs
 const signerCfg={"app_id":null,"script":null,"page":null};  // {app_id,script,page}: build-time; a result's _meta['yeet/signer'] overrides
-const BUILD="d5ef51a401afcb02287158a93917642f196bf3e4";     // the yeet-win commit this template was built from; null for a local build
+const BUILD="41db35e2d4ccca0c4884fffd27a941dd7eda627a";     // the yeet-win commit this template was built from; null for a local build
 const APP={"manage_url":"https://chatgpt.com/plugins","refresh_label":"Refresh YEET in ChatGPT","refresh_steps":"open YEET there, select Refresh, then start a new chat"};         // {manage_url,refresh_label,refresh_steps}: where the person refreshes the app in ChatGPT
 const CONFIRM_KEY='yeet/confirm',SIGNER_KEY='yeet/signer',BUILD_KEY='yeet/build';
 const POLL_MS=5000,POLL_MAX=360,SKEW_MS=2000,MAX_PARTS=99,AMOUNT_MAX=25,MORE_USDC='5';
@@ -572,14 +575,26 @@ const ACCOUNT_KEY='yeet/account';
 let account=null;
 function takeAccount(meta){
  const v=meta?.[ACCOUNT_KEY];if(!v||typeof v!=='object')return;
+ const before=account;
  account={user:typeof v.user==='string'?v.user:null,email:typeof v.email==='string'&&/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email)?v.email:null,
   masked:typeof v.masked==='string'?v.masked.slice(0,80):null,google:v.google===true,apple:v.apple===true,wallets:Array.isArray(v.wallets)?v.wallets.filter(x=>typeof x==='string').map(x=>x.toLowerCase()):[]};
+ emailLinked(before);
 }
 const viaPageAccount=()=>!!account&&!account.email;
-const providerName=()=>account?.google?'Google':account?.apple?'Apple':null;
+const pageMode=()=>viaPageAccount()&&!!signerCfg.page;
+const PAGE_HINT='Opens secure trading on the YEET page.';
 const PAGE_DEVICE='yeet.page-device.';
 function pageDevice(){try{return !!account?.user&&window.localStorage.getItem(PAGE_DEVICE+account.user)==='1'}catch{return false}}
-function markPageDevice(){try{if(account?.user)window.localStorage.setItem(PAGE_DEVICE+account.user,'1')}catch{/* without storage the card asks once more next time */}}
+function markPageDevice(){try{if(account?.user&&!account.email)window.localStorage.setItem(PAGE_DEVICE+account.user,'1')}catch{/* without storage the card asks once more next time */}}
+function clearPageDevice(){try{window.localStorage.removeItem(PAGE_DEVICE+account.user)}catch{/* nothing was kept */}}
+const LINKED_TOLD='They confirmed their email on the YEET page, so future trades on this YEET account finish inside ChatGPT.';
+function emailLinked(before){
+ if(!account?.user||!account.email)return;
+ const gained=!!before&&before.user===account.user&&!before.email&&(before.google||before.apple);
+ const marked=pageDevice();
+ if(marked)clearPageDevice();
+ if(gained||(marked&&(account.google||account.apple)))tell('signin',`email-linked:${account.user}`,LINKED_TOLD);
+}
 /** The device session belongs to the connected account: the same Privy user, and one of its wallets when both sides name wallets. */
 async function sameAccount(s,u){
  if(!account)return true;
@@ -828,9 +843,7 @@ async function tap(){
   },
   signer:loadSigner,
   signIn:s=>new Promise((resolve,reject)=>{
-   if(viaPageAccount()){
-    if(pageDevice()){resolve('page');return}
-    signin={stage:'page',email:'',code:'',error:null,wait:false,s,resolve,reject};render();return}
+   if(viaPageAccount()){resolve('page');return}
    signin={stage:'email',email:'',code:'',error:null,wait:false,s,resolve,reject};render()}),
   openPage,
   pageUrl:id=>signerCfg.page?`${signerCfg.page}${signerCfg.page.includes('?')?'&':'?'}trade_id=${encodeURIComponent(id)}`:null,
@@ -902,16 +915,10 @@ function signinBox(){
  const g=signin,b=mark(el('div','signin'),`signin:${g.stage}`);b.dataset.role='signin';
  const code=g.stage==='code',known=!!account?.email,shown=known?(account.masked??'your email'):g.email;
  if(known)g.email=account.email;
- const title=g.fixed?'Unlock your wallet':'First trade on this device';
- if(g.stage==='page'){
-  const who=providerName();
-  b.append(el('strong',null,title),mark(el('p','next','Confirm it’s you on the YEET page.'),'page-lead'));
-  const go=button('ink sm',who?`Continue with ${who}`:'Open the YEET page',signinPage);go.dataset.role='signin-page';const row=el('div','signin-row');row.append(go);b.append(row);
-  const acts=el('div','acts-row'),x=button('ghost xs','Cancel',signinCancel);x.dataset.role='signin-cancel';acts.append(x);b.append(acts);
-  return b}
- if(!code&&account&&!known){b.append(el('strong',null,title),mark(el('p','next','Nothing to do here. Your first trade on this device takes you to the YEET page for a one-time check.'),'no-email'));return b}
+ const title=g.fixed?'Unlock your wallet':'Trust this device';
+ if(!code&&account&&!known){b.append(el('strong',null,title),mark(el('p','next','Nothing to do here. Your trades open secure trading on the YEET page, and you can trust this device there.'),'no-email'));return b}
  b.append(el('strong',null,title));
- b.append(mark(el('p','next',code?`We emailed a 6-digit code to ${shown}.`:known?(g.fixed?`We email a 6-digit code to ${shown}.`:`${DEVICE_CHECK} We’ll email a code to ${shown}.`):(g.fixed?'':`${DEVICE_CHECK} `)+'Type the email of your YEET account and we email you a 6-digit code.'),'unlock-lead'));
+ b.append(mark(el('p','next',code?(g.fixed?`We emailed a 6-digit code to ${shown}.`:`Enter the code we emailed to ${shown}.`):known?(g.fixed?`We email a 6-digit code to ${shown}.`:`${DEVICE_CHECK} We’ll email a code to ${shown}.`):(g.fixed?'':`${DEVICE_CHECK} `)+'Type the email of your YEET account and we email you a 6-digit code.'),'unlock-lead'));
  if(!code&&known){const go=button('ink sm',g.wait?'Sending…':'Email me a code',signinSend);go.disabled=g.wait;go.dataset.role='signin-send';const row=el('div','signin-row');row.append(go);b.append(row);
   if(g.error){const e=el('p','reason',g.error);e.setAttribute('role','alert');b.append(e)}
   if(!g.fixed){const acts=el('div','acts-row'),x=button('ghost xs','Cancel',signinCancel);x.dataset.role='signin-cancel';acts.append(x);b.append(acts)}
@@ -1242,7 +1249,14 @@ function tradeButton(p,live){
  const b=button(`${skeet?'skeet':'yeet'} lg wide run cta${look}`,label,null,ph==='done'?'i-check':MARK_OF[skeet?'skeet':'yeet']);
  if(look===' charging')b.prepend(el('span','chgbar'));
  b.disabled=ph==='idle'?!live:true;b.dataset.role='trade';b.dataset.phase=ph;
- if(ph==='idle')holdable(b,()=>tap(),skeet?'SKEET':'YEET');
+ if(ph!=='idle')return b;
+ if(pageMode()){
+  b.dataset.mode='page';b.querySelector('.bl').append(use('i-lock','ic lock'));
+  b.setAttribute('aria-label',`${skeet?'SKEET':'YEET'}. ${PAGE_HINT}`);
+  const hint=el('p','hold-hint',PAGE_HINT);hint.dataset.role='page-hint';b.hint=hint;
+  b.onclick=e=>{e.preventDefault();if(!b.disabled)tap()};
+  return b}
+ b.dataset.mode='hold';holdable(b,()=>tap(),skeet?'SKEET':'YEET');
  return b;
 }
 

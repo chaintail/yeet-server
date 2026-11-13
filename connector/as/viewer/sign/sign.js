@@ -151,36 +151,58 @@ function emailOnly(host, intro) {
   host.replaceChildren(line(intro), eLabel, email, send, status, codeBox);
 }
 
-// ---- The optional step after the trade: an email login for an account that came in with Google or Apple ---------
+// ---- The email step, once the trade is out: an account that came in with Google or Apple is offered to trust this --
+// device (flow.mjs state.link). It is an opt-in, worded as one: confirm your email once, and the next trades finish
+// inside ChatGPT without this window. It is the page's main content then: the heading asks, the address Google or
+// Apple gave is shown masked (typed only when there is none, or it is a relay address, or it turned out to belong to
+// another account), one button, the code, "Send again", and a small "Not now".
+const heading = document.querySelector('.top h1'), HEADING = heading?.textContent ?? '';
+const LINK_TITLE = 'Trust this device?';
 const draft = {email: null, code: ''};
-function linkBox(s) {
-  const k = s.link; if (!k || k.stage === 'skipped') return null;
-  const box = el('section', 'more'); box.id = 'sign-link'; box.setAttribute('aria-label', 'Trade faster next time');
-  if (k.stage === 'done') {
-    box.append(el('strong', '', 'You’re set'), line(`Future trades finish inside ChatGPT. The first one on a device asks for a code we email to ${k.masked ?? 'you'}.`, 'ok'));
-    return box;
-  }
-  box.append(el('strong', '', 'Trade faster next time'), el('p', 'line', 'Confirm your email once and future trades finish inside ChatGPT.'));
-  const quiet = (text, fn, id) => { const b = el('button', 'quiet', text); b.id = id; b.disabled = k.wait; b.onclick = fn; return b; };
+const linking = (s) => !!s.link && (s.link.stage === 'offer' || s.link.stage === 'code');
+const title = (text) => { if (heading && heading.textContent !== text) heading.textContent = text; };
+function linkStep(s) {
+  const k = s.link;
+  const box = el('section', 'step'); box.id = 'sign-link'; box.setAttribute('aria-label', LINK_TITLE);
+  box.append(el('p', 'lead', 'Confirm your email once and your next trades finish right inside ChatGPT, without opening this window.'));
+  const small = (text, fn, id, cls) => { const b = el('button', cls, text); b.id = id; b.type = 'button'; b.disabled = k.wait; b.onclick = fn; return b; };
   if (k.stage === 'offer') {
     if (draft.email === null) draft.email = k.email ?? '';
-    const f = el('input'); f.type = 'email'; f.id = 'link-email'; f.autocomplete = 'email'; f.inputMode = 'email'; f.autocapitalize = 'none'; f.value = draft.email; f.oninput = () => { draft.email = f.value; };
-    const lab = el('label', '', 'Email'); lab.htmlFor = f.id;
-    const go = el('button', '', k.wait ? 'Sending…' : 'Email me a code'); go.id = 'link-send'; go.disabled = k.wait; go.onclick = () => flow.linkSend(draft.email);
-    f.onkeydown = (e) => { if (e.key === 'Enter') go.click(); };
-    box.append(lab, f, go);
+    const go = el('button', '', k.wait ? 'Sending…' : 'Trust this device'); go.id = 'link-send'; go.disabled = k.wait;
+    if (k.fixed) {
+      const shownAt = line(`We’ll email a code to ${maskEmail(k.email) ?? k.email}.`); shownAt.id = 'link-address';
+      go.onclick = () => flow.linkSend(k.email);
+      box.append(shownAt, go);
+    } else {
+      const f = el('input'); f.type = 'email'; f.id = 'link-email'; f.autocomplete = 'email'; f.inputMode = 'email'; f.autocapitalize = 'none'; f.value = draft.email; f.oninput = () => { draft.email = f.value; };
+      const lab = el('label', '', 'Email'); lab.htmlFor = f.id;
+      go.onclick = () => flow.linkSend(draft.email);
+      f.onkeydown = (e) => { if (e.key === 'Enter') go.click(); };
+      const why = k.relay ? 'Apple keeps your own address private and gave YEET this relay address. The code goes through Apple to your inbox. If it doesn’t arrive, type another email you use.'
+        : k.email ? null : 'Your account didn’t share an email with YEET. Type the one you want to use.';
+      box.append(lab, f, ...(why ? [el('p', 'fine', why)] : []), go);
+    }
   } else {
-    box.append(line(`We emailed a 6-digit code to ${maskEmail(k.email) ?? k.email}.`));
+    const sent = line(`We emailed a 6-digit code to ${k.fixed ? maskEmail(k.email) ?? k.email : k.email}.`); sent.id = 'link-sent';
     const f = el('input'); f.id = 'link-code'; f.inputMode = 'numeric'; f.autocomplete = 'one-time-code'; f.maxLength = 6; f.value = draft.code; f.oninput = () => { draft.code = f.value; };
     const lab = el('label', '', '6-digit code'); lab.htmlFor = f.id;
     const go = el('button', '', k.wait ? 'Checking…' : 'Confirm'); go.id = 'link-confirm'; go.disabled = k.wait; go.onclick = () => flow.linkConfirm(draft.code);
     f.onkeydown = (e) => { if (e.key === 'Enter') go.click(); };
-    box.append(lab, f, go, quiet('Send again', () => flow.linkSend(k.email), 'link-again'));
+    box.append(sent, lab, f, go, small('Send again', () => flow.linkSend(k.email), 'link-again', 'quiet'));
   }
-  if (k.error) { const e = line(k.error, 'bad'); e.setAttribute('role', 'alert'); box.append(e); }
-  box.append(quiet('Not now', () => flow.linkSkip(), 'link-skip'));
+  if (k.error) { const e = line(k.error, 'bad'); e.id = 'link-error'; e.setAttribute('role', 'alert'); box.append(e); }
+  box.append(small('Not now', () => flow.linkSkip(), 'link-skip', 'skip'));
   return box;
 }
+/** The trade is out and the email step is open: one line for the trade, then the step. */
+function showLinkStep(s) {
+  title(LINK_TITLE);
+  const out = line(s.view === 'nothing' ? 'Your trade is already out.' : 'Your trade is on its way.', 'ok'); out.id = 'sign-out';
+  show(out, linkStep(s));
+  if (s.link.stage === 'code' && !s.link.wait) document.getElementById('link-code')?.focus();
+}
+/** After the step: what a later first trade on another device asks for. */
+const linkedLine = (s) => (s.link?.stage === 'done' ? line(`Your next trade asks once for a code we email to ${s.link.masked ?? 'you'}.`) : null);
 
 // ---- One state, one screen -----------------------------------------------------------------------------------------
 let shown = null;
@@ -188,6 +210,8 @@ function draw(s) {
   if (s.view !== 'signin' && unmount) { try { unmount(); } catch { /* already gone */ } unmount = null; }
   if (s.view === 'signin') { if (shown !== 'signin') showSignIn(s.why); shown = 'signin'; return; }
   shown = s.view;
+  if ((s.view === 'done' || s.view === 'nothing') && linking(s)) return showLinkStep(s);
+  title(HEADING);
   if (s.view === 'starting') return show(line('Starting your wallet…'));
   if (s.view === 'loading') return show(line('Getting your trade…'));
   if (s.view === 'unavailable') return show(line(s.message, 'bad'));
@@ -195,7 +219,7 @@ function draw(s) {
     const other = el('button', 'quiet', 'Use another account'); other.id = 'sign-other'; other.onclick = () => flow.useAnother();
     return show(line(s.message, 'bad'), s.who ? line(`You’re here as ${s.who}.`) : null, other);
   }
-  if (s.view === 'nothing') return show(...tradeRows(s), line(s.message, s.kind));
+  if (s.view === 'nothing') return show(...tradeRows(s), line(s.message, s.kind), linkedLine(s));
   if (s.view === 'ready' || s.view === 'sending') {
     const side = s.trade.direction === 'skeet' ? 'skeet' : 'yeet', word = side === 'skeet' ? 'SKEET' : 'YEET';
     const btn = el('button', side, s.view === 'sending' ? 'Sending…' : word); btn.id = 'sign-go';
@@ -206,8 +230,8 @@ function draw(s) {
   }
   if (s.view === 'done') {
     const end = line(s.message, s.kind); end.classList.add('end'); end.id = 'sign-done';
-    // The way back sits right under the end line; the optional step comes after it.
-    return body.replaceChildren(...tradeRows(s), end, ...(cfg.back ? [backLink()] : []), ...[linkBox(s)].filter(Boolean));
+    // The end: "Done." (also after "Not now"), or "This device is trusted." once the email is confirmed. The way back is under it.
+    return show(...tradeRows(s), end, linkedLine(s));
   }
 }
 

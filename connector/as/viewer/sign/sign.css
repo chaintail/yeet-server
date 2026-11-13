@@ -57,11 +57,14 @@ button.holding .hold-fill{transform:scaleX(1);transition:transform var(--hold,80
 .hold-hint{margin:8px 0 0;text-align:center;font:600 12.5px var(--mono);color:var(--fog)}
 .hold-hint.nudge{color:var(--volt);animation:holdnudge .45s ease-out}
 @keyframes holdnudge{0%{transform:scale(1)}40%{transform:scale(1.08)}100%{transform:scale(1)}}
-/* The end state, and the optional step under it. */
+/* The end state. */
 .line.end{font-size:20px;font-weight:700;margin:4px 0 0}
 .line.end.ok{color:var(--mint)}
-.more{margin-top:18px;padding:14px 14px 12px;border-radius:18px;background:var(--night-3);border:1px solid var(--night-4)}
-.more strong{display:block;font-size:17px;margin:0 0 4px}
-.more .line{margin:0 0 4px}
-.more input{background:var(--night-2)}
+.line.end+.line{margin:8px 0 0}
+/* The email step, once the trade is out (the heading asks "Trust this device?"): one button, the code, a small way out. */
+.step .lead{font-size:17px;color:var(--cloud);margin:0 0 4px}
+.step .line{margin:8px 0 0}
+.step .fine{margin:8px 0 0}
+.step .line.bad{margin:12px 0 0}
+.step button.skip{background:transparent;border:0;color:var(--fog);font-weight:600;font-size:14px;padding:8px;margin-top:10px;text-decoration:underline;text-underline-offset:3px}
 @media (prefers-reduced-motion:reduce){.hold-hint.nudge{animation:none}.screen.leaving{transition:none}}

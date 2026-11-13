@@ -94,7 +94,10 @@ session:function(){return Promise.resolve(user)},accessToken:function(){return P
 wallets:function(){return Promise.resolve([{address:h.wallet,id:"w1",chain_type:"solana"}])},
 rpc:function(){return later(h.walletMs,{data:{signed_transaction:"AQID",encoding:"base64"}})},
 sendCode:function(){return later(200)},login:function(){user=h.after||null;return Promise.resolve(user)},
-linkEmail:function(email){if(/^taken/.test(email))return Promise.reject(Object.assign(Error("linked"),{code:"linked_to_another_user"}));
+linkEmail:function(email,code){var no=function(c,s){return later(200).then(function(){throw Object.assign(Error(c),{code:c,status:s})})};
+if(/^taken/.test(email))return no("linked_to_another_user",400);
+if(code==="429429")return no("too_many_requests",429);
+if(code!=="123456")return no("invalid_credentials",401);
 user=Object.assign({},user,{linked_accounts:[{type:"email",address:email}].concat(user.linked_accounts)});return later(200,user)},
 logout:function(){user=null;return Promise.resolve()}}}};})();`);
 const TRADE_ID = "t_abcdefghij0123456789", TRADE_WALLET = "7x3qiZtcsqC2paa7p7XnfUffedPDNP7GvZVuMD7VXvDe";
@@ -135,10 +138,17 @@ Object.assign(PAGES, {
   // A Google account already here (it connected in this browser): the trade and the press and hold.
   "trade-ready": tradePage({ user: gina, api: "trade" }),
   "trade-sending": tradePage({ user: gina, api: "trade", submit: "wait" }),
-  // An account with an email login ends without the optional step.
+  // An account with an email login ends without the email step.
   "trade-ready-email": tradePage({ user: emil, api: "trade" }),
+  // The email step for other accounts: the Google address is another account's email login already; Apple gave no
+  // address; Apple gave its relay address ("Hide My Email").
+  "trade-ready-taken": tradePage({ user: person([{ type: "google_oauth", email: "taken@gmail.com", name: "Tess" }]), api: "trade" }),
+  "trade-ready-apple": tradePage({ user: person([{ type: "apple_oauth", email: null }]), api: "trade" }),
+  "trade-ready-relay": tradePage({ user: person([{ type: "apple_oauth", email: "x7k2m9q4rt@privaterelay.appleid.com" }]), api: "trade" }),
   "trade-mismatch": tradePage({ user: gina, api: "mismatch" }),
-  "trade-sent": tradePage({ user: gina, api: "sent" }),
+  // The trade is out already: an email account reads that; a Google account meets the email step again.
+  "trade-sent": tradePage({ user: emil, api: "sent" }),
+  "trade-sent-google": tradePage({ user: gina, api: "sent" }),
 });
 for (const [name, html] of Object.entries(PAGES)) writeFileSync(join(out, `${name}.html`), html);
 console.log(`PASS harness: ${Object.keys(PAGES).length} pages in ${out}`);

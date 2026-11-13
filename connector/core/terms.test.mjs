@@ -157,3 +157,42 @@ test('the basket answers carry the card-only account facts: the code for an emai
  await assert.rejects(basket(()=>{throw refused})(null,{accountId:'yeet-privy-e'}),e=>e===refused);
  await assert.rejects(basket(async()=>{throw refused})(null,{accountId:'yeet-privy-g'}),e=>e===refused);
 });
+
+test('after the email was confirmed on the YEET page: the notice drops the cached facts, the very next proposal reads Privy again and carries the email; trade_status never waits and has it one answer later',async()=>{
+ const google={id:'did:privy:g',linked_accounts:[{type:'google_oauth',email:'gina@gmail.example'}]};
+ const linked={id:'did:privy:g',linked_accounts:[{type:'email',address:'gina@gmail.example'},{type:'google_oauth',email:'gina@gmail.example'}]};
+ let user=google,calls=0,open=null;
+ // A Privy that answers only when the test lets it (`open`), so "never waits" is visible.
+ const api={app:async()=>{calls++;if(open)await open;return user}};
+ const lookup=createAccountLogin({api,now:()=>0});   // the clock stands still: no minute passes anywhere below
+ const of={lookup:()=>lookup,didOf:()=>'did:privy:g'};
+ const propose=withCardAccount(of)(async()=>({proposal_id:'p_abcdefghij0123456789'}));
+ const status=withCardAccount({...of,wait:false})(()=>({trade_id:'t_abcdefghij0123456789',status:'signing'}));
+ const none={user:'did:privy:g',email:null,masked:null,google:true,apple:false,wallets:[]},has={...none,email:'gina@gmail.example',masked:'g•••@g•••.example'};
+ // Trade 1: the basket says "no email login" (the card hands the trade to the page); the status answers repeat it from the cache.
+ assert.deepEqual((await propose(null,{})).card_account,none);
+ assert.deepEqual((await status(null,{})).card_account,none);assert.equal(calls,1,'trade_status adds no Privy read while the facts are fresh');
+ // The person confirms the email on the page. Without the notice the server still says "none" (cached for a minute).
+ user=linked;
+ assert.deepEqual((await propose(null,{})).card_account,none);assert.equal(calls,1);
+ // The page's notice (POST /sign/api/email-linked -> core POST /sign/account/login-refresh -> forget).
+ lookup.forget('did:privy:g');
+ // trade_status first: Privy is slow, the answer does not wait for it and is the plain status; one read is running.
+ let release;open=new Promise(r=>{release=r});
+ assert.deepEqual(await status(null,{}),{trade_id:'t_abcdefghij0123456789',status:'signing'});
+ assert.deepEqual(await status(null,{}),{trade_id:'t_abcdefghij0123456789',status:'signing'});
+ assert.equal(calls,2,'one background read, not one per status answer');
+ release();open=null;await new Promise(r=>setImmediate(r));
+ assert.deepEqual((await status(null,{})).card_account,has,'the next status answer carries the email: the card following the trade learns it');
+ assert.deepEqual((await propose(null,{})).card_account,has,'and the next basket emails the code inside ChatGPT');
+ assert.equal(calls,2);
+ // The proposal alone, right after the notice: it waits for the fresh read and carries the email at once.
+ lookup.forget('did:privy:g');
+ assert.deepEqual((await propose(null,{})).card_account,has);assert.equal(calls,3);
+ // peek: no client, no user id, or a failed read is no answer and never an error.
+ assert.equal(createAccountLogin({env:{}}).peek('did:privy:g'),null);assert.equal(lookup.peek('nope'),null);
+ const down=createAccountLogin({api:{app:async()=>{throw Error('down')}}});
+ assert.equal(down.peek('did:privy:g'),null);await new Promise(r=>setImmediate(r));assert.equal(down.peek('did:privy:g'),null);
+ const sync=withCardAccount({...of,wait:false})(()=>{throw Error('TRADE_NOT_FOUND')});
+ await assert.rejects(sync(null,{}),/TRADE_NOT_FOUND/);
+});
