@@ -23,7 +23,7 @@ test("no session: 303 to the sign-in page with the fund return target, nothing c
   for (const cookie of [undefined, "yeet_session=other"]) {
     const r = await get(cookie);
     assert.equal(r.status, 303);
-    assert.equal(r.headers.get("location"), "/demo/login?next=fund");
+    assert.equal(r.headers.get("location"), "/account/login?next=fund");
     assert.equal(r.headers.get("cache-control"), "no-store");
     assert.equal(r.headers.get("content-security-policy"), null);
   }
@@ -66,8 +66,8 @@ test("signed in: page with nonce CSP for Privy and the Base RPC, popup-friendly 
   assert.equal(new URL(BASE_RPC).origin, BASE_RPC_ORIGIN);
   assert.match(html, new RegExp(`<title>${FUND_TITLE}</title>`));
   assert.match(html, /<div id="yeet-fund">/);
-  assert.match(html, /<script type="module" src="\/demo\/privy-login\/fund\.js"><\/script>/);
-  assert.match(html, /<link rel="stylesheet" href="\/demo\/auth-pages\.css">/);
+  assert.match(html, /<script type="module" src="\/account\/privy-login\/fund\.js"><\/script>/);
+  assert.match(html, /<link rel="stylesheet" href="\/account\/auth-pages\.css">/);
   // Fresh nonce per response.
   const again = (await (await get("yeet_session=good")).text()).match(/csp-nonce" content="([^"]+)"/)[1];
   assert.notEqual(again, nonce);
@@ -84,7 +84,7 @@ test("sign-in page CSP is unchanged by the shared builder", () => {
 test("sign-in return target accepts only the fund page", () => {
   assert.equal(afterSignIn("fund"), "/fund");
   for (const v of [undefined, "", "/fund", "https://evil.example/", "//evil.example", ["fund"], "FUND"]) {
-    assert.equal(afterSignIn(v), "/demo/");
+    assert.equal(afterSignIn(v), "/account/");
     assert.equal(nextField(v), "");
   }
   assert.equal(nextField("fund"), '<input type="hidden" name="next" value="fund">');

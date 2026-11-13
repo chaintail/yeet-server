@@ -32,7 +32,7 @@ handle @yeet_conn {
 			import cf_https_proto
 		}
 	}
-	# Everything else, including GET /, goes to the sign-in server: OAuth/OIDC endpoints, /me, /interaction/*, /demo/*.
+	# Everything else, including GET /, goes to the sign-in server: OAuth/OIDC endpoints, /me, /interaction/*, /account/*.
 	handle {
 		reverse_proxy 127.0.0.1:38860 {
 			import cf_https_proto

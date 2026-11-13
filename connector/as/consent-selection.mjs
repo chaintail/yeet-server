@@ -52,7 +52,7 @@ export function requireAgreements(body){
 /** The production consent form exactly as as.mjs sends it (inside authDocument). The button stays disabled
  *  until the required boxes are ticked (consent.js); the boxes are also `required` for browsers without scripts. */
 export function consentForm({csrf,accountId,clientId,resource,requested,priorGranted=[],renewal=''}){
- return `<form method="POST" data-yeet-agreements><input type="hidden" name="csrf" value="${html(csrf)}"><p class="lead">ChatGPT wants to use your YEET account so you can trade from the chat.</p>${consentFields(requested,priorGranted)}<fieldset class="agreements"><legend>Please confirm</legend>${agreementFields()}${renewal}</fieldset>${consentDetails({accountId,clientId,resource,requested})}<input type="hidden" name="consent" value="yes"><button type="submit">Continue</button></form><script type="module" src="/demo/consent.js"></script>`;
+ return `<form method="POST" data-yeet-agreements><input type="hidden" name="csrf" value="${html(csrf)}"><p class="lead">ChatGPT wants to use your YEET account so you can trade from the chat.</p>${consentFields(requested,priorGranted)}<fieldset class="agreements"><legend>Please confirm</legend>${agreementFields()}${renewal}</fieldset>${consentDetails({accountId,clientId,resource,requested})}<input type="hidden" name="consent" value="yes"><button type="submit">Continue</button></form><script type="module" src="/account/consent.js"></script>`;
 }
 /** One screen after consent, before ChatGPT. There is no referral system: both buttons continue. */
 export const REFERRAL_TITLE='Got a referral code?';

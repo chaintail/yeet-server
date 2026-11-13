@@ -1,4 +1,4 @@
-// A-4 in-process: the sign-in server (38860), connector (38861), core (38862) and operator admin (38863) run in this
+// A-4 in-process: the sign-in server (38874), connector (38875), core (38876) and operator admin (38877; 38860-38861 are the deployed stack's host ports) run in this
 // process on 127.0.0.1 with throwaway state and service secrets; nothing outside the test's temp directory is touched.
 import test, {after} from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,7 +8,7 @@ import {join} from 'node:path';
 import {randomBytes,createHash} from 'node:crypto';
 
 const ORIGIN='https://chatgpt.yeet.win';
-const PORTS={AS_PORT:38860,CONNECTOR_PORT:38861,CORE_PORT:38862,ADMIN_PORT:38863};
+const PORTS={AS_PORT:38874,CONNECTOR_PORT:38875,CORE_PORT:38876,ADMIN_PORT:38877};
 const AS=`http://127.0.0.1:${PORTS.AS_PORT}`,CONNECTOR=`http://127.0.0.1:${PORTS.CONNECTOR_PORT}`;
 const root=mkdtempSync(join(tmpdir(),'yeet-acceptance-'));
 const secrets=join(root,'secrets'),state=join(root,'state');
@@ -70,16 +70,20 @@ test('A-4: POST /mcp is 404 on the connector and on the sign-in server; GET /hea
 });
 
 test('sign-in pages use yeet cookies and YEET titles; identity config is off without Privy',async()=>{
- const r=await fetch(AS+'/demo/login');
+ const r=await fetch(AS+'/account/login');
  assert.equal(r.status,200);
  assert.match(r.headers.getSetCookie().join(';'),/^yeet_login=[0-9a-f]{48}; HttpOnly; SameSite=Lax/);
  assert.match(await r.text(),/<title>Sign in to YEET \(local\)<\/title>/);
- assert.equal((await fetch(AS+'/demo/identity-config')).status,404);
- assert.equal((await fetch(AS+'/demo/api/profile')).status,404);
- const css=await fetch(AS+'/demo/auth-pages.css');assert.equal(css.status,200);
+ assert.equal((await fetch(AS+'/account/identity-config')).status,404);
+ assert.equal((await fetch(AS+'/account/api/profile')).status,404);
+ const css=await fetch(AS+'/account/auth-pages.css');assert.equal(css.status,200);
+ // Without a session /account/ never says the person is signed in; it sends them to the sign-in page.
+ const home=await fetch(AS+'/account/',{redirect:'manual'});assert.equal(home.status,303);assert.equal(home.headers.get('location'),'/account/login');
+ // The old route prefix is gone, with no alias left behind.
+ for(const p of ['/demo/login','/demo/','/demo/auth-pages.css','/demo/identity-config','/demo/privy-login/login.js'])assert.equal((await fetch(AS+p,{redirect:'manual'})).status,404,p);
  // The sign-in bundle is served from login/dist once `npm run build:login` has run.
  if(existsSync(new URL('../login/dist/login.js',import.meta.url))){
-  const js=await fetch(AS+'/demo/privy-login/login.js');assert.equal(js.status,200);assert.match(js.headers.get('content-type'),/javascript/);
+  const js=await fetch(AS+'/account/privy-login/login.js');assert.equal(js.status,200);assert.match(js.headers.get('content-type'),/javascript/);
  }
 });
 
@@ -180,9 +184,9 @@ test('add funds: sign-in carries only the fund return target; /fund is off witho
  assert.equal((await fetch(AS+'/fund',{redirect:'manual'})).status,404);
  const cookies=jar();
  const page=async(path)=>{const r=await fetch(AS+path,{headers:{cookie:cookies.header()}});cookies.add(r);return r.text()};
- assert.match(await page('/demo/login?next=fund'),/<input type="hidden" name="next" value="fund">/);
- assert.doesNotMatch(await page('/demo/login?next=https%3A%2F%2Fexample.com'),/name="next"/);
- const csrf=(await page('/demo/login?next=fund')).match(/name="csrf" value="([0-9a-f]+)"/)[1];
- const r=await fetch(AS+'/demo/login',{method:'POST',redirect:'manual',headers:{cookie:cookies.header(),origin:ORIGIN,'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf,next:'fund',identity_token:'DEV:did:privy:acceptance-fund'})});
+ assert.match(await page('/account/login?next=fund'),/<input type="hidden" name="next" value="fund">/);
+ assert.doesNotMatch(await page('/account/login?next=https%3A%2F%2Fexample.com'),/name="next"/);
+ const csrf=(await page('/account/login?next=fund')).match(/name="csrf" value="([0-9a-f]+)"/)[1];
+ const r=await fetch(AS+'/account/login',{method:'POST',redirect:'manual',headers:{cookie:cookies.header(),origin:ORIGIN,'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf,next:'fund',identity_token:'DEV:did:privy:acceptance-fund'})});
  assert.equal(r.status,302);assert.equal(r.headers.get('location'),'/fund');
 });

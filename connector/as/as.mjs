@@ -70,7 +70,7 @@ if (
     process.env.TEST_PROFILE === "1" ||
     process.env.CIMD_TEST_FIXTURES === "1")
 )
-  throw Error("Invalid public demo configuration");
+  throw Error("Invalid public configuration");
 if (process.env.MOCK_PASSWORD_LOGIN === "1")
   throw Error("Password sign-in is not available");
 if (process.env.PRIVY_LOGIN === "1" && process.env.DEV_IDENTITY_STUB === "1")
@@ -285,7 +285,7 @@ function limit(max) {
   };
 }
 if (PUBLIC) {
-  app.use("/demo/login", limit(20));
+  app.use("/account/login", limit(20));
   app.use("/interaction", limit(64));
   app.use("/reg", limit(20));
   app.use("/auth", limit(60));
@@ -318,14 +318,14 @@ function authDocument(res, title, body) {
 }
 const loginFields = () =>
   process.env.PRIVY_LOGIN === "1"
-    ? '<div id="privy-login"><p role="status">Loading secure sign in…</p></div><script type="module" src="/demo/privy-login/login.js"></script>'
+    ? '<div id="privy-login"><p role="status">Loading secure sign in…</p></div><script type="module" src="/account/privy-login/login.js"></script>'
     : credentials();
 // Public values only: the sign-in page needs the app id, and the signer step needs the YEET signer and policy ids.
 const publicId = (name) => {
   const value = process.env[name];
   return typeof value === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(value) ? value : null;
 };
-app.get("/demo/identity-config", (_q, r) =>
+app.get("/account/identity-config", (_q, r) =>
   process.env.PRIVY_LOGIN === "1"
     ? r.set("Cache-Control", "no-store").json({
         appId: process.env.PRIVY_APP_ID,
@@ -354,7 +354,7 @@ function cookie(res, name, value, age = 3600) {
     `${name}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${age}${process.env.COOKIE_SECURE === "1" ? "; Secure" : ""}`,
   );
 }
-function retireDemoSession(current,res){
+function retireStaleSession(current,res){
   const sessions=read('sessions.json');
   delete sessions[current.token];
   write('sessions.json',sessions);
@@ -403,7 +403,7 @@ function accountConsent(accountId, patch) {
 // The referral screen shows once: for an account that has not seen it and holds no grant for this client.
 const referralDue = (accountId, clientId) =>
   !accountConsent(accountId)?.referral_shown && Adapter.grantsFor(accountId, clientId).length === 0;
-app.get("/demo/login", (q, r) => {
+app.get("/account/login", (q, r) => {
   const next = nextField(q.query.next);
   const c = randomBytes(24).toString("hex");
   cookie(r, "yeet_login", c, 300);
@@ -415,7 +415,7 @@ app.get("/demo/login", (q, r) => {
     ),
   );
 });
-app.post("/demo/login", async (q, r) => {
+app.post("/account/login", async (q, r) => {
   try {
     const c = q.headers.cookie
       ?.split(";")
@@ -441,7 +441,7 @@ app.post("/demo/login", async (q, r) => {
     r.status(401).json({ error: "sign in failed" });
   }
 });
-app.post("/demo/logout", (q, r) => {
+app.post("/account/logout", (q, r) => {
   const s = session(q);
   if (!s || !equal(q.headers["x-csrf-token"], s.csrf) || !originOK(q))
     return r.sendStatus(403);
@@ -455,29 +455,33 @@ app.post("/demo/logout", (q, r) => {
       : { ok: true },
   );
 });
-app.get("/demo/logout-identity", (_q, r) => {
+app.get("/account/logout-identity", (_q, r) => {
   if (process.env.PRIVY_LOGIN !== "1") return r.sendStatus(404);
   r.type("html").send(
     authDocument(
       r,
       "Sign out",
-      '<div id="privy-login" data-mode="logout"></div><script type="module" src="/demo/privy-login/login.js"></script>',
+      '<div id="privy-login" data-mode="logout"></div><script type="module" src="/account/privy-login/login.js"></script>',
     ),
   );
 });
 // Page styles, then the sign-in bundle built from ../login (npm run build:login writes login/dist/login.js).
-app.use("/demo", express.static(fileURLToPath(new URL("./viewer/", import.meta.url)), { fallthrough: true }));
-app.use("/demo/privy-login", express.static(fileURLToPath(new URL("../login/dist/", import.meta.url)), { fallthrough: true }));
-app.get("/demo/", (_q, r) =>
-  r
-    .type("html")
-    .send(
-      authDocument(
-        r,
-        "YEET",
-        '<p>You are signed in to YEET. Go back to ChatGPT to keep going.</p>',
-      ),
-    ),
+app.use("/account", express.static(fileURLToPath(new URL("./viewer/", import.meta.url)), { fallthrough: true }));
+app.use("/account/privy-login", express.static(fileURLToPath(new URL("../login/dist/", import.meta.url)), { fallthrough: true }));
+// Without a live session this page never claims a sign-in: it sends the browser to the sign-in page.
+app.get("/account/", (q, r) =>
+  session(q)
+    ? r
+        .set("Cache-Control", "no-store")
+        .type("html")
+        .send(
+          authDocument(
+            r,
+            "YEET",
+            '<p>You are signed in to YEET. Go back to ChatGPT to keep going.</p>',
+          ),
+        )
+    : r.redirect(303, "/account/login"),
 );
 // Add funds: USDC on Base through Privy funding (Coinbase Onramp). Needs a YEET sign-in session and the Privy sign-in.
 fundRoutes(app, { enabled: () => process.env.PRIVY_LOGIN === "1", session });
@@ -496,7 +500,7 @@ app.get("/interaction/:uid", async (q, r, next) => {
     if (await foreignClient(d))
       return r.status(400).type("html").send(authDocument(r, "Connection refused", foreignClientBody));
     const s = await prepareInteractionSession(d,session(q),{
-      eligible,retire: current=>retireDemoSession(current,r),
+      eligible,retire: current=>retireStaleSession(current,r),
     });
     const binding = interactionBinding(d, s);
     if (s && !(await eligible(s.id, d.params.client_id)))

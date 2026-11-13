@@ -8,7 +8,7 @@ import { PrivyProvider, usePrivy, useFundWallet } from "@privy-io/react-auth";
 import { embeddedWallets, privyConfig } from "./privy-app.jsx";
 import { DEFAULT_AMOUNT, baseUsdcReader, formatUsdc, fundOptions, validAmount } from "./fund-balance.js";
 
-const SIGN_IN = "/demo/login?next=fund";
+const SIGN_IN = "/account/login?next=fund";
 
 function useBalance(reader, address) {
   const [state, setState] = useState({ status: "idle" });
@@ -132,7 +132,7 @@ function Fund({ reader }) {
 
 const root = document.getElementById("yeet-fund");
 try {
-  const response = await fetch("/demo/identity-config", { credentials: "same-origin" });
+  const response = await fetch("/account/identity-config", { credentials: "same-origin" });
   if (!response.ok) throw Error();
   const config = await response.json();
   const reader = baseUsdcReader();

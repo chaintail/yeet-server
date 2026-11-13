@@ -35,13 +35,13 @@ export const fundCsp = (nonce) => privyPageCsp(nonce, { connect: [BASE_RPC_ORIGI
 
 export const FUND_TITLE = "Add funds";
 const FUND_BODY =
-  '<div id="yeet-fund"><p role="status">Loading your YEET wallet…</p></div><script type="module" src="/demo/privy-login/fund.js"></script>';
+  '<div id="yeet-fund"><p role="status">Loading your YEET wallet…</p></div><script type="module" src="/account/privy-login/fund.js"></script>';
 
 /**
  * GET /fund. Requires a YEET sign-in session; without one the person is sent to the sign-in page, which returns here.
  * enabled(): the Privy sign-in is configured (the page cannot work without it). session(req): the current session or null.
  */
-export function fundRoutes(app, { enabled, session, loginPath = "/demo/login" }) {
+export function fundRoutes(app, { enabled, session, loginPath = "/account/login" }) {
   app.get(FUND_PATH, (q, r) => {
     if (!enabled()) return r.sendStatus(404);
     r.set("Cache-Control", "no-store");
@@ -59,6 +59,6 @@ export function fundRoutes(app, { enabled, session, loginPath = "/demo/login" })
 }
 
 /** Where the sign-in form sends the person after a successful sign-in. Only the fund page is accepted. */
-export const afterSignIn = (next) => (next === FUND_NEXT ? FUND_PATH : "/demo/");
+export const afterSignIn = (next) => (next === FUND_NEXT ? FUND_PATH : "/account/");
 /** Hidden field the sign-in form carries when it was opened from the fund page. */
 export const nextField = (next) => (next === FUND_NEXT ? `<input type="hidden" name="next" value="${FUND_NEXT}">` : "");

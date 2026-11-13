@@ -1,6 +1,6 @@
 // Self-contained presentation for the YEET sign-in pages.
 export function html(value){return String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-export function document(title,body,nonce){return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${nonce?`<meta property="csp-nonce" content="${html(nonce)}">`:""}<title>${html(title)}</title><link rel="stylesheet" href="/demo/auth-pages.css"></head><body><main><section class="card" aria-labelledby="page-title"><h1 id="page-title">${html(title)}</h1>${body}</section></main></body></html>`}
+export function document(title,body,nonce){return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${nonce?`<meta property="csp-nonce" content="${html(nonce)}">`:""}<title>${html(title)}</title><link rel="stylesheet" href="/account/auth-pages.css"></head><body><main><section class="card" aria-labelledby="page-title"><h1 id="page-title">${html(title)}</h1>${body}</section></main></body></html>`}
 // Product titles for interaction prompts; the local development-identity build is marked in the title only.
 export function promptTitle(name){const base=name==='login'?'Sign in to YEET':'Connect YEET to ChatGPT';return process.env.PRIVY_LOGIN==='1'?base:`${base} (local)`}
 // Development identity field (TEST_PROFILE=1 and DEV_IDENTITY_STUB=1 only); production uses the Privy bundle.

@@ -27,7 +27,7 @@ function EndSession() {
           setBusy(true);
           try {
             await logout();
-            location.assign("/demo/login");
+            location.assign("/account/login");
           } catch {
             setError("Sign out could not finish. Please try again.");
             setBusy(false);
@@ -43,7 +43,7 @@ function EndSession() {
 
 /**
  * Lets the YEET server sign for both embedded wallets, within the YEET policies (one policy per chain).
- * Runs for every sign-in method (email, Google, Apple) when /demo/identity-config returns a signer id, so
+ * Runs for every sign-in method (email, Google, Apple) when /account/identity-config returns a signer id, so
  * sign-in keeps working before the signer is registered. A wallet that already has a delegated signer is left
  * as it is, so a retry after a partial failure only adds what is missing.
  */
@@ -294,7 +294,7 @@ function SignIn({ config }) {
 }
 
 try {
-  const response = await fetch("/demo/identity-config", {
+  const response = await fetch("/account/identity-config", {
     credentials: "same-origin",
   });
   if (!response.ok) throw Error();

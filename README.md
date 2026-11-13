@@ -30,7 +30,7 @@ scripts/       vendor-yeet-win.sh, text-gate.sh, live-one-leg.mjs (B-2)
 
 Endpoints on `https://chatgpt.yeet.win`: `POST /` (protocol, connector), `GET /.well-known/oauth-protected-resource`
 and `GET /health` (connector); everything else (`/.well-known/oauth-authorization-server`, `/auth`, `/token`, `/me`,
-`/interaction/*`, `/demo/*`) is the sign-in server. There is no `/mcp` path.
+`/interaction/*`, `/account/*`) is the sign-in server. There is no `/mcp` path.
 
 ## Run the tests
 

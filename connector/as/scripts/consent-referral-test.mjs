@@ -74,7 +74,7 @@ test('consent page lists five required agreements and one optional email line; t
  for(const [name] of AGREEMENTS)assert.match(html,new RegExp(`name="${name}" value="yes" required>`));
  assert.match(html,/name="product_email" value="yes">/);
  assert.match(html,/Privy/);assert.match(html,/ChatGPT/);assert.match(html,/NEAR Intents/);assert.match(html,/Terms of Service/);assert.match(html,/Privacy Policy/);
- assert.match(html,/<script type="module" src="\/demo\/consent\.js"><\/script>/);
+ assert.match(html,/<script type="module" src="\/account\/consent\.js"><\/script>/);
  assert.deepEqual(requireAgreements({...AGREED}),{product_email:false});
  assert.deepEqual(requireAgreements({...AGREED,product_email:'yes'}),{product_email:true});
  for(const [name] of AGREEMENTS)assert.throws(()=>requireAgreements({...AGREED,[name]:undefined}),/Required agreements/);

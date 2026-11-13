@@ -57,5 +57,29 @@ check('rendered:contract-title',contract.title);
 for(const [card,c] of Object.entries(contract['x-yeet-cards']))check(`rendered:card-spec:${card}`,c.title+'\n'+c.description);
 for(const [scope,text] of Object.entries(contract['x-yeet-scopes']))check(`rendered:scope:${scope}`,text);
 
+// 3. Routes and served asset paths: people see these in the address bar and in links, so they carry neither the
+// words above nor any word that says the product is not real.
+const PATH_BANNED=/(demo|mock|sample|placeholder|fake|unverified|\bmcp\b|\bfolio\b|(?:^|[^a-z])tests?(?:[^a-z]|$))/i;
+const pathHits=[];
+export function checkPath(label,path){const m=PATH_BANNED.exec(path);if(m)pathHits.push(`${label}: "${m[0].replace(/[^a-z]/gi,'')}" in path ${JSON.stringify(path)}`)}
+checkPath('self-test','/demo/login');checkPath('self-test','/x/test.js');checkPath('self-test','/latest/ok');
+if(pathHits.length!==2){console.error('text gate path self-test failed');process.exit(2)}
+pathHits.length=0;
+const routeFiles=['as/as.mjs','as/fund-page.mjs','as/auth-pages.mjs','as/consent-selection.mjs','as/account-recovery.mjs','as/provider-csp.mjs',
+ 'mcp/mcp.mjs','mcp/widgets.mjs','mcp/tool-registration.mjs','mcp/authenticate.mjs','core/fund-link.mjs',
+ 'login/src.jsx','login/fund.jsx','login/privy-app.jsx','login/build.mjs'];
+// Absolute paths in string literals (routes, redirects, script/style/fetch targets) and in src/href attributes.
+const ROUTE_RE=/(?:["'`]|(?:src|href|action)=\\?["'])(\/[A-Za-z0-9._~\-\/]*)(?:[?"'`\\]|\$\{)/g;
+let routeCount=0;
+for(const f of routeFiles){const u=new URL(f,C);if(!existsSync(u))continue;for(const m of readFileSync(u,'utf8').matchAll(ROUTE_RE)){routeCount++;checkPath(`route:connector/${f}`,m[1])}}
+const snippet=new URL('ops/Caddyfile.snippet',root);
+// The @yeet_private matcher lists paths that are refused with 404, so it is not a served route and is skipped.
+if(existsSync(snippet))for(const m of readFileSync(snippet,'utf8').split('\n').filter(l=>!/@yeet_private\s+path/.test(l)).join('\n').matchAll(/(?:^|\s)(\/[A-Za-z0-9._~\-\/*]+)/gm)){routeCount++;checkPath('route:ops/Caddyfile.snippet',m[1])}
+// Files served as they are: page styles and scripts (mounted under /account) and the built sign-in bundle.
+const walk=(dir,prefix)=>{const out=[];if(!existsSync(dir))return out;for(const e of readdirSync(dir,{withFileTypes:true})){if(e.isDirectory())out.push(...walk(new URL(e.name+'/',dir),prefix+e.name+'/'));else out.push(prefix+e.name)}return out};
+const served=[...walk(new URL('as/viewer/',C),'/account/'),...walk(new URL('login/dist/',C),'/account/privy-login/')];
+for(const p of served)checkPath('served',p);
+for(const h of pathHits)hits.push(h);
+
 if(hits.length){console.error(`TEXT GATE FAIL (${hits.length})`);for(const h of hits)console.error('  '+h);process.exit(1)}
-console.log(`TEXT GATE PASS: ${files.length} files and ${WIDGET_VIEWS.length} cards, ${Object.keys(TOOL_ERRORS).length} error codes, ${Object.keys(titles).length} tools checked; allow-list: ${ALLOW.map(a=>JSON.stringify(a)).join(', ')}`);
+console.log(`TEXT GATE PASS: ${files.length} files and ${WIDGET_VIEWS.length} cards, ${Object.keys(TOOL_ERRORS).length} error codes, ${Object.keys(titles).length} tools, ${routeCount} route strings and ${served.length} served files checked; allow-list: ${ALLOW.map(a=>JSON.stringify(a)).join(', ')}`);
