@@ -86,6 +86,7 @@ test('YEET_P2=1 end to end: home -> spin -> leaderboard, then a settled trade sh
  const spin=await alice.call('daily_spin');
  assert.equal(spin.isError,undefined,JSON.stringify(spin.content));
  const s=spin.structuredContent;
+ assert.match(spin.content[0].text,new RegExp(`^You won ${s.xp_won} XP and a [A-Z]+ stamp \\(1 of 7\\)\\.$`));
  assert.ok(s.xp_won>=5&&s.xp_won<=5+40+25,String(s.xp_won));assert.equal(s.total,5+s.xp_won);assert.equal(s.streak_days,1);
  assert.equal(s.next_spin_at,new Date(Date.UTC(...(d=>[d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate()+1])(new Date()))).toISOString());
  assert.deepEqual((await alice.call('daily_spin')).structuredContent,s,"YEET text.");

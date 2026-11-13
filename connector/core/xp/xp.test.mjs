@@ -5,7 +5,7 @@ import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {z} from 'zod';
-import {openLedger,DEFAULT_RULES} from './ledger.mjs';
+import {openLedger,DEFAULT_RULES,SET_COMPLETE_XP} from './ledger.mjs';
 import {streakDays} from './streak.mjs';
 import {roll,BONUS_TABLE,createSpin,streakMilestone,STREAK_BONUS,STREAK_RULES,streakMilestones,nextStreakMilestone} from './spin.mjs';
 import {leaderboard,rankRows,handle} from './board.mjs';
@@ -17,12 +17,14 @@ import {toolSchemas,zodSchema} from '../../mcp/tool-contract.mjs';
 
 const SECRET='test-xp-secret-0123456789abcdef';
 const out=name=>zodSchema(z,toolSchemas[name].output);
+// The connector cuts daily_spin to the contract's listed fields (stamp fields pass once the contract lists them).
+const spinOut=s=>out('daily_spin').parse(Object.fromEntries(Object.entries(s).filter(([k])=>k in toolSchemas.daily_spin.output.properties)));
 const clock=(iso='2026-11-12T12:00:00.000Z')=>fakeClock(Date.parse(iso));
 const at=iso=>new Date(Date.parse(iso)).toISOString();
 
-test('rule table: five events, caps as documented',()=>{
+test('rule table: seven events, caps as documented',()=>{
  assert.deepEqual(DEFAULT_RULES.map(r=>[r.event,r.points,r.per_day_cap,r.lifetime_cap]),
-  [['sign_in',5,1,null],['first_yeet',50,null,1],['yeet_settled',20,5,null],['skeet_settled',10,5,null],['daily_spin',5,1,null]]);
+  [['sign_in',5,1,null],['first_yeet',50,null,1],['yeet_settled',20,5,null],['skeet_settled',10,5,null],['daily_spin',5,1,null],['set_completed',SET_COMPLETE_XP,null,null],['extra_spin',5,null,null]]);
 });
 
 test('ledger: dedupe per key, per-day cap resets at the UTC day, lifetime cap holds',()=>{
@@ -76,7 +78,7 @@ test("YEET text.",()=>{
  const spin=createSpin({ledger:l,secret:SECRET});
  assert.equal(spin.available('a'),true);
  const s1=spin.spin('a');
- out('daily_spin').parse(s1);
+ spinOut(s1);
  assert.equal(s1.xp_won,5+roll(SECRET,'a|2026-11-10'));assert.equal(s1.total,s1.xp_won);assert.equal(s1.streak_days,1);
  assert.equal(s1.draw_xp,roll(SECRET,'a|2026-11-10'));assert.equal(s1.streak_xp,0);
  assert.equal(s1.next_spin_at,'2026-11-11T00:00:00.000Z');
@@ -92,9 +94,12 @@ test("YEET text.",()=>{
  assert.equal(s3.total,s1.xp_won+s2.xp_won+s3.xp_won);
  // The parts the card needs: the wheel lands on base + draw_xp; streak_xp (fixed bonus + its own draw) is shown apart.
  assert.equal(s3.draw_xp,roll(SECRET,'a|2026-11-12'));assert.equal(s3.streak_xp,STREAK_BONUS+roll(SECRET,'a|2026-11-12|streak'));
- out('daily_spin').parse(s3);
- assert.deepEqual(spin.spin('a'),s3,'repeat on a milestone day: same parts');
- assert.deepEqual([1,2,3,4,6,7,8,14,21,28,35].map(streakMilestone),[false,false,true,false,false,true,false,true,true,true,true]);
+ spinOut(s3);
+ // Day 3 is a milestone: one extra spin for today; after it, a repeat returns that extra spin.
+ assert.equal(s3.spins_available,1);assert.equal(s3.extra_spin_reason,'streak_milestone');
+ const x3=spin.spin('a');assert.equal(x3.spin_kind,'extra');assert.equal(x3.spins_available,0);
+ assert.deepEqual(spin.spin('a'),x3,'repeat on a milestone day after the extra spin: same spin');
+ assert.deepEqual([1,2,3,4,6,7,8,10,14,17,21,28,35].map(streakMilestone),[false,false,true,false,false,true,false,true,true,true,true,true,true]);
  // Without a secret there is no spin, and home says so.
  const off=createSpin({ledger:l,secret:undefined});
  assert.equal(off.available('z'),false);assert.throws(()=>off.spin('z'),e=>e.code==='TEMPORARILY_UNAVAILABLE');
@@ -203,20 +208,22 @@ test('trade XP: a lost onSettled (crash before the hook) is paid by the next sta
 test('home summary: total, streak and spin availability; recent wins stay empty',()=>{
  const now=clock();const xp=openXp({secret:SECRET,now});
  const next={days:3,xp:STREAK_BONUS};
- assert.deepEqual(xp.summary('a'),{total:0,streak_days:0,spin_available:true,next_streak_milestone:next});
+ const empty=xp.spin.stamps.coins.map(coin=>({coin,count:0,slots:7,card:1,progress:0,complete:false}));
+ assert.deepEqual(xp.summary('a'),{total:0,streak_days:0,spin_available:true,next_streak_milestone:next,spins_available:1,extra_spin_reason:null,stamps:empty,sets_completed:0});
  xp.signIn('a');xp.signIn('a');
- assert.deepEqual(xp.summary('a'),{total:5,streak_days:1,spin_available:true,next_streak_milestone:next});
+ assert.deepEqual(xp.summary('a'),{total:5,streak_days:1,spin_available:true,next_streak_milestone:next,spins_available:1,extra_spin_reason:null,stamps:empty,sets_completed:0});
  const s=xp.doSpin('a');
- assert.deepEqual(xp.summary('a'),{total:5+s.xp_won,streak_days:1,spin_available:false,next_streak_milestone:next});
+ const after=empty.map(c=>c.coin===s.stamp.coin?{...c,count:1,progress:1}:c);
+ assert.deepEqual(xp.summary('a'),{total:5+s.xp_won,streak_days:1,spin_available:false,next_streak_milestone:next,spins_available:0,extra_spin_reason:null,stamps:after,sets_completed:0});
  assert.deepEqual(xp.recentWins(),[]);
 });
 
-test('streak milestones: one table, day 3 then every 7th day; next milestone ported from Folio',()=>{
+test('streak milestones: one table, the 3rd and 7th day of every 7-day block; next milestone ported from Folio',()=>{
  const paying=Array.from({length:70},(_,i)=>i+1).filter(d=>streakMilestone(d));
- assert.deepEqual(paying,[3,7,14,21,28,35,42,49,56,63,70]);
+ assert.deepEqual(paying,[3,7,10,14,17,21,24,28,31,35,38,42,45,49,52,56,59,63,66,70]);
  for(const d of paying)assert.equal(streakMilestones(d).reduce((sum,r)=>sum+r.xp,0),STREAK_BONUS,`one rule pays on day ${d}`);
  assert.ok(STREAK_RULES.every(r=>r.roll&&r.xp===STREAK_BONUS));
- assert.deepEqual([0,1,2,3,6,7,13,27,28,34,35,100].map(d=>nextStreakMilestone(d)?.days),[3,3,3,7,7,14,14,28,35,35,42,105]);
+ assert.deepEqual([0,1,2,3,6,7,13,27,28,34,35,100].map(d=>nextStreakMilestone(d)?.days),[3,3,3,7,7,10,14,28,31,35,38,101]);
  assert.deepEqual(nextStreakMilestone(5),{days:7,xp:25});
  // A custom table: rules firing on the same day add up; a one-time table runs out.
  const rules=[{days:2,repeat_every:2,xp:10,roll:false},{days:4,repeat_every:null,xp:7,roll:true}];
@@ -238,7 +245,7 @@ test('streak milestone: 25 XP plus a draw seeded id|day|streak, separate from th
   else assert.equal(bonus,0,`day ${s.streak_days}`);
   now.advance(86_400_000);
  }
- assert.deepEqual(paid.map((b,i)=>b>0?i+1:0).filter(Boolean),[3,7,14]);
+ assert.deepEqual(paid.map((b,i)=>b>0?i+1:0).filter(Boolean),[3,7,10,14]);
  // The streak seed is its own: over many accounts it does not track the daily draw.
  const pairs=Array.from({length:200},(_,i)=>[roll(SECRET,`u${i}|2026-11-03`),roll(SECRET,`u${i}|2026-11-03|streak`)]);
  assert.ok(pairs.filter(([a,b])=>a!==b).length>100);
@@ -262,8 +269,8 @@ test('next_streak_milestone: today’s spin still counts until it happens; homeX
  const summary=xp.summary('a');
  const HOME_XP_KEYS=homeXpKeys(toolSchemas.yeet_home.output);
  assert.deepEqual(HOME_XP_KEYS,['total','streak_days','spin_available','next_streak_milestone']);
- const block=homeXp(summary,HOME_XP_KEYS);
- assert.deepEqual(block,summary);
+ const {stamps:_s,sets_completed:_n,spins_available:_a,extra_spin_reason:_r,...listed}=summary;const block=homeXp(summary,HOME_XP_KEYS);
+ assert.deepEqual(block,listed);
  const xpSchema=zodSchema(z,toolSchemas.yeet_home.output.properties.xp);
  assert.equal(xpSchema.safeParse(block).success,true);
  assert.equal(xpSchema.safeParse({...block,next_streak_milestone:null}).success,true,'null when no milestone can pay');
