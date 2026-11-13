@@ -16,6 +16,12 @@ const FINAL_LEG=new Set(['SUCCESS','REFUNDED','FAILED']);
 /** A trade earns XP when at least one leg delivered. */
 export const tradeEarns=status=>status==='success'||status==='partial';
 
+/** The xp fields the pinned contract's yeet_home output schema allows (pass the resolved output schema). Its xp object
+ * is closed (additionalProperties false), so a summary field the contract does not list yet would fail the connector's
+ * output check and blank the card. */
+export const homeXpKeys=homeOutput=>Object.freeze(Object.keys(homeOutput.properties.xp.anyOf.find(s=>s.type==='object').properties));
+export const homeXp=(summary,keys)=>Object.fromEntries(keys.filter(k=>k in summary).map(k=>[k,summary[k]]));
+
 export function openXp({file=':memory:',secret,now=Date.now}={}){
  const ledger=openLedger(file,{now});
  const db=ledger.db;
@@ -61,10 +67,12 @@ export function openXp({file=':memory:',secret,now=Date.now}={}){
    const row=tradeRow(view.trade_id);
    return row&&row.account_id===who?{points:Number(row.points),total:ledger.total(who)}:null;
   },
-  /** yeet_home's xp block. */
+  /** The XP summary behind yeet_home's xp block (homeXp cuts it to the contract). next_streak_milestone: {days, xp} of
+   * the next streak length that pays a bonus, or null when the spin is off. */
   summary(who){
    const at=ledger.iso();
-   return {total:ledger.total(who),streak_days:streakDays(db,who,dayOf(at)),spin_available:spin.available(who,at)};
+   return {total:ledger.total(who),streak_days:streakDays(db,who,dayOf(at)),spin_available:spin.available(who,at),
+    next_streak_milestone:spin.nextMilestone(who,at)};
   },
   /** yeet_home's recent_wins. The contract asks for {symbol, pct}; the stored data has what a leg paid and received
    * but no later price, so no gain since the buy can be stated truthfully. An empty list until a price history exists. */
