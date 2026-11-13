@@ -9,8 +9,10 @@ FROM node:24-slim AS login
 WORKDIR /app/connector/login
 COPY connector/login/package.json connector/login/package-lock.json ./
 RUN npm ci --no-audit --no-fund
-COPY connector/login/src.jsx connector/login/fund.jsx connector/login/privy-app.jsx connector/login/fund-balance.js connector/login/login-methods.js connector/login/build.mjs ./
-RUN node build.mjs
+# The whole login folder (node_modules and dist are excluded by Dockerfile.dockerignore), so a new module the
+# bundle imports never needs a Dockerfile change.
+COPY connector/login/ ./
+RUN node build.mjs && test -s dist/login.js && test -s dist/fund.js
 
 FROM node:24-slim
 ENV NODE_ENV=production

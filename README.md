@@ -139,8 +139,8 @@ null and the two P2 tools are not registered. It is just XP: no money, no prizes
   `YEET_CODE_MINT_LIMIT` (20), `YEET_TRACK_MAX_HOURS` (24), `YEET_BALANCE_TOLERANCE_BPS` (100),
   `YEET_STUCK_AFTER_MINUTES` (30), `STATE_DIR`.
 - Operator scripts: `YEET_POLICY_ADMIN_QUORUM_ID` (policy-create.mjs), `TRADE_DB` (trade-alerts.mjs).
-- What each one means, and the compose defaults (`REFRESH_FAMILY_TTL=14400`, `REFRESH_CONSENT_COMPAT=1`,
-  `REFRESH_DIAGNOSTICS=1`, Folio's working values for ChatGPT): `ops/README.md`, "Variables".
+- What each one means, and the compose defaults (`REFRESH_FAMILY_TTL=604800`, 7 days; `REFRESH_CONSENT_COMPAT=1`;
+  `REFRESH_DIAGNOSTICS=1`): `ops/README.md`, "Variables".
 - All roles, for local runs and tests: `AS_PORT`, `CONNECTOR_PORT`, `CORE_PORT`, `ADMIN_PORT`, `LISTEN_HOST`,
   `SECRETS_DIR` (defaults: 38312, 38313, 38316, 38317, `0.0.0.0`, `/secrets`).
 
