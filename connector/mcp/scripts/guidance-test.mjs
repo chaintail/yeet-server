@@ -72,6 +72,12 @@ test('yeet_home: paused, wallet set-up, no USDC (with and without a spin), ready
  assert.equal(fund,COPY.yeet_home.needs_funds_spin);assert.match(fund,/Add funds/);assert.match(fund,/daily wheel is free/);
  assert.equal(g('yeet_home',{wallets:wallets('0'),ready:'needs_funds',xp:xp({spin_available:false,spins_available:0}),recent_wins:[]}),COPY.yeet_home.needs_funds);
  assert.equal(g('yeet_home',{wallets:wallets('0'),ready:'needs_funds',xp:null,recent_wins:[]},P01),COPY.yeet_home.needs_funds_no_wheel);
+ // Zero balance: the model may give the YEET wallet address and its network for a direct USDC transfer, or Add funds.
+ const direct="YEET direct.";
+ for(const k of ['needs_funds_spin','needs_funds','needs_funds_no_wheel']){
+  assert.ok(COPY.yeet_home[k].includes(` ${direct}`),k);assert.match(COPY.yeet_home[k],/YEET/,k);
+ }
+ for(const k of ['paused','needs_signer','ready_spin','ready_usdc','ready'])assert.doesNotMatch(COPY.yeet_home[k],/direct USDC transfer/,k);
  assert.equal(g('yeet_home',{wallets:wallets('40'),ready:'ready',xp:xp(),recent_wins:[]}),COPY.yeet_home.ready_spin);
  assert.equal(g('yeet_home',{wallets:wallets('40'),ready:'ready',xp:xp({spin_available:false,spins_available:0}),recent_wins:[]}),"YEET text.");
  assert.equal(g('yeet_home',{wallets:wallets(null),ready:'ready',xp:null,recent_wins:[]},P01),COPY.yeet_home.ready);
@@ -214,6 +220,21 @@ test('registered tools: guidance in structuredContent and in the text the model 
   const x=await client.callTool({name:'skeet_propose',arguments:{request_id:'r2',legs:[{symbol:'WIF',percent:100}]}});
   assert.equal(x.isError,true);const v=JSON.parse(x.content[0].text);
   assert.equal(v.error,'TRADING_PAUSED');assert.equal(v.guidance,COPY.errors.TRADING_PAUSED);
+ }finally{await close()}
+});
+
+test('yeet_home with no USDC: the text the model reads carries both wallet addresses and the direct-transfer guidance',async()=>{
+ const home={wallets:{base:{address:'0x5a1C0ffee0D15ea5e0000000000000000000B45E',usdc:'0'},solana:{address:'9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM'}},ready:'needs_funds',fund_url:'https://chatgpt.yeet.win/fund',xp:null,recent_wins:[]};
+ const {client,close}=await connect(async route=>{assert.equal(route,'/home');return home});
+ try{
+  const r=await client.callTool({name:'yeet_home',arguments:{}});
+  assert.equal(r.isError,undefined,JSON.stringify(r.content));
+  const text=JSON.parse(r.content[0].text);
+  assert.equal(text.wallets.base.address,home.wallets.base.address);
+  assert.equal(text.wallets.solana.address,home.wallets.solana.address);
+  assert.equal(text.fund_url,home.fund_url);
+  assert.equal(text.guidance,COPY.yeet_home.needs_funds_no_wheel);assert.match(text.guidance,/direct USDC transfer/);
+  assert.deepEqual(r.structuredContent.wallets,home.wallets,'the card reads the same addresses');
  }finally{await close()}
 });
 
