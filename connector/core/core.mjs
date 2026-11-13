@@ -132,6 +132,7 @@ export const ROUTE_SCOPES=Object.freeze([
  ['GET',/^\/trades\/t_[a-z0-9]{20}$/,'yeet:read'],
  ['GET',/^\/portfolio$/,'yeet:read'],
  ['GET',/^\/leaderboard\/(xp|week)$/,'yeet:read'],
+ ['GET',/^\/checkin$/,'yeet:read'],
  ['POST',/^\/spin$/,'yeet:write'],
  ['GET',/^\/lucky$/,'yeet:read'],
  ['POST',/^\/lucky\/spin$/,'yeet:write'],
@@ -244,6 +245,8 @@ function xpRoute(tool,fn){
 /** The name a board shows: the username the person set, otherwise the default name. */
 export function boardName(id){return usernameOf(id)??handle(id)}
 app.get('/leaderboard/:board',xpRoute('yeet_leaderboard',(x,who,a)=>x.board(a.board??'xp',who,boardName)));
+// yeet_checkin: the daily wheel on its own card (a check-in). The same XP summary yeet_home carries in `xp`.
+app.get('/checkin',xpRoute('yeet_checkin',(x,who)=>({checkin:homeXp(x.summary(who),HOME_XP_KEYS)})));
 app.post('/spin',xpRoute('daily_spin',(x,who)=>x.doSpin(who)));
 // Lucky wheel (xp/lucky.mjs): today's five hot coins (only coins 1Click quotes now), then the server's slice.
 app.get('/lucky',xpRoute('lucky_wheel',async(x,who)=>x.lucky.wheel(who,luckyAvailable(await tradeEngine()))));

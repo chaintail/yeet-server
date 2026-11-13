@@ -81,6 +81,11 @@ export const COPY=Object.freeze({
   ranked:"YEET yeet_leaderboard.ranked: {rank} {xp}.",
   unranked:"YEET yeet_leaderboard.unranked.",
  },
+
+ yeet_checkin:{
+  open:"YEET yeet_checkin.open.",
+  done:"YEET yeet_checkin.done: {days} {s}.",
+ },
  daily_spin:{
   set:"YEET daily_spin.set: {xp_won} {coin} {bonus}.",
   stamp:"YEET daily_spin.stamp: {coin} {filled} {slots} {xp_won}.",
@@ -226,6 +231,7 @@ const BY_TOOL={
  submit_trade_signature:trade,trade_status:trade,
  yeet_portfolio:portfolio,
  yeet_leaderboard:r=>Number.isInteger(r.me?.rank)?fill(COPY.yeet_leaderboard.ranked,{rank:r.me.rank,xp:r.me.xp}):COPY.yeet_leaderboard.unranked,
+ yeet_checkin:r=>{const c=r.checkin??{},left=Number.isInteger(c.spins_available)?c.spins_available:c.spin_available?1:0;return left>0?COPY.yeet_checkin.open:fill(COPY.yeet_checkin.done,{days:c.streak_days,s:plural(c.streak_days)})},
  daily_spin:spin,
  yeet_set_username:r=>fill(COPY.yeet_set_username.set,{username:r.username}),
  lucky_wheel:lucky,lucky_spin:lucky,

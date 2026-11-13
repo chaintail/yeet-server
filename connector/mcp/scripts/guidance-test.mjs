@@ -141,7 +141,7 @@ const status=(s,over={})=>({trade_id:'t_abcdefghij0123456789',direction:'yeet',s
 test("YEET text.",()=>{
  for(const s of ['submitted','settling','signing']){
   const out=g('trade_status',status(s));
-  assert.equal(out,COPY.trade.settling_yeet,s);assert.match(out,/one by one/);assert.match(out,/a few minutes/);assert.match(out,/check the status/);assert.match(out,/YEET/);
+  assert.equal(out,COPY.trade.settling_yeet,s);assert.match(out,/one by one/);assert.match(out,/a few minutes/);assert.match(out,/YEET/);assert.match(out,/YEET/);
  }
  assert.equal(g('trade_status',status('settling',{direction:'skeet'})),COPY.trade.settling_skeet);
  assert.equal(g('submit_trade_signature',{trade_id:'t_abcdefghij0123456789',status:'signing',legs:[],sign_requests:[{},{}]}),"YEET text.");

@@ -10,7 +10,7 @@ import {COPY} from '../guidance.mjs';
 import {contract} from '../tool-contract.mjs';
 
 const LISTED=['execute_trade','skeet_propose','submit_trade_signature','trade_status','yeet_coins','yeet_home','yeet_overview','yeet_portfolio','yeet_propose','yeet_quote'];
-const P2=['daily_spin','yeet_leaderboard','yeet_set_username','lucky_wheel','lucky_spin'];
+const P2=['daily_spin','yeet_checkin','yeet_leaderboard','yeet_set_username','lucky_wheel','lucky_spin'];
 delete process.env.YEET_P2;
 const coins={coins:[{symbol:'WIF',name:'dogwifhat',kind:'meme',price_usd:null}],limits:{min_leg_usdc:'3',max_trade_usdc:'25',max_legs:5,default_usdc:'20'}};
 const proposal={proposal_id:'p_abcdefghij0123456789',revision:1,direction:'yeet',amount_usdc:'20',legs:[{symbol:'WIF',parts:10,amount_in:'20',est_out:'7.1',est_out_usd:'19.4',min_out:'7'}],totals:{in_usd:'20',out_usd:'19.4',cost_pct:3,time_estimate_s:40},quoted_at:'2026-11-12T00:00:00Z',warnings:[],next:'⚡ YEET is ready in the card.'};
@@ -58,7 +58,7 @@ test('tools/list: P0 and P1 tools with the contract annotations, scopes, cards a
   assert.equal(tools.find(t=>t.name==='yeet_leaderboard')._meta['openai/outputTemplate'],LEADERBOARD_UI_URI);
   // The lucky wheel: lucky_wheel is the model's (home card), lucky_spin is card only, like daily_spin.
   const lw=tools.find(t=>t.name==='lucky_wheel'),ls=tools.find(t=>t.name==='lucky_spin');
-  assert.equal(lw._meta['openai/visibility'],undefined);assert.deepEqual(lw._meta.ui.visibility,['model','app']);assert.equal(lw._meta['openai/outputTemplate'],'ui://yeet/home-v1.html');
+  assert.equal(lw._meta['openai/visibility'],undefined);assert.deepEqual(lw._meta.ui.visibility,['model','app']);assert.equal(lw._meta['openai/outputTemplate'],'ui://yeet/lucky-v1.html');
   assert.equal(ls._meta['openai/visibility'],'private');assert.deepEqual(ls._meta.ui.visibility,['app']);assert.equal(ls._meta['openai/widgetAccessible'],true);
   assert.deepEqual(Object.keys(ls.inputSchema.properties),['lucky_id']);
  }finally{await c2.close();await p2.close()}

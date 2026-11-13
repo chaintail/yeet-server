@@ -66,8 +66,8 @@ test('the vendored signer is present and its URL carries its content hash',()=>{
  assert.equal(publicOrigin('https://chatgpt.yeet.win/'),ORIGIN);assert.equal(publicOrigin('https://u:p@x.example'),null);
 });
 
-test('resources: overview, basket, portfolio and receipt declare exactly the signing CSP; home and leaderboard stay closed; no ui.domain',async()=>{
- assert.deepEqual([...SIGNING_VIEWS],['overview','basket','portfolio','receipt']);
+test('resources: overview, basket, portfolio, receipt and lucky declare exactly the signing CSP; home, wheel and leaderboard stay closed; no ui.domain',async()=>{
+ assert.deepEqual([...SIGNING_VIEWS],['overview','basket','portfolio','receipt','lucky']);
  const {client,close}=await connect(ENV);
  try{
   for(const [view,{uri}] of Object.entries(CARDS)){

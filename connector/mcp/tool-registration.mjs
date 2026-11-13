@@ -21,6 +21,7 @@ const ROUTES={
  yeet_portfolio:()=>['/portfolio'],
  skeet_propose:args=>['/proposals/skeet',args],
  yeet_leaderboard:({board='xp'})=>[`/leaderboard/${board}`],
+ yeet_checkin:()=>['/checkin'],
  daily_spin:()=>['/spin',{}],
  lucky_wheel:()=>['/lucky'],
  lucky_spin:({lucky_id})=>['/lucky/spin',{lucky_id}],
@@ -58,7 +59,13 @@ export function overviewText(r){
  const paused=r.trading==='paused'?' Trading is paused right now.':'';
  return `${r.username}: ${bits.join(', ')}.${open}${win}${paused} Offer next: ${r.suggestions.map(s=>`${s.label} ("${s.say}")`).join('; ')}.`;
 }
-const TEXT={yeet_overview:overviewText,daily_spin:spinText,lucky_wheel:luckyText,lucky_spin:luckyText};
+/** yeet_checkin's text for the model: the streak, the XP and whether a spin is waiting. */
+export function checkinText(r){
+ const c=r?.checkin;if(!c)return 'The daily check-in is not available right now.';
+ const left=Number.isInteger(c.spins_available)?c.spins_available:c.spin_available?1:0;
+ return `Daily check-in: ${c.streak_days}-day streak, ${c.total} XP. ${left>0?`${left} spin${left===1?' is':'s are'} waiting in the card.`:'Today\'s spin is done.'}`;
+}
+const TEXT={yeet_overview:overviewText,yeet_checkin:checkinText,daily_spin:spinText,lucky_wheel:luckyText,lucky_spin:luckyText};
 /** P0 and P1 are always registered; P2 (leaderboard, spin) only with YEET_P2=1. */
 export const registeredTools=(env=process.env)=>Object.values(toolSpecs).filter(t=>t.priority!=='P2'||env.YEET_P2==='1');
 export const TOOLS=Object.freeze(Object.values(toolSpecs).map(t=>Object.freeze({...t,route:ROUTES[t.name]})));

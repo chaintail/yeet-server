@@ -1241,6 +1241,91 @@
         "chosen"
       ],
       "additionalProperties": false
+    },
+    "xp_summary": {
+      "description": "XP, streak, stamps and the daily wheel of one person.",
+      "type": "object",
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "streak_days": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "spin_available": {
+          "type": "boolean"
+        },
+        "next_streak_milestone": {
+          "description": "The next streak length that pays a streak bonus and its fixed XP (the bonus draw comes on top); null when none is left.",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "days": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "xp": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000
+                }
+              },
+              "required": [
+                "days",
+                "xp"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "wheel": {
+          "description": "The slices the next daily_spin returns today, before the spin (the landing slice is not marked).",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/wheel_slice"
+          },
+          "minItems": 1,
+          "maxItems": 26
+        },
+        "spins_available": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "extra_spin_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/spin_reason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stamps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/stamp_count"
+          },
+          "maxItems": 64
+        },
+        "sets_completed": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "total",
+        "streak_days",
+        "spin_available"
+      ],
+      "additionalProperties": false
     }
   },
   "tools": {
@@ -1510,88 +1595,7 @@
           "xp": {
             "anyOf": [
               {
-                "type": "object",
-                "properties": {
-                  "total": {
-                    "type": "integer",
-                    "minimum": 0
-                  },
-                  "streak_days": {
-                    "type": "integer",
-                    "minimum": 0
-                  },
-                  "spin_available": {
-                    "type": "boolean"
-                  },
-                  "next_streak_milestone": {
-                    "description": "The next streak length that pays a streak bonus and its fixed XP (the bonus draw comes on top); null when none is left.",
-                    "anyOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "days": {
-                            "type": "integer",
-                            "minimum": 1
-                          },
-                          "xp": {
-                            "type": "integer",
-                            "minimum": 0,
-                            "maximum": 1000
-                          }
-                        },
-                        "required": [
-                          "days",
-                          "xp"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "wheel": {
-                    "description": "The slices the next daily_spin returns today, before the spin (the landing slice is not marked).",
-                    "type": "array",
-                    "items": {
-                      "$ref": "#/$defs/wheel_slice"
-                    },
-                    "minItems": 1,
-                    "maxItems": 26
-                  },
-                  "spins_available": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 20
-                  },
-                  "extra_spin_reason": {
-                    "anyOf": [
-                      {
-                        "$ref": "#/$defs/spin_reason"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "stamps": {
-                    "type": "array",
-                    "items": {
-                      "$ref": "#/$defs/stamp_count"
-                    },
-                    "maxItems": 64
-                  },
-                  "sets_completed": {
-                    "type": "integer",
-                    "minimum": 0
-                  }
-                },
-                "required": [
-                  "total",
-                  "streak_days",
-                  "spin_available"
-                ],
-                "additionalProperties": false
+                "$ref": "#/$defs/xp_summary"
               },
               {
                 "type": "null"
@@ -2657,6 +2661,44 @@
         "TEMPORARILY_UNAVAILABLE"
       ]
     },
+    "yeet_checkin": {
+      "priority": "P2",
+      "title": "Daily check-in",
+      "description": "Shows the daily check-in card: the wheel, the streak and the stamps.",
+      "inputSchema": {
+        "$ref": "#/$defs/empty"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "checkin": {
+            "$ref": "#/$defs/xp_summary"
+          },
+          "guidance": {
+            "$ref": "#/$defs/guidance"
+          }
+        },
+        "required": [
+          "checkin"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "scope": "yeet:read",
+      "card": "wheel",
+      "visible": true,
+      "widgetAccessible": true,
+      "errors": [
+        "INVALID_ARGUMENT",
+        "REAUTH_REQUIRED",
+        "TEMPORARILY_UNAVAILABLE"
+      ]
+    },
     "daily_spin": {
       "priority": "P2",
       "title": "Daily XP spin",
@@ -2817,7 +2859,7 @@
         "openWorldHint": false
       },
       "scope": "yeet:write",
-      "card": "home",
+      "card": "wheel",
       "visible": false,
       "widgetAccessible": true,
       "errors": [
@@ -2909,7 +2951,7 @@
         "openWorldHint": false
       },
       "scope": "yeet:read",
-      "card": "home",
+      "card": "lucky",
       "visible": true,
       "widgetAccessible": true,
       "errors": [
@@ -2921,7 +2963,7 @@
     "lucky_spin": {
       "priority": "P2",
       "title": "Spin the lucky wheel",
-      "description": "Spin today’s lucky wheel. Only the card calls this; one spin per wheel, and a repeat returns the same coin.",
+      "description": "Pick the lucky wheel’s coin. Only the card calls this; one draw per wheel, and a repeat returns the same coin.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2956,7 +2998,7 @@
         "openWorldHint": false
       },
       "scope": "yeet:write",
-      "card": "home",
+      "card": "lucky",
       "visible": false,
       "widgetAccessible": true,
       "errors": [
@@ -2996,6 +3038,16 @@
       "uri": "ui://yeet/leaderboard-v1.html",
       "title": "YEET leaderboard",
       "description": "XP ranks and your place on the board."
+    },
+    "wheel": {
+      "uri": "ui://yeet/wheel-v1.html",
+      "title": "Daily check-in",
+      "description": "The daily check-in: one wheel spin a day for XP and a coin stamp, the streak and the stamp cards."
+    },
+    "lucky": {
+      "uri": "ui://yeet/lucky-v1.html",
+      "title": "Lucky wheel",
+      "description": "A trading offer: five hot coins, the wheel picks one, and a YEET of the offered amount into it."
     }
   },
   "x-yeet-meta": {

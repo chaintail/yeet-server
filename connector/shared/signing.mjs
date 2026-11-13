@@ -14,8 +14,9 @@ export const SIGNER_META_KEY = 'yeet/signer';
 export const SIGN_PAGE_PATH = '/sign';
 export const SIGNER_PATH_PREFIX = '/cards/yeet-signer';
 /** The cards that load the person's wallet in the card: the overview (the device sign-in), and those that hold a YEET or
- * SKEET button (basket; portfolio opens a SKEET basket in place) or follow a trade. */
-export const SIGNING_VIEWS = Object.freeze(['overview', 'basket', 'portfolio', 'receipt']);
+ * SKEET button (basket; portfolio opens a SKEET basket in place; the lucky wheel opens its YEET basket in place) or
+ * follow a trade. */
+export const SIGNING_VIEWS = Object.freeze(['overview', 'basket', 'portfolio', 'receipt', 'lucky']);
 export const PRIVY_AUTH = 'https://auth.privy.io';
 export const PRIVY_API = 'https://api.privy.io';
 /** The card accepts an app id only in this shape (yeet-win src/yeet-card.js takeSigner). */
