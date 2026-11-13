@@ -154,7 +154,11 @@ test('guard 5: a consumed nonce cancels the attempt NONCE_CHANGED, leg not_sent,
  const w=world(),f=await preparedAndSigned(w);w.rpc.s.latest[w.wallet]=1;
  const r=await w.driver.submit({...f.args,dryRun:false});
  assert.equal(r.state,'not_sent');assert.equal(r.code,'NONCE_CHANGED');assert.equal(w.rpc.s.broadcasts.length,0);
- assert.equal(transfer(w,f.attemptId).state,'cancelled');
+ assert.equal(transfer(w,f.attemptId).state,'cancelled');assert.equal(transfer(w,f.attemptId).signed_raw,null);
+});
+test('guard 5: prepare refuses a wallet with contract code before any sign request exists', async()=>{
+ const w=world(),{trade,leg}=tradeLeg();w.rpc.s.code[w.wallet]='0x6080';
+ await assert.rejects(w.driver.prepare({trade,leg,wallet:w.wallet,attemptId:attemptIdFor(trade.id,0,0)}),code('WALLET_HAS_CODE'));
 });
 
 // ---- guard 6: eth_call simulation
@@ -173,7 +177,7 @@ test('guard 7: user gas over 100,000 or a gas price over the cap is refused at p
  }
 });
 test('guard 7: a fee cap lowered after prepare refuses the signed transfer; a top-up fee over the cap is refused', async()=>{
- const a=world(),fa=await preparedAndSigned(a);a.env.YEET_BASE_MAX_FEE_WEI='1000';
+ const a=world(),fa=await preparedAndSigned(a);a.env.YEET_BASE_MAX_FEE_WEI='1000';a.rpc.s.balance[a.wallet]=10n**16n;
  await assert.rejects(a.driver.submit({...fa.args,dryRun:false}),code('INVALID_TRANSACTION_BUDGET'));
  const b=world(),fb=await preparedAndSigned(b);b.rpc.s.gasPrice=200_000_000n;
  await assert.rejects(b.driver.submit({...fb.args,dryRun:false}),code('INVALID_TRANSACTION_BUDGET'));
@@ -189,10 +193,33 @@ test('guard 8: gas wallet unset, key file mode 0644, or key for another address 
   assert.equal(w.driver.readiness().ok,false);assert.ok(w.driver.readiness().reasons.includes('GAS_WALLET_NOT_CONFIGURED'));
  }
 });
-test('guard 8: the user wallet may not be the gas wallet', async()=>{
- const w=world();w.env.YEET_BASE_GAS_WALLET=w.wallet;
+test('guard 8: the user wallet may not be the gas wallet, even when the key file matches it', async()=>{
+ const key=generatePrivateKey(),same=keyFile(key),w=world({user:key});
+ Object.assign(w.env,{YEET_BASE_GAS_WALLET:same.address,YEET_BASE_GAS_WALLET_KEY_FILE:same.file});
  const f=await preparedAndSigned(w);
  await assert.rejects(w.driver.submit({...f.args,dryRun:false}),code('GAS_WALLET_NOT_CONFIGURED'));
+ assert.equal(w.rpc.s.broadcasts.length,0);
+});
+// ---- races: state that changes during the awaited gas-wallet nonce read is caught at the atomic insert
+for(const [name,flip,c] of [
+ ['a gas wallet swapped mid-flight',w=>{const o=keyFile();Object.assign(w.env,{YEET_BASE_GAS_WALLET:o.address,YEET_BASE_GAS_WALLET_KEY_FILE:o.file})},'GAS_WALLET_NOT_CONFIGURED'],
+ ['a per-wallet cap lowered mid-flight',w=>{w.env.YEET_BASE_TOPUP_CAP_RAW='1000'},'TOPUP_CAP_EXCEEDED'],
+ ['the account day count reaching 10 mid-flight',w=>{w.db.prepare('INSERT INTO base_topup_day(day,account_id,count,wei_raw) VALUES(?,?,?,?)').run('2026-11-13',ACCOUNT,10,'0')},'TOPUP_CAP_EXCEEDED'],
+]){
+ test(`race: ${name} is refused ${c} before the top-up is stored or broadcast`, async()=>{
+  const w=world(),f=await preparedAndSigned(w);let once=false;
+  w.rpc.s.hooks.nonce=(a,tag)=>{if(!once&&a===w.gas.address&&tag==='pending'){once=true;flip(w)}};
+  const r=await w.driver.submit({...f.args,dryRun:false});
+  assert.deepEqual([r.state,r.code],['not_sent',c]);assert.equal(w.rpc.s.broadcasts.length,0);assert.equal(topups(w).length,0);
+ });
+}
+test('race: a top-up that went live elsewhere mid-flight makes this one wait, unstored and unsent', async()=>{
+ const w=world(),f=await preparedAndSigned(w);let once=false;
+ w.rpc.s.hooks.nonce=(a,tag)=>{if(!once&&a===w.gas.address&&tag==='pending'){once=true;
+  w.db.prepare("INSERT INTO base_attempt(id,kind,trade_id,leg_idx,account_id,wallet,sender,nonce,tx_json,state,signed_raw,tx_hash,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+   .run('topup:t_other:0:0','gas_topup','t_other',0,ACCOUNT,'0x'+'12'.repeat(20),w.gas.address,0,'{"value":"1","gas":"21000","maxFeePerGas":"1","maxPriorityFeePerGas":"1"}','submitted','0x02','0x'+'ab'.repeat(32),0,0)}};
+ const r=await w.driver.submit({...f.args,dryRun:false});
+ assert.equal(r.state,'pending');assert.equal(w.rpc.s.broadcasts.length,0);assert.equal(topups(w).length,1);
 });
 test('guard 8: signed top-up bytes that do not parse back to the prepared top-up are never stored or broadcast', async()=>{
  const w=world({loadWallet:cfg=>{const g=loadGasWallet(cfg);return {address:g.address,sign:tx=>g.sign({...tx,to:'0x'+'88'.repeat(20)})}}});
@@ -241,8 +268,8 @@ test('guard 11: a gas wallet that would drop under the floor refuses TOPUP_UNAVA
 });
 
 // ---- guard 12: one top-up in flight, at most 3 failures per leg
-test('guard 12: a second trade waits while a top-up is in flight; no second gas-wallet nonce is used', async()=>{
- const w=world(),a=await preparedAndSigned(w);
+test('guard 12: a second trade waits while a top-up is in flight; no second gas-wallet nonce or signature is used', async()=>{
+ const g=counting(),w=world({loadWallet:g.loadWallet}),a=await preparedAndSigned(w);
  await w.driver.submit({...a.args,dryRun:false});
  const other=privateKeyToAccount(generatePrivateKey());
  const {trade,leg}=tradeLeg({tradeId:'t_cccccccccccccccccccc'}),id=attemptIdFor(trade.id,0,0);
@@ -250,7 +277,7 @@ test('guard 12: a second trade waits while a top-up is in flight; no second gas-
  const req=await w.driver.prepare({trade,leg,wallet:other.address,attemptId:id});
  const signed=await other.signTransaction(txFromPayload(req.payload));
  const r=await w.driver.submit({trade,leg,wallet:other.address,attemptId:id,signed,dryRun:false});
- assert.equal(r.state,'pending');assert.equal(topups(w).length,1);assert.equal(w.rpc.s.broadcasts.length,1);
+ assert.equal(r.state,'pending');assert.equal(topups(w).length,1);assert.equal(w.rpc.s.broadcasts.length,1);assert.equal(g.c.signs,1);
  assert.equal(transfer(w,id).state,'awaiting_gas');
  await mine(w.rpc,w.rpc.s.broadcasts[0]);
  await w.driver.recover({now:T0+1000});
@@ -289,6 +316,25 @@ test('an unmined top-up is replaced at the same nonce with both fees raised at l
  await mine(w.rpc,rows[1].signed_raw);await w.driver.recover({now:T0+33_000});
  const after=topups(w);assert.equal(after[1].state,'confirmed');assert.equal(after[0].state,'failed');assert.equal(after[0].code,'SUPERSEDED_SIBLING');
  assert.equal(w.rpc.s.broadcasts.at(-1),f.signed);
+});
+test('replacement whose raised fee passes YEET_BASE_MAX_FEE_WEI is not signed; the stored bytes are replayed', async()=>{
+ const w=world({rpc:{gasPrice:60_000_000n}}),f=await preparedAndSigned(w);await w.driver.submit({...f.args,dryRun:false});
+ await w.driver.recover({now:T0+31_000});
+ assert.equal(topups(w).length,1);assert.equal(w.rpc.s.broadcasts.length,2);assert.equal(w.rpc.s.broadcasts[1],w.rpc.s.broadcasts[0]);
+});
+test('replacement over the per-wallet cap is not signed, alerts once, and the stored bytes keep replaying', async()=>{
+ const w=world(),f=await preparedAndSigned(w);await w.driver.submit({...f.args,dryRun:false});
+ const t=parseTransaction(w.rpc.s.broadcasts[0]);
+ w.env.YEET_BASE_TOPUP_CAP_RAW=String(t.value+21000n*t.maxFeePerGas+w.rpc.s.l1);
+ await w.driver.recover({now:T0+31_000});await w.driver.recover({now:T0+62_000});
+ assert.equal(topups(w).length,1);assert.equal(w.alerts.filter(a=>a.kind==='gas_topup_replace_capped').length,1);
+ assert.equal(w.rpc.s.broadcasts.length,3);
+});
+test('replacement over the global daily cap is not signed', async()=>{
+ const w=world(),f=await preparedAndSigned(w);await w.driver.submit({...f.args,dryRun:false});
+ w.env.YEET_BASE_TOPUP_GLOBAL_DAILY_RAW=w.db.prepare('SELECT wei_raw FROM base_topup_day').get().wei_raw;
+ await w.driver.recover({now:T0+31_000});
+ assert.equal(topups(w).length,1);
 });
 test('a lost broadcast leaves the top-up uncertain; recovery replays the same bytes', async()=>{
  const w=world(),f=await preparedAndSigned(w);w.rpc.s.broadcastError='socket hang up';
