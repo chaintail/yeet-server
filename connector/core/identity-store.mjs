@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
+import { checkUsername, UsernameError } from "./username.mjs";
 let db;
 export const validAccount = (id) =>
   typeof id === "string" && /^yeet-privy-[a-zA-Z0-9_-]{1,80}$/.test(id);
@@ -18,7 +19,7 @@ function database() {
     { defensive: true, allowExtension: false, timeout: 2000 },
   );
   db.exec(
-    "PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY,created_at INTEGER NOT NULL) STRICT; CREATE TABLE IF NOT EXISTS identity_links(provider TEXT NOT NULL,app_id TEXT NOT NULL,did TEXT NOT NULL,account_id TEXT NOT NULL REFERENCES accounts(id),PRIMARY KEY(provider,app_id,did)) STRICT; CREATE UNIQUE INDEX IF NOT EXISTS identity_account_unique ON identity_links(account_id);",
+    "PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY,created_at INTEGER NOT NULL) STRICT; CREATE TABLE IF NOT EXISTS identity_links(provider TEXT NOT NULL,app_id TEXT NOT NULL,did TEXT NOT NULL,account_id TEXT NOT NULL REFERENCES accounts(id),PRIMARY KEY(provider,app_id,did)) STRICT; CREATE UNIQUE INDEX IF NOT EXISTS identity_account_unique ON identity_links(account_id); CREATE TABLE IF NOT EXISTS usernames(account_id TEXT PRIMARY KEY REFERENCES accounts(id),name TEXT NOT NULL,name_key TEXT NOT NULL UNIQUE,updated_at INTEGER NOT NULL) STRICT;",
   );
   return db;
 }
@@ -91,4 +92,28 @@ export function didFor(id) {
   return database()
     .prepare("SELECT did FROM identity_links WHERE account_id=? AND app_id=?")
     .get(id, appId)?.did;
+}
+/** The username the person set (username.mjs), or undefined. */
+export function usernameOf(id) {
+  if (!appId || !validAccount(id)) return undefined;
+  return database().prepare("SELECT name FROM usernames WHERE account_id=?").get(id)?.name;
+}
+/** Sets an existing account's username and returns it as stored. Throws UsernameError: INVALID_ARGUMENT,
+ *  USERNAME_NOT_ALLOWED, or USERNAME_TAKEN when another account holds it in any letter case. */
+export function setUsername(id, value, { now = Date.now() } = {}) {
+  const { name, key } = checkUsername(value);
+  if (!account(id)) throw new UsernameError("INVALID_ARGUMENT");
+  const conn = database();
+  conn.exec("BEGIN IMMEDIATE");
+  try {
+    const holder = conn.prepare("SELECT account_id FROM usernames WHERE name_key=?").get(key);
+    if (holder && holder.account_id !== id) throw new UsernameError("USERNAME_TAKEN");
+    conn.prepare("DELETE FROM usernames WHERE account_id=?").run(id);
+    conn.prepare("INSERT INTO usernames VALUES(?,?,?,?)").run(id, name, key, now);
+    conn.exec("COMMIT");
+    return name;
+  } catch (e) {
+    conn.exec("ROLLBACK");
+    throw e;
+  }
 }

@@ -83,7 +83,8 @@ export function openXp({file=':memory:',secret,now=Date.now}={}){
    * but no later price, so no gain since the buy can be stated truthfully. An empty list until a price history exists. */
   recentWins:()=>[],
   doSpin:who=>spin.spin(who),
-  board:(kind,who)=>leaderboard(db,{kind,me:who,at:now()}),
+  /** names(accountId): the name a row shows; the default name when left out. */
+  board:(kind,who,names)=>leaderboard(db,{kind,me:who,at:now(),...(names?{names}:{})}),
  };
 }
 

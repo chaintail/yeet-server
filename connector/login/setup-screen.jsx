@@ -1,7 +1,11 @@
-// The waiting screen while YEET sets up the wallets: an animated progress bar (CSS in as/viewer/auth-pages.css,
-// still under prefers-reduced-motion) and the step list from wallet-setup.js. No Privy here, so it renders anywhere.
+// The waiting screen while YEET sets up the wallets: the YEET mark charges, the bar fills with running dashes, and
+// the step list from wallet-setup.js ticks off (CSS in as/viewer/auth-pages.css; still under prefers-reduced-motion).
+// No Privy here, so it renders anywhere.
 import React from "react";
 import { STEPS } from "./wallet-setup.js";
+
+/** How far the bar is along at each step, in percent. */
+const FILL = { check: 8, base: 30, solana: 58, link: 84 };
 
 /**
  * step: "base" | "solana" | "link" | "check". done: step ids already finished. slow: the setup has taken longer than
@@ -9,14 +13,22 @@ import { STEPS } from "./wallet-setup.js";
  */
 export function SetupProgress({ step, done = [], slow = false, failed = false, message = "", onRetry }) {
   const active = STEPS.find((s) => s.id === step);
-  const headline = active ? `${active.text}…` : "Checking your YEET wallets…";
+  const complete = STEPS.every((s) => done.includes(s.id));
+  const headline = complete ? "Your wallets are ready" : active ? `${active.text}…` : "Checking your YEET wallets…";
+  const fill = complete ? 100 : (FILL[step] ?? FILL.check);
+  const state = failed ? "setup stopped" : complete ? "setup complete" : "setup";
   return (
-    <div className="setup" data-step={step}>
-      <p className="setup-step lead" role="status" aria-live="polite">
-        {headline}
-      </p>
+    <div className={state} data-step={step}>
+      <div className="setup-hero">
+        <span className="setup-mark" aria-hidden="true">
+          <img src="/account/brand/mark.svg" alt="" width="30" height="30" />
+        </span>
+        <p className="setup-step lead" role="status" aria-live="polite">
+          {headline}
+        </p>
+      </div>
       <div className={failed ? "setup-bar stopped" : "setup-bar"} aria-hidden="true">
-        <span />
+        <span style={{ "--p": `${fill}%` }} />
       </div>
       <ol className="setup-steps">
         {STEPS.map((s) => {

@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 import { PrivyProvider, usePrivy, useFundWallet } from "@privy-io/react-auth";
 import { embeddedWallets, privyConfig } from "./privy-app.jsx";
 import { DEFAULT_AMOUNT, baseUsdcReader, formatUsdc, fundOptions, validAmount } from "./fund-balance.js";
+import { Swap } from "./screen.jsx";
 
 const SIGN_IN = "/account/login?next=fund";
 
@@ -30,6 +31,24 @@ function useBalance(reader, address) {
 function Fund({ reader }) {
   const { ready, authenticated, user } = usePrivy();
   const address = embeddedWallets(user).base?.address;
+  useEffect(() => {
+    if (ready && !authenticated) location.assign(SIGN_IN);
+  }, [ready, authenticated]);
+  const screen = !ready || !authenticated ? "loading" : address ? "fund" : "waiting";
+  return (
+    <Swap id={screen}>
+      {screen === "loading" ? (
+        <p role="status">Loading your YEET wallet…</p>
+      ) : screen === "waiting" ? (
+        <p role="status">Your YEET wallets are still being set up. Reload this page in a moment.</p>
+      ) : (
+        <FundWallet reader={reader} address={address} />
+      )}
+    </Swap>
+  );
+}
+
+function FundWallet({ reader, address }) {
   const [balance, refreshBalance] = useBalance(reader, address);
   const [amount, setAmount] = useState(DEFAULT_AMOUNT);
   const [busy, setBusy] = useState(false);
@@ -40,17 +59,6 @@ function Fund({ reader }) {
     onUserExited: () => closed.current?.(),
   });
 
-  useEffect(() => {
-    if (ready && !authenticated) location.assign(SIGN_IN);
-  }, [ready, authenticated]);
-
-  if (!ready || !authenticated) return <p role="status">Loading your YEET wallet…</p>;
-  if (!address)
-    return (
-      <p role="status">
-        Your YEET wallets are still being set up. Reload this page in a moment.
-      </p>
-    );
 
   async function copy() {
     try {
@@ -92,13 +100,17 @@ function Fund({ reader }) {
 
   return (
     <>
-      <p>Add USDC on Base to your YEET wallet. YEET trades from this balance.</p>
-      <label htmlFor="fund-address">Your YEET wallet on Base</label>
-      <input id="fund-address" readOnly value={address} onFocus={(e) => e.target.select()} />
-      <button type="button" className="secondary" onClick={copy}>
-        {copied ? "Copied" : "Copy address"}
-      </button>
-      <p>Send USDC on Base to this address.</p>
+      <p className="lead">Add USDC on Base to your YEET wallet. YEET trades from this balance.</p>
+      <dl className="balance">
+        <dt>Balance</dt>
+        <dd className={balance.status === "ready" ? undefined : "quiet"}>
+          {balance.status === "ready"
+            ? `${formatUsdc(balance.units)} USDC`
+            : balance.status === "error"
+              ? "Unavailable right now"
+              : "Checking…"}
+        </dd>
+      </dl>
       <label htmlFor="fund-amount">Amount in US dollars</label>
       <input
         id="fund-amount"
@@ -110,22 +122,21 @@ function Fund({ reader }) {
       <button type="button" disabled={busy} onClick={addFunds}>
         {busy ? "Adding funds…" : "Add funds"}
       </button>
-      <p>Pay by card, Apple Pay or Google Pay through Coinbase, where your device and region support it.</p>
-      <dl>
-        <dt>Balance</dt>
-        <dd>
-          {balance.status === "ready"
-            ? `${formatUsdc(balance.units)} USDC`
-            : balance.status === "error"
-              ? "Balance unavailable right now."
-              : "Checking…"}
-        </dd>
-      </dl>
+      <p className="hint fund-ways">Pay by card, Apple Pay or Google Pay through Coinbase, where your device and region support it.</p>
+      <p role="status" className={message ? "saved" : undefined}>{message}</p>
+      <label htmlFor="fund-address">Or send USDC on Base to your YEET wallet</label>
+      <div className="row">
+        <input id="fund-address" readOnly value={address} onFocus={(e) => e.target.select()} />
+        <button type="button" className="secondary" onClick={copy}>
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
       <button type="button" className="secondary" disabled={balance.status === "loading"} onClick={refreshBalance}>
         Refresh balance
       </button>
-      <p role="status">{message}</p>
-      <p>When you are done, go back to ChatGPT to trade.</p>
+      <p className="hint back">
+        When you are done, go back to ChatGPT to trade. <a href="/account/">Set your username</a>
+      </p>
     </>
   );
 }
@@ -142,5 +153,9 @@ try {
     </PrivyProvider>,
   );
 } catch {
-  root.textContent = "Adding funds is unavailable right now. Please try again later.";
+  const line = document.createElement("p");
+  line.className = "notice";
+  line.setAttribute("role", "alert");
+  line.textContent = "Adding funds is unavailable right now. Please try again later.";
+  root.replaceChildren(line);
 }

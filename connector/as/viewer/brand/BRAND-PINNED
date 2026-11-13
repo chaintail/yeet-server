@@ -1,0 +1,9 @@
+repo: chaintail/yeet-win
+commit: fa3ccc7023e9964c19b6aeecd25c0a3747b26288
+files:
+  brand/tokens.css -> tokens.css
+  brand/logo.svg -> logo.svg
+  brand/mark.svg -> mark.svg
+  brand/app-icon.svg -> app-icon.svg
+  apps/landing/type-data.js -> type-data.js
+  brand/app-icon.svg -> ../icon.svg

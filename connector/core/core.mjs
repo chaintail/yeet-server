@@ -1,4 +1,6 @@
-import {initializeIdentityStore,resolveIdentity,account,didFor} from './identity-store.mjs';
+import {initializeIdentityStore,resolveIdentity,account,didFor,usernameOf,setUsername} from './identity-store.mjs';
+import {usernameFailure} from './username.mjs';
+import {handle} from './xp/board.mjs';
 import {createWalletEnsurer,walletSetupConfig,walletSetupMessage} from './trade/wallet-ensure.mjs';
 import express from 'express';
 import {introspectBearer,validatePrincipal} from '#shared/introspection.mjs';
@@ -49,6 +51,7 @@ export const ROUTE_SCOPES=Object.freeze([
  ['GET',/^\/portfolio$/,'yeet:read'],
  ['GET',/^\/leaderboard\/(xp|week)$/,'yeet:read'],
  ['POST',/^\/spin$/,'yeet:write'],
+ ['POST',/^\/username$/,'yeet:write'],
 ]);
 export const routeScope=(method,path)=>ROUTE_SCOPES.find(([m,p])=>m===method&&p.test(path))?.[2]??null;
 app.use((q,r,next)=>{if(q.role==='mcp'){const needed=routeScope(q.method,q.path);if(!needed||!q.principal.scopes.has(needed))return r.sendStatus(403)}next()});
@@ -106,7 +109,19 @@ function xpRoute(tool,fn){
   catch(e){console.error(JSON.stringify({event:'xp_route_failed',route:q.route?.path,error:String(e?.message??e).slice(0,200)}));unavailable(r)}
  };
 }
-app.get('/leaderboard/:board',xpRoute('yeet_leaderboard',(x,who,a)=>x.board(a.board??'xp',who)));
+/** The name a board shows: the username the person set, otherwise the default name. */
+export const boardName=id=>usernameOf(id)??handle(id);
+app.get('/leaderboard/:board',xpRoute('yeet_leaderboard',(x,who,a)=>x.board(a.board??'xp',who,boardName)));
 app.post('/spin',xpRoute('daily_spin',(x,who)=>x.doSpin(who)));
+// Username (username.mjs): read by the sign-in server's account page; set from that page or by yeet_set_username.
+app.get('/username',(q,r)=>{if(q.role!=='as')return r.sendStatus(403);r.json({username:usernameOf(q.subject)??null,name:boardName(q.subject)})});
+app.post('/username',(q,r)=>{
+ if(q.role!=='as'&&q.role!=='mcp')return r.sendStatus(403);
+ try{const username=setUsername(q.subject,q.body?.username);r.json({username})}
+ catch(e){
+  if(e?.name==='UsernameError')return r.status(e.code==='USERNAME_TAKEN'?409:400).json(usernameFailure(e.code));
+  console.error(JSON.stringify({event:'username_failed',error:String(e?.message??e).slice(0,200)}));unavailable(r);
+ }
+});
 app.use((_e,_q,r,_n)=>r.status(400).json({error:'invalid request'}));
 export const server=app.listen(port('CORE_PORT',38316),process.env.LISTEN_HOST||'0.0.0.0');

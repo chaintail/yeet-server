@@ -1,0 +1,93 @@
+/* YEET design tokens. Dark first. The copy the site serves is apps/landing/tokens.css; edit here, then copy. */
+:root {
+  color-scheme: dark;
+
+  /* ground */
+  --ink-950: #06071C;
+  --ink-900: #0A0C2B;
+  --ink: #0F1240;
+  --ink-700: #181D5E;
+  --ink-600: #232A7A;
+  --blue: #2430FF;
+  --blue-deep: #1820C4;
+  --blue-lift: #4A55FF;
+
+  /* brand: the logo, XP, highlights */
+  --yellow: #FFE03A;
+  --yellow-lift: #FFEE78;
+  --yellow-deep: #F2C200;
+
+  /* the two actions */
+  --yeet: #22E27A;
+  --yeet-lift: #8AF7B6;
+  --yeet-deep: #0FB95C;
+  --skeet: #FF4D8D;
+  --skeet-lift: #FF88B4;
+  --skeet-deep: #EE2E77;
+
+  /* text and lines on dark */
+  --text: #F4F5FF;
+  --muted: #A9AEDD;
+  --dim: #6E74B2;
+  --line: rgba(255, 255, 255, .12);
+  --line-strong: rgba(255, 255, 255, .22);
+  --surface: rgba(15, 18, 64, .72);
+  --surface-solid: #12164C;
+
+  /* light surfaces (cards inside ChatGPT, print) */
+  --paper: #FFFFFF;
+  --sky: #EEF0FF;
+  --line-light: #DADDF5;
+  --muted-light: #5A5E8A;
+
+  /* price moves */
+  --up: #22E27A;
+  --down: #FF6B8F;
+
+  /* coin chips */
+  --coin-1: #FFB238;
+  --coin-2: #F27BB3;
+  --coin-3: #9C84FF;
+  --coin-4: #38D1C0;
+  --coin-5: #E3A86B;
+
+  /* type */
+  --font-display: "Archivo", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --text-hero: clamp(3.5rem, 17.5vw, 9.5rem);
+  --text-h2: clamp(2rem, 8.6vw, 4rem);
+  --text-h3: 1.25rem;
+  --text-body: 1.0625rem;
+  --text-small: .875rem;
+  --leading-display: .9;
+  --leading-body: 1.5;
+
+  /* shape */
+  --r-chip: 999px;
+  --r-btn: 18px;
+  --r-card: 22px;
+  --r-tile: 28px;
+
+  /* depth: soft, never a hard offset */
+  --shadow-card: 0 20px 44px -24px rgba(2, 3, 20, .8);
+  --shadow-pop: 0 28px 60px -20px rgba(2, 3, 20, .85);
+  --glow-yeet: rgba(34, 226, 122, .55);
+  --glow-skeet: rgba(255, 77, 141, .55);
+  --glow-yellow: rgba(255, 224, 58, .45);
+
+  /* motion */
+  --dur-press: 120ms;
+  --dur-out: 420ms;
+  --dur-in: 760ms;
+  --dur-glint: 850ms;
+  --dur-edge: 9s;
+  --dur-breathe: 4.8s;
+  --dur-stretch: 5.2s;
+  --dur-drift: 22s;
+  --stagger: 70ms;
+  --ease-out: cubic-bezier(.2, .8, .2, 1);
+  --ease-in: cubic-bezier(.6, 0, .9, .4);
+  --ease-settle: cubic-bezier(.3, 1.25, .5, 1);
+  --ease-glint: cubic-bezier(.45, 0, .2, 1);
+}

@@ -15,7 +15,7 @@ export function privyConfig() {
     appearance: {
       logo: <strong>YEET</strong>,
       theme: "dark",
-      accentColor: "#ffe14d",
+      accentColor: "#FFE03A",
       walletList: [],
     },
     loginMethods: [...LOGIN_METHODS],

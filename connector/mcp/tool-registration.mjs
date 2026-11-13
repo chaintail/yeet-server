@@ -18,6 +18,8 @@ const ROUTES={
  skeet_propose:args=>['/proposals/skeet',args],
  yeet_leaderboard:({board='xp'})=>[`/leaderboard/${board}`],
  daily_spin:()=>['/spin',{}],
+ // Registered once the pinned contract lists the tool.
+ yeet_set_username:({username})=>['/username',{username}],
 };
 /** P0 and P1 are always registered; P2 (leaderboard, spin) only with YEET_P2=1. */
 export const registeredTools=(env=process.env)=>Object.values(toolSpecs).filter(t=>t.priority!=='P2'||env.YEET_P2==='1');
