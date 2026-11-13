@@ -43,11 +43,11 @@ export function fakeSolanaRpc({feePayerLamports=50_000_000}={}){
 }
 
 /** The pipeline on fakes. `holdings` are the person's Solana token accounts (default 100 USDC and 1,000 WIF). */
-export function fakePipeline({env={},now=fakeClock(),oneclick=fakeOneClick(),holdings,rpc=fakeSolanaRpc(),feePayer=fakeFeePayer(),floor,logs=[],db=openTradeDb(':memory:')}={}){
+export function fakePipeline({env={},now=fakeClock(),oneclick=fakeOneClick(),holdings,rpc=fakeSolanaRpc(),feePayer=fakeFeePayer(),floor,logs=[],db=openTradeDb(':memory:'),landing={landingWatchMs:0}}={}){
  const balances=fakeBalances({holdings:holdings??[{mint:USDC_SOLANA,raw:100_000_000n,decimals:6},{mint:WIF_MINT,raw:1_000_000_000n,decimals:6}]});
  const directory=staticWalletDirectory({[ALICE.accountId]:{base:{address:BASE_WALLET},solana:{address:aliceWallet.address}},[BOB.accountId]:{base:{address:'0x27602fd697f91d31fe551b26a3b12b113789477e'},solana:{address:bobWallet.address}}});
  const fullEnv={YEET_LIVE:'1',...env};
- const p=createPipeline({db,env:fullEnv,client:oneclick,directory,balances,now,trackerIntervalMs:0,log:l=>logs.push(l),
+ const p=createPipeline({db,env:fullEnv,client:oneclick,directory,balances,now,trackerIntervalMs:0,log:l=>logs.push(l),...landing,
   driverOverrides:{rpc,signatureStatus:rpc.signatureStatus,historySignatureStatus:rpc.signatureStatus,feePayer,...(floor!==undefined?{floor}:{})}});
  return {p,db,env:fullEnv,now,oneclick,rpc,feePayer,balances,logs};
 }
@@ -57,7 +57,7 @@ export function fakePipeline({env={},now=fakeClock(),oneclick=fakeOneClick(),hol
 export function fakeRuntime({env={},oneclick=fakeOneClick(),holdings,usdc,rpc=fakeSolanaRpc(),feePayer=fakeFeePayer(),wallet=aliceWallet}={}){
  const balances=fakeBalances({...(usdc!==undefined?{usdc}:{}),holdings:holdings??[{mint:USDC_SOLANA,raw:100_000_000n,decimals:6},{mint:WIF_MINT,raw:1_000_000_000n,decimals:6}]});
  const directory={stable:true,async lookup(){return {base:{address:BASE_WALLET,walletId:null,signerState:'none',policyId:null},solana:{address:wallet.address,walletId:null,signerState:'none',policyId:null}}}};
- const overrides={client:oneclick,directory,balances,env:{...process.env,YEET_LIVE:'1',...env},trackerIntervalMs:0,
+ const overrides={client:oneclick,directory,balances,env:{...process.env,YEET_LIVE:'1',...env},trackerIntervalMs:0,landingWatchMs:0,
   driverOverrides:{rpc,signatureStatus:rpc.signatureStatus,historySignatureStatus:rpc.signatureStatus,feePayer}};
  /** Mark every landed signature confirmed, the way the chain would. */
  const confirmSent=()=>{for(const b64 of rpc.sent)rpc.statuses.set(base58Encode(decodeTransaction(Buffer.from(b64,'base64')).signatures[0]),{status:'confirmed',commitment:'confirmed',slot:5})};

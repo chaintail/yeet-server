@@ -55,7 +55,8 @@ export function liveGate(env=process.env){
 const chainEnv=(env,name)=>{const v=env[name]?.trim()||'sol';if(!CHAINS.includes(v))throw Error(`Invalid ${name}`);return v};
 
 export function createPipeline({db,env=process.env,client,wallets,directory,balances,drivers,ledger,catalog=CATALOG,now=Date.now,fetch=globalThis.fetch,didFor,
- onSettled,trackerIntervalMs=5000,log=line=>console.log(line),driverOverrides,liveBroadcast=true}){
+ onSettled,trackerIntervalMs=5000,log=line=>console.log(line),driverOverrides,liveBroadcast=true,
+ landingPollMs=1000,landingWatchMs=60_000,sleep=ms=>new Promise(r=>{const h=setTimeout(r,ms);h.unref?.()})}){
  const limits=limitsFromEnv(env);
  const gateFor=liveGate(env);
  const buyChain=chainEnv(env,'YEET_BUY_CHAIN'),sellChain=chainEnv(env,'YEET_SELL_CHAIN');
@@ -126,6 +127,21 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   if(l.oneclick_status&&l.oneclick_status!=='PENDING_DEPOSIT'){done();return}
   try{tracker.apply(t.id,idx,await client.submitDeposit(l.deposit_address,l.tx_hash,l.deposit_memo??undefined));done()}
   catch(e){ledger.note(t.id,`leg ${idx}: deposit/submit: ${e?.message}`)}
+ }
+ /** Polls one sent attempt every landingPollMs for up to landingWatchMs; /deposit/submit as soon as it has landed.
+  * Not awaited by submit; the tracker pass stays the fallback. `landings()` awaits the open watches (tests, ops). */
+ const watches=new Set();
+ function watchLanding(t,idx,attemptId,d){
+  if(!(landingWatchMs>0))return;
+  const run=(async()=>{
+   for(let i=0,n=Math.ceil(landingWatchMs/Math.max(1,landingPollMs));i<n;i++){
+    await sleep(landingPollMs);
+    let r;try{r=await d.recoverAttempt(attemptId)}catch{continue}
+    if(r?.state==='sent'){await depositSubmit(t,idx);event({event:'deposit_submitted_on_landing',trade:t.id,leg:idx});return}
+    if(!['pending','confirming'].includes(r?.state))return;
+   }
+  })().catch(e=>ledger.note(t.id,`leg ${idx}: landing watch: ${e?.message}`));
+  watches.add(run);run.finally(()=>watches.delete(run));
  }
  const pausedReason=(t)=>{try{gateFor(t.origin_chain??'sol')(t.account_id);return null}catch(e){return e?.detail??'paused'}};
 
@@ -262,6 +278,9 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   try{r=await d.submit({trade:t,leg:l,wallet,attemptId:attempt_id,signed,dryRun,now:now()})}
   finally{inFlight.delete(t.id)}
   if(r.state==='sent')await depositSubmit(t,leg);
+  // Sent but not yet landed (Solana answers `pending` after the broadcast): watch this attempt and tell 1Click the
+  // moment it lands, instead of on the next tracker pass.
+  else if(!dryRun&&r.state==='pending'&&r.txHash&&d.recoverAttempt)watchLanding(t,leg,attempt_id,d);
   if(!dryRun){settle(t.id);try{tracker.refresh(t.id)}catch(e){ledger.note(t.id,`refresh: ${e?.message}`)}}
   event({event:'signature_submitted',trade:t.id,leg,attempt:attempt_id.slice(0,12),state:r.state,dry_run:dryRun});
   const fresh=r.state==='expired'?await signRequests(trade(t.id)):[];
@@ -300,7 +319,7 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
 
  return {
   limits,wallets,proposals,tracker,codes,ledger,drivers,buyChain,sellChain,
-  execute,submit,cancel,signRequests:async(ctx,id)=>signRequests(owned(ctx,id)),recoverTrade,
+  execute,submit,cancel,landings:()=>Promise.allSettled([...watches]),signRequests:async(ctx,id)=>signRequests(owned(ctx,id)),recoverTrade,
   /** driver-interface recover over every driver (ops). */
   async recover(){const out=[];for(const d of Object.values(drivers))out.push(...await d.recover({now:now()}));return out},
   propose:(ctx,body)=>proposals.propose(ctx,body),

@@ -8,11 +8,13 @@ import {fakeOneClick} from '../trade/fakes.mjs';
 import {decodeTransaction,encodeTransaction,associatedTokenAddress,USDC_SOLANA,TOKEN_PROGRAM} from './solana/message.mjs';
 import {spentToday} from '../trade/limits.mjs';
 import {limitsFromEnv} from '../trade/limits.mjs';
+import {base58Encode} from '../trade/router.mjs';
 
 const basket={request_id:'r1',amount_usdc:'10',legs:[{symbol:'WIF',parts:1},{symbol:'BOME',parts:1}]};
 const exec=(p,ctx,prop)=>p.execute(ctx,{proposal_id:prop.proposal_id,revision:prop.revision,confirm:prop.confirm.code});
 const sub=(p,ctx,req,signed,opts)=>p.submit(ctx,{trade_id:req.trade_id,leg:req.leg,attempt_id:req.attempt_id,signed},opts);
 async function code(pr,c){await assert.rejects(pr,e=>e.code===c,`expected ${c}`)}
+const decodeSig=b64=>base58Encode(decodeTransaction(Buffer.from(b64,'base64')).signatures[0]);
 const leg=(db,id,idx)=>db.prepare('SELECT * FROM trade_legs WHERE trade_id=? AND idx=?').get(id,idx);
 const confirmAll=(rpc,x)=>{for(const l of x.legs)if(l.tx_hash)rpc.statuses.set(l.tx_hash,{status:'confirmed',commitment:'confirmed',slot:5})};
 /** Review finding 2: a not-sent BUY amount stays spent until the deposit deadline passes with 1Click at PENDING_DEPOSIT. */
@@ -64,6 +66,34 @@ test('BUY all-Solana: sign requests, person signs, fee payer co-signs, persisted
  assert.equal(p.status(ALICE,x.trade_id).status,'success');
  const st=p.status(ALICE,x.trade_id);
  assert.ok(st.legs.every(l=>l.origin_tx));
+});
+
+test('deposit notice on landing: /deposit/submit goes out as soon as the leg lands, with no tracker pass',async()=>{
+ let polls=0,rpcRef;
+ // The chain confirms on the second landing check.
+ const sleep=async()=>{polls++;if(polls===2)for(const b64 of rpcRef.sent)rpcRef.statuses.set(decodeSig(b64),{status:'confirmed',commitment:'confirmed',slot:5})};
+ const f=fakePipeline({landing:{landingPollMs:1,landingWatchMs:10,sleep}});rpcRef=f.rpc;
+ const {p,db,oneclick}=f;
+ const x=await exec(p,ALICE,await p.propose(ALICE,{...basket,legs:[{symbol:'WIF',parts:1}],amount_usdc:'5'}));
+ const s=await sub(p,ALICE,x.sign_requests[0],signAs(aliceWallet,x.sign_requests[0]));
+ assert.equal(s.legs[0].send_status,'signing');
+ await p.landings();
+ assert.equal(polls,2,'stops watching once landed');
+ assert.equal(leg(db,x.trade_id,0).send_status,'sent');
+ assert.equal(leg(db,x.trade_id,0).deposit_submitted,1);
+ assert.deepEqual(oneclick.calls.submit.map(c=>c.txHash),[s.legs[0].tx_hash]);
+ // The tracker pass afterwards sends no second notice.
+ await p.tracker.pollOnce();
+ assert.equal(oneclick.calls.submit.length,1);
+});
+
+test('deposit notice on landing: a dry run starts no watch',async()=>{
+ let polls=0;
+ const {p}=fakePipeline({landing:{landingPollMs:1,landingWatchMs:10,sleep:async()=>{polls++}}});
+ const x=await exec(p,ALICE,await p.propose(ALICE,{...basket,legs:[{symbol:'WIF',parts:1}],amount_usdc:'5'}));
+ await sub(p,ALICE,x.sign_requests[0],signAs(aliceWallet,x.sign_requests[0]),{dryRun:true});
+ await p.landings();
+ assert.equal(polls,0);
 });
 
 test('resubmitting the same signature returns the same hash: no second co-sign, no second send',async()=>{
