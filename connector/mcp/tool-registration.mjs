@@ -6,6 +6,8 @@ import {registerWidgets,toolMeta,CONFIRM_META_KEY} from './widgets.mjs';
 import {instructions} from './instructions.mjs';
 import {guidanceFor} from './guidance.mjs';
 import {SIGNER_META_KEY,signerMetaFromEnv} from '#shared/signing.mjs';
+import {staleness as processStaleness,staleKey,appRefresh,withRefresh,BUILD_META_KEY} from './refresh.mjs';
+import {refreshGuidance} from './guidance.mjs';
 
 /** Core route per tool: route(args) -> [core route, body or undefined for GET]. Everything else about a tool (title,
  * description, schemas, annotations, scope, card, visibility, widget access, card-only confirm) is the contract's. */
@@ -77,7 +79,7 @@ for(const t of TOOLS)if(!t.route)throw Error(`No core route for contract tool ${
 /** Results that carry `_meta['yeet/signer']` (CARD-SIGNING.md section 2.3a): the overview (its card checks the device
  * sign-in and shows the sign-in when needed), the proposals the card trades from and the trade answers it follows. Card-only, like the confirm code; never in structuredContent or content. */
 export const SIGNER_TOOLS=new Set(['yeet_overview','yeet_propose','yeet_quote','skeet_propose','execute_trade','submit_trade_signature','trade_status']);
-export function createMcpServer({token,callCore,env=process.env}) {
+export function createMcpServer({token,callCore,env=process.env,staleness=processStaleness}) {
  const server=new McpServer({name:'yeet',version:'0.2.0'},{instructions});
  // Signing set up here (https RESOURCE, PRIVY_APP_ID, vendored signer): the signing cards declare the signing domains
  // and the trade results tell the card where the signer and the signing page are. Otherwise both stay off.
@@ -90,9 +92,15 @@ export function createMcpServer({token,callCore,env=process.env}) {
   const {name,scope}=tool,schemas=toolSchemas[name],route=ROUTES[name];
   const output=zodSchema(z,schemas.output);
   server.registerTool(name,{title:tool.title,description:tool.description,inputSchema:zodSchema(z,schemas.input),outputSchema:output,
-   annotations:tool.annotations,_meta:{...meta(scope),...toolMeta(name)}},async args=>{
+   annotations:tool.annotations,_meta:{...meta(scope),...toolMeta(name)}},async(input,extra)=>{
    const granted=token.scope?.split(' ')??[];
    if(!granted.includes(scope))return toolError({error:'REAUTH_REQUIRED'},ctx);
+   // card_build (refresh.mjs): which card build made this call. Never sent on to core. A call without it on a tool the
+   // model can see is the model's own call: its result is where the model is told about a stale app, once.
+   const {card_build:cardBuild,...args}=input??{};
+   const key=staleKey(token,extra?._meta);
+   staleness.note(key,{cardBuild,cardOnly:!tool.visible});
+   const tellRefresh=tool.visible&&cardBuild===undefined&&staleness.take(key);
    try{
     const [path,body]=route(args);
     const result=await callCore(path,body);
@@ -102,11 +110,14 @@ export function createMcpServer({token,callCore,env=process.env}) {
     const listed=CUT_TO_CONTRACT.has(name)&&schemas.output.properties?new Set(Object.keys(schemas.output.properties)):null;
     const data=isObject?Object.fromEntries(Object.entries(result).filter(([k])=>k!=='confirm'&&k!=='guidance'&&(!listed||listed.has(k)))):result;
     // Agent guidance (guidance.mjs): for the model, in structuredContent (the card ignores it) and in the text it reads.
-    const guidance=isObject?guidanceFor(name,data,ctx):undefined;
-    const parsed=output.safeParse(guidance?{...data,guidance}:data);
+    const own=isObject?guidanceFor(name,data,ctx):undefined;
+    const guidance=tellRefresh&&isObject?withRefresh(refreshGuidance(),own):own;
+    const refresh=tellRefresh&&name==='yeet_overview'&&isObject?{app_refresh:appRefresh()}:{};
+    const parsed=output.safeParse(guidance?{...data,...refresh,guidance}:data);
     if(!parsed.success)return toolError({error:'TEMPORARILY_UNAVAILABLE'},ctx);
     const text=TEXT[name]?TEXT[name](result):JSON.stringify(parsed.data);
-    const cardMeta={...(confirm?{[CONFIRM_META_KEY]:confirm}:{}),...(signer&&SIGNER_TOOLS.has(name)?{[SIGNER_META_KEY]:signer}:{})};
+    // Card only: the server's card build, so a card built from another commit can tell it is stale.
+    const cardMeta={[BUILD_META_KEY]:staleness.build,...(confirm?{[CONFIRM_META_KEY]:confirm}:{}),...(signer&&SIGNER_TOOLS.has(name)?{[SIGNER_META_KEY]:signer}:{})};
     // The one-sentence tools (spin, lucky wheel) carry the guidance as a second text block; JSON text already has it.
     const content=[{type:'text',text},...(TEXT[name]&&parsed.data.guidance?[{type:'text',text:parsed.data.guidance}]:[])];
     return {structuredContent:parsed.data,...(Object.keys(cardMeta).length?{_meta:cardMeta}:{}),content};

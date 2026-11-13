@@ -39,7 +39,9 @@ fi
   (cd packages/router && ../../node_modules/.bin/tsc -p tsconfig.json)
   # The widget build also writes the landing page's wheel.js/wheel.css into apps/landing/ (not vendored).
   mkdir -p apps/landing
-  (cd packages/widget && node build.mjs)
+  # Every template carries the commit it is built from (cardBuild in packages/widget/index.mjs): a card sends it with
+  # its tool calls, and the connector compares it with this pin (connector/mcp/refresh.mjs).
+  (cd packages/widget && YEET_CARD_BUILD="$sha" node build.mjs)
   # The Privy signer the trade card loads by <script> (too big to inline: about 855 KB). esbuild and
   # @privy-io/js-sdk-core come from this repo's lock-pinned connector/login install (npm run build:login first).
   if [ -f packages/widget/scripts/build-signer.mjs ]; then

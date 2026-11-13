@@ -113,8 +113,8 @@ test("results: _meta['yeet/signer'] on the overview, proposal and trade results 
  // Without signing configured the results are as before: no signer key; a trade answer has no _meta at all.
  const off=await connect({});
  try{
-  const x=await off.client.callTool({name:'execute_trade',arguments:CALLS.execute_trade});assert.equal(x._meta,undefined);
-  const p=await off.client.callTool({name:'yeet_propose',arguments:CALLS.yeet_propose});assert.deepEqual(Object.keys(p._meta),[CONFIRM_META_KEY]);
+  const x=await off.client.callTool({name:'execute_trade',arguments:CALLS.execute_trade});assert.deepEqual(Object.keys(x._meta),['yeet/build'],'only the card build, no signer');
+  const p=await off.client.callTool({name:'yeet_propose',arguments:CALLS.yeet_propose});assert.deepEqual(Object.keys(p._meta),['yeet/build',CONFIRM_META_KEY]);
  }finally{await off.close()}
  // Errors never carry it.
  const failing=createMcpServer({token:{scope:allScopes.join(' ')},callCore:async()=>{throw {error:'TRADING_PAUSED'}},env:ENV});

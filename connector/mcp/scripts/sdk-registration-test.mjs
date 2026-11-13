@@ -60,7 +60,7 @@ test('tools/list: P0 and P1 tools with the contract annotations, scopes, cards a
   const lw=tools.find(t=>t.name==='lucky_wheel'),ls=tools.find(t=>t.name==='lucky_spin');
   assert.equal(lw._meta['openai/visibility'],undefined);assert.deepEqual(lw._meta.ui.visibility,['model','app']);assert.equal(lw._meta['openai/outputTemplate'],'ui://yeet/lucky-v1.html');
   assert.equal(ls._meta['openai/visibility'],'private');assert.deepEqual(ls._meta.ui.visibility,['app']);assert.equal(ls._meta['openai/widgetAccessible'],true);
-  assert.deepEqual(Object.keys(ls.inputSchema.properties),['lucky_id']);
+  assert.deepEqual(Object.keys(ls.inputSchema.properties),['lucky_id','card_build']);
  }finally{await c2.close();await p2.close()}
 });
 

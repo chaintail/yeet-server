@@ -1,6 +1,9 @@
 // Agent guidance: one short field on every tool result, for the model (the card does not show it), keyed by tool or
 // refusal code and state. This repository carries neutral text in every string; the wording YEET deploys is not part
 // of it.
+import {contract} from './tool-contract.mjs';
+const APP=contract['x-yeet-app'];
+
 export const COPY=Object.freeze({
 
  yeet_overview:{
@@ -117,6 +120,10 @@ export const COPY=Object.freeze({
   claimed:"YEET lucky.claimed.",
  },
 
+ refresh:{
+  stale:"YEET refresh.stale: {url} {steps}.",
+ },
+
  errors:{
   LIMIT_EXCEEDED_Noob:"YEET errors.LIMIT_EXCEEDED_Noob: {winner_xp} {vip_over_xp}.",
   LIMIT_EXCEEDED_Winner:"YEET errors.LIMIT_EXCEEDED_Winner: {vip_over_xp}.",
@@ -141,6 +148,8 @@ export const COPY=Object.freeze({
   USERNAME_NOT_ALLOWED:"YEET errors.USERNAME_NOT_ALLOWED.",
  },
 });
+
+export function refreshGuidance(app=APP){return fill(COPY.refresh.stale,{url:app.manage_url,steps:app.refresh_steps})}
 
 export const TIER_XP=Object.freeze({winner_xp:'69',vip_over_xp:'1,000'});
 

@@ -213,7 +213,7 @@ test('B-1 end to end through the connector with a real token: propose, quote, ex
   assert.equal(JSON.parse(stale.content[0].text).error,'CONFIRMATION_REQUIRED');
   const x=await call('execute_trade',{proposal_id:p.structuredContent.proposal_id,revision:2,confirm:c2.code});
   assert.equal(x.isError,undefined,JSON.stringify(x.content));
-  assert.equal(x.structuredContent.status,'awaiting_signature');assert.equal(x._meta,undefined);assert.ok(!modelSees(x).includes(c2.code));
+  assert.equal(x.structuredContent.status,'awaiting_signature');assert.deepEqual(Object.keys(x._meta),['yeet/build']);assert.ok(!modelSees(x).includes(c2.code));
   const reqs=x.structuredContent.sign_requests;
   // The Solana basket is ONE transaction: one sign request naming both legs (the contract's legs / leg_summaries
   // pass the vendored output schema).

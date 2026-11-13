@@ -1331,6 +1331,11 @@
       "type": "string",
       "pattern": "^-?(0|[1-9][0-9]{0,8})(\\.[0-9]{1,2})?$",
       "description": "US dollars as a decimal string, negative for a loss."
+    },
+    "card_build": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,40}$",
+      "description": "Set by the card only: the build of the card that makes this call."
     }
   },
   "tools": {
@@ -1339,7 +1344,14 @@
       "title": "YEET overview",
       "description": "Shows the welcome card with the person's USDC, XP, tier, streak, daily check-in state and next actions.",
       "inputSchema": {
-        "$ref": "#/$defs/empty"
+        "type": "object",
+        "properties": {
+          "card_build": {
+            "$ref": "#/$defs/card_build"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
       },
       "outputSchema": {
         "type": "object",
@@ -1491,6 +1503,25 @@
               "additionalProperties": false
             }
           },
+          "app_refresh": {
+            "type": "object",
+            "description": "Present when the person’s YEET app in ChatGPT is out of date: where they refresh it and how.",
+            "properties": {
+              "url": {
+                "$ref": "#/$defs/https_url"
+              },
+              "steps": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            },
+            "required": [
+              "url",
+              "steps"
+            ],
+            "additionalProperties": false
+          },
           "guidance": {
             "$ref": "#/$defs/guidance"
           }
@@ -1532,7 +1563,14 @@
       "title": "YEET home",
       "description": "Shows whether the person's YEET account is ready to trade, their USDC and their XP.",
       "inputSchema": {
-        "$ref": "#/$defs/empty"
+        "type": "object",
+        "properties": {
+          "card_build": {
+            "$ref": "#/$defs/card_build"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
       },
       "outputSchema": {
         "type": "object",
@@ -1798,6 +1836,9 @@
           "lucky_id": {
             "$ref": "#/$defs/lucky_id",
             "description": "Optional: the lucky wheel this YEET is for. Set it when proposing the coin the lucky wheel landed on."
+          },
+          "card_build": {
+            "$ref": "#/$defs/card_build"
           }
         },
         "required": [
@@ -1859,6 +1900,9 @@
           },
           "amount_usdc": {
             "$ref": "#/$defs/usdc"
+          },
+          "card_build": {
+            "$ref": "#/$defs/card_build"
           }
         },
         "required": [
@@ -1914,6 +1958,9 @@
           },
           "confirm": {
             "$ref": "#/$defs/confirm"
+          },
+          "card_build": {
+            "$ref": "#/$defs/card_build"
           }
         },
         "required": [
@@ -2070,6 +2117,9 @@
             "minLength": 1,
             "maxLength": 2048,
             "description": "base64 (Solana), 0x02 hex (Base evm_tx), 0x + 65-byte batch signature [+ 65-byte authorization signature] (Base evm_7702), or `unsupported`."
+          },
+          "card_build": {
+            "$ref": "#/$defs/card_build"
           }
         },
         "required": [
@@ -2184,6 +2234,9 @@
         "properties": {
           "trade_id": {
             "$ref": "#/$defs/trade_id"
+          },
+          "card_build": {
+            "$ref": "#/$defs/card_build"
           }
         },
         "required": [
@@ -2375,7 +2428,14 @@
       "title": "YEET portfolio",
       "description": "Shows the coins and USDC the person holds on YEET, with values.",
       "inputSchema": {
-        "$ref": "#/$defs/empty"
+        "type": "object",
+        "properties": {
+          "card_build": {
+            "$ref": "#/$defs/card_build"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
       },
       "outputSchema": {
         "type": "object",
@@ -2494,7 +2554,14 @@
       "title": "Fund your YEET account",
       "description": "Shows the Add funds card, on the crypto or card view when method is given, otherwise with both choices.",
       "inputSchema": {
-        "$ref": "#/$defs/empty"
+        "type": "object",
+        "properties": {
+          "card_build": {
+            "$ref": "#/$defs/card_build"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
       },
       "outputSchema": {
         "type": "object",
@@ -2583,6 +2650,9 @@
             },
             "minItems": 1,
             "maxItems": 5
+          },
+          "card_build": {
+            "$ref": "#/$defs/card_build"
           }
         },
         "required": [
@@ -2646,6 +2716,9 @@
               "all"
             ],
             "description": "today is the current UTC day. Default: all for xp, today for the others."
+          },
+          "card_build": {
+            "$ref": "#/$defs/card_build"
           }
         },
         "required": [],
@@ -2802,7 +2875,14 @@
       "title": "Daily check-in",
       "description": "Shows the daily check-in card: the wheel, the streak and the stamps.",
       "inputSchema": {
-        "$ref": "#/$defs/empty"
+        "type": "object",
+        "properties": {
+          "card_build": {
+            "$ref": "#/$defs/card_build"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
       },
       "outputSchema": {
         "type": "object",
@@ -2840,7 +2920,14 @@
       "title": "Daily XP spin",
       "description": "Card only: uses the next available daily or bonus spin and awards its XP and stamp.",
       "inputSchema": {
-        "$ref": "#/$defs/empty"
+        "type": "object",
+        "properties": {
+          "card_build": {
+            "$ref": "#/$defs/card_build"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
       },
       "outputSchema": {
         "type": "object",
@@ -3063,7 +3150,14 @@
       "title": "Lucky wheel",
       "description": "Shows today's lucky wheel card: up to five randomly picked coins and the YEET offer for the coin it lands on.",
       "inputSchema": {
-        "$ref": "#/$defs/empty"
+        "type": "object",
+        "properties": {
+          "card_build": {
+            "$ref": "#/$defs/card_build"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
       },
       "outputSchema": {
         "type": "object",
@@ -3105,6 +3199,9 @@
         "properties": {
           "lucky_id": {
             "$ref": "#/$defs/lucky_id"
+          },
+          "card_build": {
+            "$ref": "#/$defs/card_build"
           }
         },
         "required": [
@@ -3193,7 +3290,13 @@
   },
   "x-yeet-meta": {
     "confirm": "yeet/confirm",
-    "card": "yeet/card"
+    "card": "yeet/card",
+    "build": "yeet/build"
+  },
+  "x-yeet-app": {
+    "manage_url": "https://chatgpt.com/plugins",
+    "refresh_label": "Refresh YEET in ChatGPT",
+    "refresh_steps": "open YEET there, select Refresh, then start a new chat"
   },
   "x-yeet-spin": {
     "base_xp": 5,

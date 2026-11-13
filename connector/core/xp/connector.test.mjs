@@ -51,6 +51,8 @@ const checked=new Set();
 after(()=>{for(const n of PASS_THROUGH)assert.ok(checked.has(n),`no successful ${n} call was compared with core`)});
 
 const SCOPES=['openid','offline_access','yeet:read','yeet:write','yeet:trade'];
+const {CARD_BUILD,APP}=await import('../../mcp/refresh.mjs');
+const CARD_ONLY=new Set(['execute_trade','submit_trade_signature','daily_spin','lucky_spin']);
 const local=url=>{const u=new URL(url,ORIGIN);return u.origin===ORIGIN?`${AS}${u.pathname}${u.search}`:u.href};
 function jar(){const c=new Map();return {header:()=>[...c].map(([k,v])=>`${k}=${v}`).join('; '),add(r){for(const s of r.headers.getSetCookie()){const p=s.split(';')[0],i=p.indexOf('=');c.set(p.slice(0,i),p.slice(i+1))}}}}
 const rpc=(body,bearer)=>fetch(CONNECTOR+'/',{method:'POST',headers:{'content-type':'application/json',accept:'application/json, text/event-stream',authorization:`Bearer ${bearer}`},body:JSON.stringify(body)});
@@ -71,8 +73,10 @@ async function signIn(did){
  const token=await (await fetch(AS+'/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',code,code_verifier:verifier,redirect_uri:redirect,client_id:'local-chatgpt-fixture',resource:ORIGIN})})).json();
  assert.ok(token.access_token);
  const me=await (await fetch(AS+'/me',{headers:{authorization:`Bearer ${token.access_token}`}})).json();
- const call=async(name,args={})=>{
+ const call=async(name,input={})=>{
   lastCore=null;
+  // Card-only tools are called as a current card calls them: with the build of the vendored cards (mcp/refresh.mjs).
+  const args=CARD_ONLY.has(name)&&!('card_build' in input)?{...input,card_build:CARD_BUILD}:input;
   const result=(await (await rpc({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}},token.access_token)).json()).result;
   if(PASS_THROUGH.has(name)&&result&&!result.isError){
    const {confirm:_c,...sent}=lastCore??{};

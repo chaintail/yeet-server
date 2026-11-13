@@ -7,6 +7,7 @@ import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
 import {COPY,TIER_XP,GUIDED_TOOLS,guidanceFor,refusalGuidance,fill} from '../guidance.mjs';
 import {createMcpServer} from '../tool-registration.mjs';
+import {CARD_BUILD} from '../refresh.mjs';
 import {toolError} from '../errors.mjs';
 import {contract,toolSchemas,zodSchema} from '../tool-contract.mjs';
 import {FAILURE_CODES} from '#contracts/errors';
@@ -268,7 +269,8 @@ test('registered tools: guidance in structuredContent and in the text the model 
   assert.equal(p.structuredContent.guidance,`${COPY.propose_yeet.base} ${COPY.propose_yeet.risk}`);
   assert.equal(JSON.parse(p.content[0].text).guidance,p.structuredContent.guidance);
   assert.doesNotMatch(JSON.stringify(p.structuredContent)+JSON.stringify(p.content),/CCCC/,'the confirm code stays card-only');
-  const s=await client.callTool({name:'daily_spin',arguments:{}});
+  // A card-only tool, called as a current card calls it: with its build.
+  const s=await client.callTool({name:'daily_spin',arguments:{card_build:CARD_BUILD}});
   assert.equal(s.content[0].text,'You won 30 XP and a BONK stamp (3 of 7).');
   assert.equal(s.content[1].text,s.structuredContent.guidance);assert.match(s.content[1].text,/BONK stamp: 3 of 7/);
   const l=await client.callTool({name:'lucky_wheel',arguments:{}});

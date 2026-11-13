@@ -470,6 +470,7 @@ h1{margin:0}
 .hold-hint.warn{color:var(--rose)}
 @keyframes holdnudge{0%{transform:scale(1)}40%{transform:scale(1.08)}100%{transform:scale(1)}}
 
+.fine.refresh{flex-wrap:wrap}.fine.refresh .tx{color:var(--yc-accent);font-weight:700}
 .signin{display:grid;gap:8px;margin:0 0 12px;padding:14px;border-radius:18px;background:var(--yc-raise);box-shadow:inset 0 0 0 1px var(--yc-line)}
 .signin strong{font:700 15px var(--disp);color:var(--yc-fg)}.signin .next{text-align:left}.signin .reason{color:var(--rose);font:600 12.5px var(--mono)}
 .signin-row{display:flex;gap:8px}.signin-row input{flex:1;min-width:0;height:40px;padding:0 12px;border:0;border-radius:12px;background:var(--yc-bg);color:var(--yc-fg);font:600 15px var(--mono);box-shadow:inset 0 0 0 1px var(--yc-line)}
@@ -511,7 +512,9 @@ const BRAND={"logo":{"box":"-40 180 4256 820","d":"M84 990Q45 990,16 984Q-12 979
 const WheelCard=(()=>({logic:{normalizeSpin:()=>null,normalizeLucky:()=>null}}))(window); // src/wheel-card.js: the daily wheel (views home and wheel) and the lucky wheel (view lucky)
 const SIGNING=(()=>null)(null);   // src/trade-signing.js over src/vendor/wallet-request.mjs
 const signerCfg={"app_id":null,"script":null,"page":null};  // {app_id,script,page}: build-time; a result's _meta['yeet/signer'] overrides
-const CONFIRM_KEY='yeet/confirm',SIGNER_KEY='yeet/signer';
+const BUILD="bc0d179486a8144811367d44847c45a7098bb508";     // the yeet-win commit this template was built from; null for a local build
+const APP={"manage_url":"https://chatgpt.com/plugins","refresh_label":"Refresh YEET in ChatGPT","refresh_steps":"open YEET there, select Refresh, then start a new chat"};         // {manage_url,refresh_label,refresh_steps}: where the person refreshes the app in ChatGPT
+const CONFIRM_KEY='yeet/confirm',SIGNER_KEY='yeet/signer',BUILD_KEY='yeet/build';
 const POLL_MS=5000,POLL_MAX=360,SKEW_MS=2000,MAX_PARTS=99,AMOUNT_MAX=25,MORE_USDC='5';
 const FINAL=new Set(['success','partial','refunded','failed']);
 const OWN_MESSAGE=new Set(['LIMIT_EXCEEDED','BALANCE_LOW']);
@@ -554,7 +557,19 @@ const newId=()=>typeof window.crypto?.randomUUID==='function'?window.crypto.rand
 function request(method,params,timeoutMs=4000){return new Promise((resolve,reject)=>{const id=++sequence;const timer=window.setTimeout(()=>{pending.delete(id);reject(Error('timeout'))},timeoutMs);pending.set(id,{resolve,reject,timer});window.parent.postMessage({jsonrpc:'2.0',id,method,params},'*')})}
 function notify(method,params={}){window.parent.postMessage({jsonrpc:'2.0',method,params},'*')}
 function canCall(){return host.canCallTools||typeof window.openai?.callTool==='function'}
+let stale=false;
+const SHA=/^[0-9a-f]{7,40}$/;
+function markStale(){
+ if(stale)return;stale=true;
+ tell('refresh','refresh',`This card comes from an older version of YEET than the server runs. Refresh: ${APP.manage_url} (${APP.refresh_steps}).`);
+}
+function takeBuild(meta){const b=meta?.[BUILD_KEY];if(BUILD&&typeof b==='string'&&SHA.test(b)&&b!==BUILD){markStale();return true}return false}
+const unknownTool=e=>/unknown tool|tool not found|tool .* not found|no such tool/i.test(String(e?.message??e??''));
 async function callTool(name,args,timeoutMs=20000){
+ try{const r=await callHost(name,BUILD?{...args,card_build:BUILD}:args,timeoutMs);if(takeBuild(r?._meta))render();return r}
+ catch(e){if(unknownTool(e)){markStale();render()}throw e}
+}
+async function callHost(name,args,timeoutMs){
  if(host.canCallTools)return request('tools/call',{name,arguments:args},timeoutMs);
  if(typeof window.openai?.callTool==='function'){
   let timer;
@@ -683,7 +698,7 @@ function show(data,meta){
 function receive(structured,meta,isError,raw){
  if(structured===undefined&&!isError)return;
  const data=isError?(errorEnvelope(raw)||{error:'TEMPORARILY_UNAVAILABLE'}):structured;
- takeSigner(meta);
+ takeSigner(meta);takeBuild(meta);
  const c=meta?.[CONFIRM_KEY];
  const key=JSON.stringify([data,typeof c?.expires_at==='string'?c.expires_at:null,!!isError]);
  if(key===lastKey)return;lastKey=key;
@@ -1077,6 +1092,12 @@ function card(cls,title,meta){
  const c=el('section',`yc${cls?` ${cls}`:''}`);
  if(title||meta){const h=el('div','yc-h');if(title)h.append(el('span','tt',title));if(meta)h.append(el('span','meta',meta));c.append(mark(h,'head',true))}
  return c;
+}
+/** The small line a card from an older build carries: where to refresh the app in ChatGPT, opened through the host. */
+function refreshLine(){
+ const p=mark(el('p','fine refresh'),'refresh-app');p.dataset.role='refresh-app';
+ const a=link(APP.refresh_label,APP.manage_url);a.dataset.role='refresh-link';a.setAttribute('title',APP.refresh_steps);
+ p.append(document.createTextNode('YEET was updated. '),a);return p;
 }
 function noteLine(text){const n=el('p','next note',text);n.setAttribute('role','status');return mark(n,'note',true)}
 function alertBox(title,text,key){const b=mark(el('div','yc-alert'),key);b.setAttribute('role','alert');b.append(el('strong',null,title),el('span',null,text));return b}
@@ -1506,6 +1527,7 @@ function render(){
  }catch{node=renderError({error:'TEMPORARILY_UNAVAILABLE'})}
  if(kind!=='basket')basketUi=null;
  if(kind!=='receipt')settleUi=null;
+ if(stale&&kind!=='waiting'){const host=node.matches('.yc')?node:[...node.children].filter(n=>n.matches('.yc')).at(-1);if(host&&!host.querySelector('[data-role=refresh-app]'))host.append(refreshLine())}
  const old=[...root.children].find(c=>!c.classList.contains('outgoing'))??null;
  const ghosts=[...root.children].filter(c=>c.classList.contains('outgoing'));
  const moving=!REDUCED&&!!old&&old.getBoundingClientRect().height>0;
