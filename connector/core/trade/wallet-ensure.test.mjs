@@ -1,7 +1,7 @@
 // Server-side wallet setup at sign-in (wallet-ensure.mjs) against fakePrivyWallets: a person with no wallets gets one
-// Base and one Solana wallet owned by them with the YEET signer under the chain's policy; a second call creates
-// nothing; concurrent calls create once; a Privy failure is reported with its status and a retry uses a new key;
-// existing wallets are kept and their signer state reported. No network.
+// Base and one Solana wallet owned by them with no additional signer (decision (b)); a second call creates nothing;
+// concurrent calls create once; a Privy failure is reported with its status and a retry uses a new key; existing
+// wallets are kept and an old YEET signer on them is reported `legacy`. No network.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fakePrivyWallets,fakePrivyEnv,fakeClock,FAKE_POLICY_IDS} from './fakes.mjs';
@@ -19,36 +19,34 @@ const setup=(opts={})=>{
  return {privy,events,config,ensurer};
 };
 
-test('config needs the Privy app, the signer quorum and both policies', ()=>{
+test('config needs only the Privy app; no signer quorum or policy is required (decision (b))', ()=>{
  assert.ok(walletSetupConfig(fakePrivyEnv()));
- assert.equal(walletSetupConfig(fakePrivyEnv({YEET_SOLANA_POLICY_ID:''})),null);
- assert.equal(walletSetupConfig(fakePrivyEnv({YEET_PRIVY_KEY_QUORUM_ID:''})),null);
+ assert.ok(walletSetupConfig(fakePrivyEnv({YEET_SOLANA_POLICY_ID:'',YEET_BASE_POLICY_ID:''})));
+ assert.equal(walletSetupConfig(fakePrivyEnv({YEET_PRIVY_KEY_QUORUM_ID:''})).legacySignerId,null);
  assert.equal(walletSetupConfig({}),null);
 });
 
-test('a Google-only user with no wallets gets one Base and one Solana wallet with the YEET signer', async()=>{
+test('a Google-only user with no wallets gets one Base and one Solana wallet with no additional signer', async()=>{
  const {privy,events,ensurer}=setup();
  const out=await ensurer.ensure('acct-1',DID);
  assert.equal(out.ready,true);
  assert.deepEqual(Object.keys(out.chains),['base','solana']);
- for(const c of ['base','solana']){assert.equal(out.chains[c].created,true);assert.equal(out.chains[c].signer,'attached')}
+ for(const c of ['base','solana']){assert.equal(out.chains[c].created,true);assert.equal(out.chains[c].signer,'none')}
  const creates=privy.creates;
  assert.equal(creates.length,2);
  assert.deepEqual(creates.map(c=>c.body.chain_type),['ethereum','solana']);
- for(const [i,c] of creates.entries()){
-  assert.deepEqual(c.body.owner,{user_id:DID});
-  assert.deepEqual(c.body.additional_signers,[{signer_id:'quorum-yeet',override_policy_ids:[[FAKE_POLICY_IDS.base,FAKE_POLICY_IDS.solana][i]]}]);
+ for(const c of creates){
+  assert.deepEqual(c.body,{chain_type:c.body.chain_type,owner:{user_id:DID}},'no additional_signers in the create body');
   assert.match(c.key,/^[a-f0-9]{64}$/);
   assert.equal(c.signed,false);
  }
  assert.deepEqual(events.map(e=>e.event),['wallet_ensure_start','wallet_ensure_created','wallet_ensure_created','wallet_ensure_done']);
  assert.ok(!JSON.stringify(events).includes('fake-app-secret'));
- // The trade engine's directory now finds both wallets with the signer granted under the expected policy.
+ // The old engine's directory finds both wallets and no YEET signer on either.
  const env=fakePrivyEnv();
  const dir=privyDirectory({api:createPrivyApi({config:walletSetupConfig(env).privy,fetch:privy.fetch}),didFor:()=>DID,keyQuorumId:'quorum-yeet'});
  const found=await dir.lookup('acct-1');
- assert.equal(found.base.signerState,'granted');assert.equal(found.base.policyId,FAKE_POLICY_IDS.base);
- assert.equal(found.solana.signerState,'granted');assert.equal(found.solana.policyId,FAKE_POLICY_IDS.solana);
+ assert.notEqual(found.base.signerState,'granted');assert.notEqual(found.solana.signerState,'granted');
 });
 
 test('a second call creates nothing and reports the wallets', async()=>{
@@ -89,16 +87,19 @@ test('a Privy failure names the chain and status; the retry uses a new key and k
  assert.match(walletSetupMessage('PRIVY_HTTP_500'),/did not answer/);
 });
 
-test('existing wallets are kept; one without the YEET signer is reported missing', async()=>{
+test('existing wallets are kept and ready; one still carrying the old YEET signer is reported legacy and logged', async()=>{
  const linked=[...google,
   {type:'wallet',wallet_client_type:'privy',chain_type:'ethereum',address:'0x'+'1'.repeat(40),id:'w-base'},
   {type:'wallet',wallet_client_type:'privy',chain_type:'solana',address:'So1ana1111111111111111111111111111111111111',id:'w-sol'}];
- const {privy,ensurer}=setup({linked,existingSigners:{'w-base':[{signer_id:'quorum-yeet',override_policy_ids:[FAKE_POLICY_IDS.base]}]}});
+ const {privy,events,ensurer}=setup({linked,existingSigners:{'w-base':[{signer_id:'quorum-yeet',override_policy_ids:[FAKE_POLICY_IDS.base]}]}});
  const out=await ensurer.ensure('acct-1',DID);
  assert.equal(privy.creates.length,0);
- assert.equal(out.ready,false);
- assert.equal(out.chains.base.signer,'attached');
- assert.equal(out.chains.solana.signer,'missing');
+ assert.equal(out.ready,true);
+ assert.equal(out.chains.base.signer,'legacy');
+ assert.equal(out.chains.solana.signer,'none');
+ assert.deepEqual(events.find(e=>e.event==='wallet_legacy_signer').chains,['base']);
+ // Nothing in sign-in adds or changes a signer: only reads and (for missing wallets) creates.
+ assert.ok(privy.calls.every(c=>c.method==='GET'||c.path==='/v1/wallets'));
 });
 
 test('an unknown account is refused before any Privy call', async()=>{

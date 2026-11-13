@@ -392,20 +392,12 @@ const loginFields = () =>
   process.env.PRIVY_LOGIN === "1"
     ? '<div id="privy-login"><p role="status">Loading secure sign in…</p></div><script type="module" src="/account/privy-login/login.js"></script>'
     : credentials();
-// Public values only: the sign-in page needs the app id, and the signer step needs the YEET signer and policy ids.
-const publicId = (name) => {
-  const value = process.env[name];
-  return typeof value === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(value) ? value : null;
-};
+// Public values only: the sign-in page needs the app id.
 app.get("/account/identity-config", (_q, r) =>
   process.env.PRIVY_LOGIN === "1"
     ? r.set("Cache-Control", "no-store").json({
+        // Decision (b): no signer id is published; the page never attaches a YEET signer to a wallet.
         appId: process.env.PRIVY_APP_ID,
-        signerId: publicId("YEET_SIGNER_ID"),
-        policyIds: {
-          base: publicId("YEET_BASE_POLICY_ID"),
-          solana: publicId("YEET_SOLANA_POLICY_ID"),
-        },
       })
     : r.sendStatus(404),
 );

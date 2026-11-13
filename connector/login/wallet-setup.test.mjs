@@ -1,17 +1,17 @@
 // Wallet setup after sign-in (wallet-setup.js), with fake Privy calls: no React, no network.
 import test from "node:test";
 import assert from "node:assert/strict";
+import * as walletSetup from "./wallet-setup.js";
 import {
   STEPS,
-  attachYeetSigner,
   embeddedWallets,
   ensureWallets,
   setupComplete,
   setupErrorReport,
   walletAlreadyExists,
   requestServerSetup,
-  chainsMissingSigner,
 } from "./wallet-setup.js";
+import { readFileSync } from "node:fs";
 
 const BASE = { type: "wallet", walletClientType: "privy", chainType: "ethereum", address: "0xb45e", delegated: false };
 const SOL = { type: "wallet", walletClientType: "privy", chainType: "solana", address: "So1ana", delegated: false };
@@ -126,35 +126,13 @@ test("wallet setup: a failed create or a wallet that never shows up stops with a
   await assert.rejects(ensureWallets({ user: user(), ...never, attempts: 3, sleep: noSleep }), { code: "wallets-not-ready" });
 });
 
-test("wallet setup: the YEET signer is added to both wallets with the chain's policy, once", async () => {
-  const config = { signerId: "quorum-1", policyIds: { base: "pol-base", solana: null } };
-  const privy = fakePrivy(user(BASE, SOL));
-  const out = await attachYeetSigner({ config, user: user(BASE, SOL), addSigners: privy.addSigners });
-  assert.deepEqual(privy.state.signers, [
-    { address: BASE.address, signers: [{ signerId: "quorum-1", policyIds: ["pol-base"] }] },
-    { address: SOL.address, signers: [{ signerId: "quorum-1" }] },
-  ]);
-  assert.ok(setupComplete(config, out));
-  // A retry with the updated user adds nothing.
-  await attachYeetSigner({ config, user: out, addSigners: privy.addSigners });
-  assert.equal(privy.state.signers.length, 2);
-});
-
-test("wallet setup: without a signer id nothing is linked; missing wallets and link errors have codes", async () => {
-  const calls = [];
-  const addSigners = async (x) => calls.push(x);
-  const u = user(BASE);
-  assert.equal(await attachYeetSigner({ config: { signerId: null }, user: u, addSigners }), u);
-  assert.equal(calls.length, 0);
-  assert.ok(!setupComplete({ signerId: null }, u));
-  assert.ok(setupComplete({ signerId: null }, user(BASE, SOL)));
-  await assert.rejects(attachYeetSigner({ config: { signerId: "q" }, user: u, addSigners }), { code: "wallets-not-ready" });
-  const refuse = async () => {
-    throw Error("denied");
-  };
-  await assert.rejects(attachYeetSigner({ config: { signerId: "q" }, user: user(BASE, SOL), addSigners: refuse }), {
-    code: "link-base-failed",
-  });
+test("decision (b): sign-in never attaches the YEET signer; setup is complete with both wallets, delegated or not", () => {
+  assert.equal(walletSetup.attachYeetSigner, undefined);
+  assert.equal(walletSetup.chainsMissingSigner, undefined);
+  assert.ok(!setupComplete({ signerId: "quorum-1" }, user(BASE)));
+  assert.ok(setupComplete({ signerId: "quorum-1" }, user(BASE, SOL)), "no signer needed even if one is configured");
+  const page = readFileSync(new URL("./src.jsx", import.meta.url), "utf8");
+  assert.doesNotMatch(page, /addSigners|useSigners|attachYeetSigner/);
 });
 
 test("wallet setup: the failure report is structured and carries no addresses or emails", async () => {
@@ -182,7 +160,7 @@ test("wallet setup: the waiting screen names each step in product words", () => 
 
 // Server setup (POST /account/wallets): the page only posts its Privy access token and reads the answer.
 const answer = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
-const READY = { ready: true, chains: { base: { signer: "attached" }, solana: { signer: "attached" } } };
+const READY = { ready: true, chains: { base: { signer: "none" }, solana: { signer: "none" } } };
 
 test("server setup posts the Privy access token and returns the server's answer", async () => {
   const calls = [];
@@ -195,7 +173,7 @@ test("server setup posts the Privy access token and returns the server's answer"
   assert.equal(calls[0].url, "/account/wallets");
   assert.equal(calls[0].init.method, "POST");
   assert.deepEqual(JSON.parse(calls[0].init.body), { privy_access_token: "tok" });
-  assert.deepEqual(chainsMissingSigner(out), []);
+  assert.equal(out.chains.base.signer, "none");
 });
 
 test("server setup retries a server error and a network failure, then succeeds", async () => {
@@ -219,8 +197,4 @@ test("server setup surfaces the server's plain text after the last attempt", asy
     requestServerSetup({ getAccessToken: async () => "tok", fetch: async () => answer(401, { code: "SIGN_IN_REQUIRED", message: "m" }) }),
     (e) => e.code === "SIGN_IN_REQUIRED",
   );
-});
-
-test("chains whose wallet lacks the YEET signer are the ones the page links", () => {
-  assert.deepEqual(chainsMissingSigner({ chains: { base: { signer: "attached" }, solana: { signer: "missing" } } }), ["solana"]);
 });

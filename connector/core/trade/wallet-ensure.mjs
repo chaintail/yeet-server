@@ -1,13 +1,12 @@
 // Server-side wallet setup at sign-in: the person's Base (Ethereum) and Solana embedded wallets are created by the
-// server, owned by the person, with the YEET key quorum attached as an additional signer under the chain's policy, so
-// no browser wallet call is needed. docs.privy.io (checked 2026-11-13):
+// server, owned by the person, with NO additional signer (gas sponsorship decision (b): the person's own wallet signs
+// every trade; YEET never holds signing authority over it). docs.privy.io (checked 2026-11-13):
 //   api-reference/wallets/create: POST /v1/wallets, Basic auth + privy-app-id, optional privy-idempotency-key; body
-//     {chain_type, owner: {user_id}, additional_signers: [{signer_id, override_policy_ids}]}; answers the Wallet
-//     {id, address, chain_type, owner_id, additional_signers}. No authorization signature for creation.
+//     {chain_type, owner: {user_id}}; answers the Wallet {id, address, chain_type, owner_id, additional_signers}.
 //   recipes/pregenerate-wallets: wallets created for a user "automatically appear in their account" and "work
 //     identically to wallets created during login".
-//   wallets/using-wallets/signers/add-signers: updating a wallet's signers later needs the owner's signature, so a
-//     wallet that already exists without the YEET signer is reported `signer: 'missing'` and the page adds it.
+// A wallet that still carries the old YEET key quorum (YEET_PRIVY_KEY_QUORUM_ID) is reported `signer: 'legacy'` and
+// logged; ops/remove-yeet-signer.mjs removes it. `ready` means both wallets exist.
 // Idempotent: the user's linked wallets are read first and a chain that has a wallet is never created again;
 // concurrent calls for one person share one run; the create key is stable per person, chain and 10-minute window
 // (a replay answers the same wallet) and moves on after a failure (Privy caches 4xx/5xx answers against a key).
@@ -28,13 +27,13 @@ export function linkedWallets(user){
  return Object.fromEntries(WALLET_CHAINS.map(([chain,type])=>[chain,find(type)]));
 }
 
-/** Settings from the core env; null when Privy or the YEET signer is not configured. */
+/** Settings from the core env; null when Privy is not configured. Decision (b): no signer is attached at creation;
+ * `legacySignerId` (YEET_PRIVY_KEY_QUORUM_ID, optional) is only used to report wallets that still carry it. */
 export function walletSetupConfig(env=process.env){
  const privy=privyConfig(env);
- const v=n=>{const x=env[n]?.trim();return x&&ID.test(x)?x:undefined};
- const signerId=privy?.keyQuorumId,policyIds={base:v('YEET_BASE_POLICY_ID'),solana:v('YEET_SOLANA_POLICY_ID')};
- if(!privy||!signerId||!ID.test(signerId)||!policyIds.base||!policyIds.solana)return null;
- return {privy,signerId,policyIds};
+ if(!privy)return null;
+ const q=privy.keyQuorumId;
+ return {privy,legacySignerId:q&&ID.test(q)?q:null};
 }
 
 const log=(event,fields)=>console.log(JSON.stringify({event,...fields}));
@@ -55,7 +54,8 @@ export function createWalletEnsurer({config,fetch=globalThis.fetch,now=Date.now,
    throw e instanceof PrivyApiError?new WalletSetupError(e.code,{status:e.status}):e;
   }
  };
- const signerState=wallet=>{const s=signerAttachment(wallet,config.signerId);return s.granted&&s.policyId===config.policyIds[wallet.__chain]?'attached':'missing'};
+ /** 'none' = no YEET signer (the target state); 'legacy' = the old YEET key quorum is still attached (ops cleanup). */
+ const signerState=wallet=>config.legacySignerId&&signerAttachment(wallet,config.legacySignerId).granted?'legacy':'none';
 
  async function run(accountId,did){
   const t0=now();
@@ -68,8 +68,8 @@ export function createWalletEnsurer({config,fetch=globalThis.fetch,now=Date.now,
    const existing=have[chain];
    try{
     if(existing){
-     let state='missing';
-     if(typeof existing.id==='string'&&ID.test(existing.id)){
+     let state='none';
+     if(config.legacySignerId&&typeof existing.id==='string'&&ID.test(existing.id)){
       const w=await call(null,()=>api.app('GET',`/v1/wallets/${existing.id}`));
       state=signerState({...w,__chain:chain});
      }
@@ -77,7 +77,8 @@ export function createWalletEnsurer({config,fetch=globalThis.fetch,now=Date.now,
      logger('wallet_ensure_exists',{account:accountId,chain,signer:state});
      continue;
     }
-    const body={chain_type:type,owner:{user_id:did},additional_signers:[{signer_id:config.signerId,override_policy_ids:[config.policyIds[chain]]}]};
+    // Decision (b): owned by the person, no additional_signers. The person's wallet signs every trade.
+    const body={chain_type:type,owner:{user_id:did}};
     const w=await call(`${did}:${chain}`,()=>api.app('POST','/v1/wallets',body,{idempotencyKey:key(did,chain)}));
     if(typeof w?.address!=='string')throw new WalletSetupError('PRIVY_CREATE_UNREADABLE');
     const state=signerState({...w,__chain:chain});
@@ -90,7 +91,8 @@ export function createWalletEnsurer({config,fetch=globalThis.fetch,now=Date.now,
     throw err;
    }
   }
-  const ready=WALLET_CHAINS.every(([c])=>chains[c].signer==='attached');
+  const ready=WALLET_CHAINS.every(([c])=>!!chains[c].address);
+  if(WALLET_CHAINS.some(([c])=>chains[c].signer==='legacy'))logger('wallet_legacy_signer',{account:accountId,chains:WALLET_CHAINS.filter(([c])=>chains[c].signer==='legacy').map(([c])=>c)});
   logger('wallet_ensure_done',{account:accountId,ready,ms:now()-t0});
   return {ready,chains};
  }

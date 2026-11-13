@@ -45,9 +45,6 @@ services:
       PRIVY_JWKS_URL: ${PRIVY_JWKS_URL:-}
       STATE_DIR: /state
       CORE_INTERNAL: ${CORE_INTERNAL:-}
-      YEET_SIGNER_ID: ${YEET_SIGNER_ID:-}
-      YEET_BASE_POLICY_ID: ${YEET_BASE_POLICY_ID:-}
-      YEET_SOLANA_POLICY_ID: ${YEET_SOLANA_POLICY_ID:-}
       YEET_DAILY_CAP_USDC: ${YEET_DAILY_CAP_USDC:-}
     env_file: [{path: /var/lib/yeet-connector/config/as.env, required: false}]
     ports: ['127.0.0.1:38860:38312']

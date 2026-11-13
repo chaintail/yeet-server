@@ -7,15 +7,12 @@ import {
   useLoginWithOAuth,
   useLoginWithTelegram,
   usePrivyClient_experimental,
-  useSigners,
   useUser,
 } from "@privy-io/react-auth";
 import { privyConfig } from "./privy-app.jsx";
 import { NO_METHOD_LINE, enabledMethods, introLine } from "./login-methods.js";
 import {
   CHAINS,
-  attachYeetSigner,
-  chainsMissingSigner,
   embeddedWallets,
   requestServerSetup,
   setupErrorReport,
@@ -272,7 +269,6 @@ async function submitSession(getAccessToken) {
 function FinishSignIn({ config }) {
   const { ready, user, getAccessToken, logout } = usePrivy();
   const { refreshUser } = useUser();
-  const { addSigners } = useSigners();
   const userRef = useRef(user);
   userRef.current = user;
   const wallets = embeddedWallets(user);
@@ -288,14 +284,10 @@ function FinishSignIn({ config }) {
     [error, setError] = useState("");
   const running = useRef(false);
 
-  /** Server setup, then the YEET signer on any wallet the server reports without it (wallets made before). */
+  /** Server setup: the server creates any missing wallet (no signer is attached: the person signs every trade). */
   async function serverSetup() {
-    const result = await requestServerSetup({ getAccessToken });
-    const missing = chainsMissingSigner(result);
-    if (missing.length) {
-      const current = (await refreshUser().catch(() => null)) || userRef.current;
-      await attachYeetSigner({ config, user: current, addSigners, chains: missing });
-    }
+    await requestServerSetup({ getAccessToken });
+    await refreshUser().catch(() => null);
   }
 
   async function runSetup() {
@@ -309,15 +301,11 @@ function FinishSignIn({ config }) {
       setStep("solana");
     }, STEP_TICK_MS);
     try {
-      const result = await requestServerSetup({ getAccessToken });
+      await requestServerSetup({ getAccessToken });
       clearTimeout(tick);
       setDone([...CHAINS]);
       setStep("link");
-      const missing = chainsMissingSigner(result);
-      if (missing.length) {
-        const current = (await refreshUser().catch(() => null)) || userRef.current;
-        await attachYeetSigner({ config, user: current, addSigners, chains: missing });
-      }
+      await refreshUser().catch(() => null);
       setDone([...CHAINS, "link"]);
       await submitSession(getAccessToken);
     } catch (e) {

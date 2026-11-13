@@ -1,10 +1,9 @@
-// Wallet setup after sign-in, without React: the YEET server creates the missing wallets with the YEET signer attached
-// (requestServerSetup; no browser wallet call). ensureWallets (browser creation) is kept for reference only and is not
-// used by the page. src.jsx passes in the Privy 3.47.0 calls:
+// Wallet setup after sign-in, without React: the YEET server creates the missing wallets, owned by the person, with no
+// additional signer (requestServerSetup; no browser wallet call). ensureWallets (browser creation) is kept for
+// reference only and is not used by the page. src.jsx passes in the Privy 3.47.0 calls:
 //   createBase   = useCreateWallet().createWallet            (Ethereum; resolves with the Wallet)
 //   createSolana = useCreateWallet().createWallet from "@privy-io/react-auth/solana" (resolves with {wallet})
 //   refreshUser  = useUser().refreshUser                      (resolves with the User)
-//   addSigners   = useSigners().addSigners                    (resolves with {user})
 // Both create calls throw "User already has an embedded wallet." (error code embedded_wallet_already_exists) when a
 // wallet of that kind exists; that counts as success here. A wallet that already exists is never created again.
 
@@ -127,41 +126,14 @@ export async function requestServerSetup({ getAccessToken, fetch = globalThis.fe
   }
 }
 
-/** Chains whose wallet exists but does not carry the YEET signer yet (the page adds it with addSigners). */
-export const chainsMissingSigner = (result) => CHAINS.filter((c) => result?.chains?.[c]?.signer !== "attached");
+// Decision (b), gas sponsorship: the YEET server signer is never attached to a person's wallet. The person signs every
+// trade in their own wallet; sign-in has no addSigners step. Wallets that still carry the old signer are cleaned up by
+// ops/remove-yeet-signer.mjs.
 
-/**
- * Lets the YEET server sign for both embedded wallets, within the YEET policies (one policy per chain). Runs when
- * /account/identity-config returns a signer id, so sign-in keeps working before the signer is registered. A wallet
- * that already has a delegated signer is left as it is, so a retry after a partial failure only adds what is missing.
- * `chains` limits it to the chains the server reported without the signer. Returns the latest user.
- */
-export async function attachYeetSigner({ config, user, addSigners, chains = CHAINS }) {
-  if (!config.signerId) return user;
-  let current = user;
-  for (const chain of chains) {
-    const wallet = embeddedWallets(current)[chain];
-    if (!wallet) throw new SetupError("wallets-not-ready");
-    if (wallet.delegated) continue;
-    const policy = config.policyIds?.[chain];
-    try {
-      const out = await addSigners({
-        address: wallet.address,
-        signers: [{ signerId: config.signerId, ...(policy ? { policyIds: [policy] } : {}) }],
-      });
-      current = out?.user || current;
-    } catch (e) {
-      throw new SetupError(`link-${chain}-failed`, e);
-    }
-  }
-  return current;
-}
-
-/** True when the user has both wallets and, if YEET has a signer, both carry it. */
-export function setupComplete(config, user) {
+/** True when the user has both wallets (no signer is needed: the person signs every trade). */
+export function setupComplete(_config, user) {
   const w = embeddedWallets(user);
-  if (!w.base || !w.solana) return false;
-  return !config.signerId || (!!w.base.delegated && !!w.solana.delegated);
+  return !!w.base && !!w.solana;
 }
 
 /** Structured, secret-free description of a setup failure (for the browser console). */
