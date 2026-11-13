@@ -1285,6 +1285,16 @@
             "minimum": 0,
             "maximum": 1000
           },
+          "draw_xp": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          },
+          "streak_xp": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          },
           "total": {
             "type": "integer",
             "minimum": 0
@@ -1299,6 +1309,8 @@
         },
         "required": [
           "xp_won",
+          "draw_xp",
+          "streak_xp",
           "total",
           "streak_days",
           "next_spin_at"
@@ -1356,6 +1368,8 @@
   "x-yeet-spin": {
     "base_xp": 5,
     "streak_bonus_xp": 25,
+    "streak_draw": true,
+    "parts": "xp_won = base_xp + draw_xp + streak_xp; draw_xp is one bonus_xp value; streak_xp is 0, or on a streak milestone streak_bonus_xp plus a second, independent bonus_xp draw",
     "bonus_xp": [
       0,
       2,

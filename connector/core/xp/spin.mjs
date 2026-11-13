@@ -65,19 +65,22 @@ export function createSpin({ledger,secret}){
   spin(who,at=ledger.iso()){
    if(!ready())throw Object.assign(Error('spin not configured'),{name:'TradeError',code:'TEMPORARILY_UNAVAILABLE'});
    const day=dayOf(at);
-   const xp_won=ledger.tx(()=>{
+   // The daily draw is deterministic, so a repeat recomputes it; the streak part is the rest of the stored award.
+   const draw_xp=roll(secret,`${who}|${day}`);
+   const {xp_won,streak_xp}=ledger.tx(()=>{
     const prior=todays(who,day);
-    if(prior)return Number(prior.points);
+    if(prior){const won=Number(prior.points);return {xp_won:won,streak_xp:Math.max(0,won-Number(ledger.rule('daily_spin').points)-draw_xp)}}
     // The spin itself is today's event, so the streak it completes is yesterday's streak plus today.
     // Other XP earned earlier today (a sign-in, a trade) already makes today active; it counts once either way.
     const days=runEndingOn(db,who,addDays(day,-1))+1;
     const base=Number(ledger.rule('daily_spin').points);
     const milestones=streakMilestones(days);
     const streak=milestones.reduce((sum,r)=>sum+r.xp,0)+(milestones.some(r=>r.roll)?roll(secret,`${who}|${day}|streak`):0);
-    const points=base+roll(secret,`${who}|${day}`)+streak;
-    return ledger.awardIn(who,'daily_spin',day,{at,points});
+    const points=base+draw_xp+streak;
+    return {xp_won:ledger.awardIn(who,'daily_spin',day,{at,points}),streak_xp:streak};
    });
-   return {xp_won,total:ledger.total(who),streak_days:streakDays(db,who,day),next_spin_at:nextSpinAt(day)};
+   // draw_xp: the wheel's slice (base + draw_xp); streak_xp: the milestone bonus including its own draw, shown apart.
+   return {xp_won,draw_xp,streak_xp,total:ledger.total(who),streak_days:streakDays(db,who,day),next_spin_at:nextSpinAt(day)};
   },
  };
 }

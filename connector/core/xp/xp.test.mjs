@@ -1,7 +1,7 @@
 // Lane E: XP ledger, streak, daily spin, leaderboard, and trade settlement paying exactly once.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,rmSync} from 'node:fs';
+import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {z} from 'zod';
@@ -78,6 +78,7 @@ test("YEET text.",()=>{
  const s1=spin.spin('a');
  out('daily_spin').parse(s1);
  assert.equal(s1.xp_won,5+roll(SECRET,'a|2026-11-10'));assert.equal(s1.total,s1.xp_won);assert.equal(s1.streak_days,1);
+ assert.equal(s1.draw_xp,roll(SECRET,'a|2026-11-10'));assert.equal(s1.streak_xp,0);
  assert.equal(s1.next_spin_at,'2026-11-11T00:00:00.000Z');
  assert.equal(spin.available('a'),false);
  now.advance(15*3600_000);// 23:00 same day
@@ -89,6 +90,10 @@ test("YEET text.",()=>{
  now.advance(86_400_000);
  const s3=spin.spin('a');assert.equal(s3.streak_days,3);assert.equal(s3.xp_won,5+roll(SECRET,'a|2026-11-12')+STREAK_BONUS+roll(SECRET,'a|2026-11-12|streak'));
  assert.equal(s3.total,s1.xp_won+s2.xp_won+s3.xp_won);
+ // The parts the card needs: the wheel lands on base + draw_xp; streak_xp (fixed bonus + its own draw) is shown apart.
+ assert.equal(s3.draw_xp,roll(SECRET,'a|2026-11-12'));assert.equal(s3.streak_xp,STREAK_BONUS+roll(SECRET,'a|2026-11-12|streak'));
+ out('daily_spin').parse(s3);
+ assert.deepEqual(spin.spin('a'),s3,'repeat on a milestone day: same parts');
  assert.deepEqual([1,2,3,4,6,7,8,14,21,28,35].map(streakMilestone),[false,false,true,false,false,true,false,true,true,true,true]);
  // Without a secret there is no spin, and home says so.
  const off=createSpin({ledger:l,secret:undefined});
@@ -264,4 +269,12 @@ test('next_streak_milestone: today’s spin still counts until it happens; homeX
  assert.equal(xpSchema.safeParse(summary).success,false,'the closed contract refuses the extra field');
  // Once the contract lists the field, it flows through unchanged.
  assert.deepEqual(homeXp(summary,[...HOME_XP_KEYS,'next_streak_milestone']).next_streak_milestone,summary.next_streak_milestone);
+});
+
+test('spin: the public x-yeet-spin contract matches the server table and streak rules',()=>{
+ const c=JSON.parse(readFileSync(new URL('../../vendor/yeet-win/contracts/yeet-tools.json',import.meta.url),'utf8'))['x-yeet-spin'];
+ assert.equal(c.base_xp,DEFAULT_RULES.find(r=>r.rule_id==='daily_spin').points);
+ assert.deepEqual(c.bonus_xp,BONUS_TABLE.map(r=>r.xp));
+ assert.ok(STREAK_RULES.every(r=>r.xp===c.streak_bonus_xp),'one fixed streak bonus');
+ assert.equal(c.streak_draw,STREAK_RULES.some(r=>r.roll));
 });

@@ -183,7 +183,7 @@ const document=window.document;
 const VIEW="leaderboard";
 const ERRORS={"INVALID_ARGUMENT":["Check the request","A value in the request is not valid, so check the coins, parts and amount.",false],"COIN_NOT_SUPPORTED":["Coin not available","One of these coins can’t be traded on YEET right now, so pick another from the coin list.",false],"PARTS_NOT_TEN":["Parts must add up to 10","Give each coin whole parts so the basket adds up to exactly 10.",false],"AMOUNT_TOO_SMALL":["Amount too small","Each coin needs at least the minimum per coin, so raise the amount or use fewer coins.",false],"COST_TOO_HIGH":["Fees too high right now","Swap costs for this basket are above the YEET limit, so try a larger amount or fewer coins.",true],"LIMIT_EXCEEDED":["Over your limit","This trade would go over the per-trade or daily USDC limit.",false],"BALANCE_LOW":["Not enough funds","Your YEET wallet doesn’t hold enough for this trade, so add funds or lower the amount.",false],"WALLET_NOT_READY":["Wallet not ready","Your YEET wallet isn’t set up for trading yet, so finish sign-in and try again.",false],"CONFIRMATION_REQUIRED":["Tap to confirm","Trades only run from your tap in the card, so refresh the quote and tap again.",true],"REQUOTE_REQUIRED":["Price moved","The price moved past your minimum, so refresh the quote to see the new numbers.",true],"TRADING_PAUSED":["Trading is paused","YEET has paused trading for now and your funds stay in your wallet.",true],"REAUTH_REQUIRED":["Reconnect YEET","ChatGPT needs your permission again, so reconnect YEET when it asks.",false],"TEMPORARILY_UNAVAILABLE":["Try again in a minute","YEET couldn’t reach a service it needs and nothing was traded.",true]};
 const COINS={"USDC":"USD Coin (Solana)","SOL":"Solana","WIF":"dogwifhat","BOME":"BOOK OF MEME","TRUMP":"Official Trump","PENGU":"Pudgy Penguins","MELANIA":"Official Melania Meme","SPX":"SPX6900","TURBO":"Turbo","LOUD":"Loud","NEARKAT":"NearKat"};
-const SPIN={"base_xp":5,"streak_bonus_xp":25,"bonus_xp":[0,2,5,7,9,12,15,19,24,31,40]};
+const SPIN={"base_xp":5,"streak_bonus_xp":25,"streak_draw":true,"parts":"xp_won = base_xp + draw_xp + streak_xp; draw_xp is one bonus_xp value; streak_xp is 0, or on a streak milestone streak_bonus_xp plus a second, independent bonus_xp draw","bonus_xp":[0,2,5,7,9,12,15,19,24,31,40]};
 const Wheel=(function yeetWheelFactory(window){
 'use strict';
 // The XP wheel: a sprung flapper over rim pegs, a slow end with a zoom, a heartbeat and a held breath,
@@ -733,7 +733,13 @@ function notify(method,params={}){window.parent.postMessage({jsonrpc:'2.0',metho
 function canCall(){return host.canCallTools||typeof window.openai?.callTool==='function'}
 async function callTool(name,args,timeoutMs=20000){
  if(host.canCallTools)return request('tools/call',{name,arguments:args},timeoutMs);
- if(typeof window.openai?.callTool==='function')return window.openai.callTool(name,args);
+ if(typeof window.openai?.callTool==='function'){
+  // The same deadline as the JSON-RPC path: a call the host never settles must still end (the wheel aborts on it).
+  let timer;
+  const deadline=new Promise((_,reject)=>{timer=window.setTimeout(()=>reject(Error('timeout')),timeoutMs)});
+  try{return await Promise.race([Promise.resolve().then(()=>window.openai.callTool(name,args)),deadline])}
+  finally{window.clearTimeout(timer)}
+ }
  throw Error('unsupported');
 }
 async function openLink(url){
@@ -744,7 +750,8 @@ async function openLink(url){
 // Widget state holds only what survives a reload: the view and the last trade id. Never a code.
 function readState(){const s=window.openai?.widgetState;return s&&s.version===1&&s.view===VIEW?{version:1,view:VIEW,...(typeof s.trade_id==='string'&&TRADE_ID.test(s.trade_id)?{trade_id:s.trade_id}:{}),...(typeof s.proposal_id==='string'&&PROPOSAL_ID.test(s.proposal_id)?{proposal_id:s.proposal_id}:{}),...(spinToday(s.spin)?{spin:spinToday(s.spin)}:{})}:{version:1,view:VIEW}}
 // Today's spin, kept so a reopened card shows it at rest instead of offering another. Gone once next_spin_at passes.
-function spinToday(v){return v&&Number.isInteger(v.xp_won)&&Number.isInteger(v.total)&&Number.isInteger(v.streak_days)&&typeof v.next_spin_at==='string'&&Date.parse(v.next_spin_at)>Date.now()?{xp_won:v.xp_won,total:v.total,streak_days:v.streak_days,next_spin_at:v.next_spin_at}:null}
+function spinToday(v){return v&&Number.isInteger(v.xp_won)&&Number.isInteger(v.total)&&Number.isInteger(v.streak_days)&&typeof v.next_spin_at==='string'&&Date.parse(v.next_spin_at)>Date.now()?{xp_won:v.xp_won,total:v.total,streak_days:v.streak_days,next_spin_at:v.next_spin_at,
+ ...(Number.isInteger(v.draw_xp)&&Number.isInteger(v.streak_xp)?{draw_xp:v.draw_xp,streak_xp:v.streak_xp}:{})}:null}
 function saveState(patch){state={...state,...patch,version:1,view:VIEW};try{window.openai?.setWidgetState?.(state)}catch{/* The card still works without persistence. */}}
 function reportHeight(){if(heightFrame!==null)return;heightFrame=window.requestAnimationFrame(()=>{heightFrame=null;const h=Math.ceil(root.getBoundingClientRect().height);if(h!==lastHeight){lastHeight=h;if(window.parent!==window)notify('ui/notifications/size-changed',{height:h});try{window.openai?.notifyIntrinsicHeight?.(h)}catch{/* optional */}}})}
 function applyInsets(insets){if(!insets)return;for(const edge of ['top','right','bottom','left']){const v=insets[edge];document.documentElement.style.setProperty(`--host-${edge}`,`${typeof v==='number'&&Number.isFinite(v)&&v>=0?v:0}px`)}}
@@ -882,8 +889,14 @@ const SLICES=(()=>{
  return order.map(v=>{const rank=xp.indexOf(v);const tier=Math.round(rank*5/(xp.length-1));const top=rank===xp.length-1;
   return {xp:v,label:`+${v}`,sub:'XP',tier,...(top?WHEEL_TOP:WHEEL_COLORS[k++%WHEEL_COLORS.length])}});
 })();
-/** The slice for an award: base + bonus, or that plus the streak bonus, else the nearest value. */
-function sliceFor(xpWon){
+/** The slice for a spin: the server's parts when present (base + draw_xp on the wheel, streak_xp shown apart);
+ * otherwise base + bonus, or that plus the fixed streak bonus, else the nearest value. */
+function sliceFor(spin){
+ const xpWon=spin.xp_won;
+ if(Number.isInteger(spin.draw_xp)&&Number.isInteger(spin.streak_xp)){
+  const base=Number.isInteger(SPIN?.base_xp)?SPIN.base_xp:0;
+  const i=SLICES.findIndex(c=>c.xp===base+spin.draw_xp);if(i>=0)return {slice:i,streak:spin.streak_xp};
+ }
  let i=SLICES.findIndex(c=>c.xp===xpWon);if(i>=0)return {slice:i,streak:0};
  const bonus=Number.isInteger(SPIN?.streak_bonus_xp)?SPIN.streak_bonus_xp:0;
  i=SLICES.findIndex(c=>c.xp===xpWon-bonus);if(bonus&&i>=0)return {slice:i,streak:bonus};
@@ -894,7 +907,7 @@ const canWheel=()=>SLICES.length>=2&&typeof window.requestAnimationFrame==='func
 function wheelNode(won){
  if(!wheel){
   wheelBox=el('div','spin-wheel');
-  const at=won?sliceFor(won.xp_won).slice:null;
+  const at=won?sliceFor(won).slice:null;
   try{wheel=Wheel.createWheel(wheelBox,{slices:SLICES,restSlice:at,won:!!won,canSpin:()=>canCall()&&!spinBusy&&!spinWon,onSpin:startSpin,onStopped:wheelStopped})}
   catch{wheelBox=null;return null}
   if(won)wheel.setHub(`+${won.xp_won}`,'XP');
@@ -905,7 +918,7 @@ async function startSpin(v0,windup){
  if(spinBusy||spinWon||!canCall()||!wheel||!wheel.start(v0,windup))return;
  spinBusy=true;note=null;wheel.setEnabled(false);wheel.setHub('','');render();
  let u;try{u=unwrap(await callTool('daily_spin',{}))}catch{u={data:{error:'TEMPORARILY_UNAVAILABLE'}}}
- if(kindOf(u.data)==='spin'){spinLanding=u.data;wheel.land(sliceFor(u.data.xp_won).slice);return}
+ if(kindOf(u.data)==='spin'){spinLanding=u.data;wheel.land(sliceFor(u.data).slice);return}
  wheel.abort();spinBusy=false;wheel.setHub('SPIN','');wheel.setEnabled(true);
  note=ERRORS[u.data?.error]?.[0]??ERRORS.TEMPORARILY_UNAVAILABLE[0];render();
 }
@@ -928,7 +941,7 @@ function spinPanel(h){
  wheel.setEnabled(!spinBusy);box.append(node);
  if(won){
   box.append(el('p','spin-line won',`+${won.xp_won} XP`));
-  const s=sliceFor(won.xp_won);if(s.streak)box.append(el('p','spin-line',`Includes a ${s.streak} XP streak bonus`));
+  const s=sliceFor(won);if(s.streak)box.append(el('p','spin-line',`Includes a ${s.streak} XP streak bonus`));
   const next=clock(won.next_spin_at);if(next)box.append(el('p','fine',`Next spin after ${next}`));
  }else box.append(el('p','spin-line',spinBusy?'Spinning…':'Tap SPIN or swipe the wheel'));
  return box;

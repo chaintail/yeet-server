@@ -1,6 +1,6 @@
 repo: chaintail/yeet-win
 branch: main
-commit: f76035669870c50e4ffc833ffd0e0712a5c7ef1b
+commit: 767d32d66366a598c349e1dd77d7790ab32f8c01
 built: router (tsc 7.0.2), widget (node build.mjs)
 files:
   contracts/yeet-tools.json
