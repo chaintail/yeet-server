@@ -9,6 +9,8 @@ import {
   balanceOfCall,
   formatUsdc,
   fundOptions,
+  cardDeposit,
+  CARD_CHAINS,
   solanaUsdcAccountsCall,
   solanaUsdcReader,
   validAmount,
@@ -27,6 +29,26 @@ test("fund options: USDC on Base (8453), card first, Coinbase as provider", () =
   });
   assert.equal(fundOptions(" 10.50 ").amount, "10.5");
   assert.throws(() => fundOptions("0"), /invalid-amount/);
+});
+
+test("card deposit: USDC to the person's wallet on the chosen network, dollars prefilled, Stripe preferred", () => {
+  const SOL = "7YeetSo1anaWa11etAddre55xxxxxxxxxxxxxxxxx";
+  assert.deepEqual(cardDeposit("base", ADDR, "25"), {
+    destination: { asset: "usdc", chain: "eip155:8453", wallet: ADDR },
+    fiat: { source: { assets: ["usd", "eur"], defaultAsset: "usd" }, environment: "production", defaultAmount: "25", preferredProvider: "stripe" },
+  });
+  const sol = cardDeposit("solana", SOL, " 10.50 ");
+  assert.deepEqual(sol.destination, { asset: "usdc", chain: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", wallet: SOL });
+  assert.equal(sol.fiat.defaultAmount, "10.5");
+  // Fiat only: no crypto branch, so Privy's modal opens on the card flow.
+  assert.equal("crypto" in sol, false);
+  assert.deepEqual(CARD_CHAINS, { base: "eip155:8453", solana: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" });
+  assert.throws(() => cardDeposit("base", ADDR, "0"), /invalid-amount/);
+  assert.throws(() => cardDeposit("tempo", ADDR, "25"), /invalid-network/);
+  assert.throws(() => cardDeposit("constructor", ADDR, "25"), /invalid-network/);
+  // An address of the other network is refused, so a payment cannot be sent to a wallet on the wrong chain.
+  assert.throws(() => cardDeposit("base", SOL, "25"), /invalid-address/);
+  assert.throws(() => cardDeposit("solana", ADDR, "25"), /invalid-address/);
 });
 
 test("amount input: 1 to 10000 dollars, at most 2 decimals", () => {

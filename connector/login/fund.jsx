@@ -1,13 +1,20 @@
 // "Add funds" page (/fund). Crypto first: the person's own YEET wallet address on Base or Solana (QR code, copy, wallet
-// links for an amount they pick) with a live balance watch; then Privy's funding flow for USDC on Base by card.
-// Privy 3.47.0 useFundWallet: fundWallet({address, options}) resolves with {status: 'completed'|'cancelled', ...};
-// onUserExited fires when the person closes the flow. Neither proves a payment arrived, so the page re-reads the
-// balance on chain after the flow closes.
+// links for an amount they pick) with a live balance watch; then card payment through Privy's funding modal.
+//
+// Card payment, @privy-io/react-auth 3.51.4:
+// - useDepositFunds().depositFunds({destination, fiat}) (https://docs.privy.io/wallets/funding/use-deposit-funds.md)
+//   opens Privy's deposit modal. With Stripe preferred it runs Stripe's embedded onramp inside the modal: card, Apple
+//   Pay, Google Pay and ACH where Stripe serves the person (US except New York, and the EU). It resolves with
+//   {method: 'fiat', status: 'submitted' | 'confirmed'} and rejects on errors and when the person closes the modal.
+// - useFundWallet().fundWallet({address, options}) is the older flow (deprecated in 3.51.4, never shows Stripe): it
+//   opens Coinbase Onramp in a popup window. Kept as the second button. It resolves with
+//   {status: 'completed' | 'cancelled'}; onUserExited fires when the person closes the flow.
+// Neither result proves a payment arrived, so the page re-reads the balance on chain after either flow closes.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { PrivyProvider, usePrivy, useFundWallet } from "@privy-io/react-auth";
+import { PrivyProvider, usePrivy, useDepositFunds, useFundWallet } from "@privy-io/react-auth";
 import { embeddedWallets, privyConfig } from "./privy-app.jsx";
-import { DEFAULT_AMOUNT, baseUsdcReader, solanaUsdcReader, formatUsdc, fundOptions, validAmount } from "./fund-balance.js";
+import { DEFAULT_AMOUNT, baseUsdcReader, solanaUsdcReader, cardDeposit, formatUsdc, fundOptions, validAmount } from "./fund-balance.js";
 import { AMOUNT_CHIPS, NETWORKS, sendAmount, validAddress, walletLinks } from "./fund-links.js";
 import { watchBalance } from "./fund-watch.js";
 import { qrCode, qrPath } from "./qr.js";
@@ -96,11 +103,13 @@ function FundWallet({ readers, addresses }) {
   const [custom, setCustom] = useState("");
   const [linkNote, setLinkNote] = useState("");
 
-  // Card payment (Privy funding flow, USDC on Base): unchanged from before, now the second way to add funds.
+  // Card payment, the second way to add funds: Privy's deposit modal (Stripe preferred) on the selected network, and
+  // the older Coinbase flow on Base.
   const [amount, setAmount] = useState(DEFAULT_AMOUNT);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(null);
   const [message, setMessage] = useState("");
   const closed = useRef(null);
+  const { depositFunds } = useDepositFunds();
   const { fundWallet } = useFundWallet({
     onUserExited: () => closed.current?.(),
   });
@@ -132,13 +141,38 @@ function FundWallet({ readers, addresses }) {
     );
   }
 
-  async function addFunds() {
+  const PAID = "Payment sent. Card payments can take a few minutes to reach your wallet.";
+  const CLOSED = "Funding closed. If you paid, the balance updates within a few minutes.";
+
+  /** Card, Apple Pay or Google Pay in Privy's deposit modal; USDC arrives on the network selected above. */
+  async function payInModal() {
     const value = validAmount(amount);
     if (!value) {
       setMessage("Enter an amount from 1 to 10,000 dollars.");
       return;
     }
-    setBusy(true);
+    setBusy("modal");
+    setMessage("");
+    try {
+      await depositFunds(cardDeposit(network, address, value));
+      setMessage(PAID);
+    } catch (e) {
+      // depositFunds rejects both when the person closes the modal ("User exited flow") and when it cannot run.
+      setMessage(/exit|cancel|clos/i.test(String(e?.message)) ? CLOSED : "Card payment could not start. Try Pay with Coinbase, or send USDC to your address above.");
+    } finally {
+      setBusy(null);
+    }
+    refreshBalance();
+  }
+
+  /** Coinbase Onramp in its own window; USDC arrives on Base. */
+  async function payWithCoinbase() {
+    const value = validAmount(amount);
+    if (!value) {
+      setMessage("Enter an amount from 1 to 10,000 dollars.");
+      return;
+    }
+    setBusy("coinbase");
     setMessage("");
     let status;
     try {
@@ -152,12 +186,11 @@ function FundWallet({ readers, addresses }) {
       setMessage("Adding funds could not start. Please try again.");
     } finally {
       closed.current = null;
-      setBusy(false);
+      setBusy(null);
     }
-    if (status === "completed")
-      setMessage("Payment sent. Card payments can take a few minutes to reach your wallet.");
-    else if (status) setMessage("Funding closed. If you paid, the balance updates within a few minutes.");
-    // Card payments land on Base: watch that balance.
+    if (status === "completed") setMessage(PAID);
+    else if (status) setMessage(CLOSED);
+    // Coinbase payments land on Base: watch that balance.
     if (network !== "base") pickNetwork("base");
     else refreshBalance();
   }
@@ -280,10 +313,16 @@ function FundWallet({ readers, addresses }) {
         value={amount}
         onChange={(e) => setAmount(e.target.value)}
       />
-      <button type="button" disabled={busy} onClick={addFunds}>
-        {busy ? "Adding funds…" : "Add funds"}
+      <button type="button" disabled={!!busy} onClick={payInModal}>
+        {busy === "modal" ? "Opening payment…" : "Pay with card or Apple Pay"}
       </button>
-      <p className="hint fund-ways">Pay by card, Apple Pay or Google Pay through Coinbase, where your device and region support it.</p>
+      <p className="hint fund-ways">
+        Card, Apple Pay or Google Pay, where your device and region support it. You get {net.asset}.
+      </p>
+      <button type="button" className="secondary" disabled={!!busy} onClick={payWithCoinbase}>
+        {busy === "coinbase" ? "Opening Coinbase…" : "Pay with Coinbase"}
+      </button>
+      <p className="hint fund-ways">Opens Coinbase in its own window. You get USDC on Base.</p>
       <p role="status" className={message ? "saved" : undefined}>{words(message)}</p>
       <button type="button" className="secondary" disabled={balance.status === "loading"} onClick={refreshBalance}>
         Refresh balance
@@ -295,7 +334,21 @@ function FundWallet({ readers, addresses }) {
   );
 }
 
+// Privy's modal backdrop (#privy-dialog-backdrop, 3.51.4) is a fixed full-viewport layer whose only paint is
+// backdrop-filter: blur(3px): no colour. On iPhone the page behind it was reported fully black; desktop Chromium
+// shows it blurred, not dimmed. This page already has backdrop-filter on the card and an animated fixed layer under
+// it, the combination WebKit is known to paint black. The rule below gives the backdrop a plain translucent colour
+// and no filter, so the page stays visible and dimmed. The style element carries the page's CSP nonce.
+function dimBehindModal() {
+  const style = document.createElement("style");
+  style.nonce = document.querySelector('meta[property="csp-nonce"]')?.content ?? "";
+  style.textContent =
+    "#privy-dialog-backdrop{background:rgba(6,7,28,.62)!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important;transition:none!important}";
+  document.head.append(style);
+}
+
 const root = document.getElementById("yeet-fund");
+dimBehindModal();
 try {
   const response = await fetch("/account/identity-config", { credentials: "same-origin" });
   if (!response.ok) throw Error();
