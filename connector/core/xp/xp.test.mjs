@@ -9,7 +9,7 @@ import {openLedger,DEFAULT_RULES} from './ledger.mjs';
 import {streakDays} from './streak.mjs';
 import {roll,BONUS_TABLE,createSpin,streakMilestone,STREAK_BONUS,STREAK_RULES,streakMilestones,nextStreakMilestone} from './spin.mjs';
 import {leaderboard,rankRows,handle} from './board.mjs';
-import {openXp,homeXp,homeXpKeys} from './xp.mjs';
+import {openXp,homeXp,homeXpKeys,checkSpinTable,serverSpinTable} from './xp.mjs';
 import {createEngine} from '../trade/engine.mjs';
 import {openTradeDb} from '../trade/db.mjs';
 import {fakeOneClick,fakeSigner,fakeBalances,fakeClock,BASE_WALLET,SOL_WALLET,FAKE_POLICY_ENV} from '../trade/fakes.mjs';
@@ -258,17 +258,17 @@ test('next_streak_milestone: today’s spin still counts until it happens; homeX
  assert.deepEqual(xp.summary('a').next_streak_milestone,{days:3,xp:25});
  // No spin configured: no milestone can pay.
  assert.equal(openXp({secret:undefined,now}).summary('a').next_streak_milestone,null);
- // The pinned contract closes yeet_home.xp, so the home block carries only its listed fields and parses.
+ // The pinned contract lists next_streak_milestone in yeet_home.xp, so the home block carries it unchanged and parses.
  const summary=xp.summary('a');
  const HOME_XP_KEYS=homeXpKeys(toolSchemas.yeet_home.output);
- assert.deepEqual(HOME_XP_KEYS,['total','streak_days','spin_available']);
+ assert.deepEqual(HOME_XP_KEYS,['total','streak_days','spin_available','next_streak_milestone']);
  const block=homeXp(summary,HOME_XP_KEYS);
- assert.deepEqual(Object.keys(block),HOME_XP_KEYS);
+ assert.deepEqual(block,summary);
  const xpSchema=zodSchema(z,toolSchemas.yeet_home.output.properties.xp);
  assert.equal(xpSchema.safeParse(block).success,true);
- assert.equal(xpSchema.safeParse(summary).success,false,'the closed contract refuses the extra field');
- // Once the contract lists the field, it flows through unchanged.
- assert.deepEqual(homeXp(summary,[...HOME_XP_KEYS,'next_streak_milestone']).next_streak_milestone,summary.next_streak_milestone);
+ assert.equal(xpSchema.safeParse({...block,next_streak_milestone:null}).success,true,'null when no milestone can pay');
+ // The xp object stays closed: a field the contract does not list is refused.
+ assert.equal(xpSchema.safeParse({...block,extra:1}).success,false);
 });
 
 test('spin: the public x-yeet-spin contract matches the server table and streak rules',()=>{
@@ -277,4 +277,16 @@ test('spin: the public x-yeet-spin contract matches the server table and streak 
  assert.deepEqual(c.bonus_xp,BONUS_TABLE.map(r=>r.xp));
  assert.ok(STREAK_RULES.every(r=>r.xp===c.streak_bonus_xp),'one fixed streak bonus');
  assert.equal(c.streak_draw,STREAK_RULES.some(r=>r.roll));
+});
+
+test('spin: the server table passes the vendored x-yeet-spin check, and a drifted table is refused',()=>{
+ const spec=JSON.parse(readFileSync(new URL('../../vendor/yeet-win/contracts/yeet-tools.json',import.meta.url),'utf8'))['x-yeet-spin'];
+ assert.doesNotThrow(()=>checkSpinTable(spec));
+ const t=serverSpinTable();
+ assert.deepEqual(t,{base_xp:5,bonus:BONUS_TABLE,streak_bonus_xp:STREAK_BONUS});
+ assert.throws(()=>checkSpinTable({...spec,base_xp:spec.base_xp+1}),/base_xp/);
+ assert.throws(()=>checkSpinTable({...spec,streak_bonus_xp:spec.streak_bonus_xp+1}),/streak_bonus_xp/);
+ assert.throws(()=>checkSpinTable({...spec,bonus_xp:[...spec.bonus_xp].reverse()}),/bonus xp/);
+ assert.throws(()=>checkSpinTable(spec,{...t,bonus:t.bonus.map((r,i)=>i?r:{...r,weight:r.weight+1})}),/weights sum/);
+ assert.throws(()=>checkSpinTable(undefined),/x-yeet-spin/);
 });

@@ -26,8 +26,8 @@ app.post(resourcePath,async(req,res)=>{
    const r=await fetch(CORE+route,{method,redirect:'error',headers:{authorization:`Bearer ${secret('core-mcp')}`,'x-delegated-bearer':bearer,'content-type':'application/json'},
     ...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(coreTimeout(route,method))});
    const raw=await r.text();if(Buffer.byteLength(raw)>128*1024)throw Error('Bound');
-   const result=JSON.parse(raw);if(!r.ok)throw {error:result.error??(r.status===401?'REAUTH_REQUIRED':'TEMPORARILY_UNAVAILABLE')};return result;
-  }catch(e){throw {error:e.error??'TEMPORARILY_UNAVAILABLE'}}
+   const result=JSON.parse(raw);if(!r.ok)throw {error:result.error??(r.status===401?'REAUTH_REQUIRED':'TEMPORARILY_UNAVAILABLE'),fund_url:result.fund_url};return result;
+  }catch(e){throw {error:e.error??'TEMPORARILY_UNAVAILABLE',fund_url:e.fund_url}}
  }
  const server=createMcpServer({token,callCore});
  const transport=new StreamableHTTPServerTransport({sessionIdGenerator:undefined,enableJsonResponse:true});

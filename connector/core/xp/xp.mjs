@@ -6,9 +6,10 @@
 // settles too when it sees a final trade with no row yet (an event lost to a crash between the tracker's write and
 // the hook), and either path repeated adds nothing.
 import path from 'node:path';
-import {openLedger,dayOf} from './ledger.mjs';
+import {openLedger,dayOf,DEFAULT_RULES} from './ledger.mjs';
 import {streakDays} from './streak.mjs';
-import {createSpin} from './spin.mjs';
+import {createSpin,BONUS_TABLE,STREAK_BONUS} from './spin.mjs';
+import {assertSpinTable} from '../../vendor/yeet-win/router/dist/src/spin-table.js';
 import {leaderboard} from './board.mjs';
 
 export const p2On=(env=process.env)=>env.YEET_P2==='1';
@@ -21,6 +22,10 @@ export const tradeEarns=status=>status==='success'||status==='partial';
  * output check and blank the card. */
 export const homeXpKeys=homeOutput=>Object.freeze(Object.keys(homeOutput.properties.xp.anyOf.find(s=>s.type==='object').properties));
 export const homeXp=(summary,keys)=>Object.fromEntries(keys.filter(k=>k in summary).map(k=>[k,summary[k]]));
+/** The server's spin table in the shape of the vendored @yeet/router spin check. */
+export const serverSpinTable=()=>({base_xp:DEFAULT_RULES.find(r=>r.rule_id==='daily_spin').points,bonus:BONUS_TABLE,streak_bonus_xp:STREAK_BONUS});
+/** Throws unless the server table matches the contract's x-yeet-spin (values, order, weights summing to 100). */
+export const checkSpinTable=(spec,table=serverSpinTable())=>assertSpinTable(table,spec);
 
 export function openXp({file=':memory:',secret,now=Date.now}={}){
  const ledger=openLedger(file,{now});

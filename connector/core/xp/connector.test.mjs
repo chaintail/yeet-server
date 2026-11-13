@@ -79,7 +79,7 @@ test('YEET_P2=1 end to end: home -> spin -> leaderboard, then a settled trade sh
  // Sign-in paid 5 XP once today; the spin is open; no wins are invented.
  const home=await alice.call('yeet_home');
  assert.equal(home.isError,undefined,JSON.stringify(home.content));
- assert.deepEqual(home.structuredContent.xp,{total:5,streak_days:1,spin_available:true});
+ assert.deepEqual(home.structuredContent.xp,{total:5,streak_days:1,spin_available:true,next_streak_milestone:{days:3,xp:25}});
  assert.deepEqual(home.structuredContent.recent_wins,[]);
 
  const spin=await alice.call('daily_spin');
@@ -116,4 +116,19 @@ test('YEET_P2=1 end to end: home -> spin -> leaderboard, then a settled trade sh
   assert.deepEqual(st.structuredContent.xp_award,{points:70,total});
  }
  assert.equal((await alice.call('yeet_home')).structuredContent.xp.total,total);
+});
+
+test('yeet_home: needs_funds carries fund_url on the public origin; a funded wallet carries none',async()=>{
+ const balances=fakeBalances({usdc:'0.5'});
+ configureTradeEngine({client:fakeOneClick(),signer:fakeSigner(),balances,env:{...process.env,...FAKE_POLICY_ENV,YEET_LIVE:'1'},trackerIntervalMs:0});
+ const carol=await signIn('did:privy:fund-carol');
+ const low=await carol.call('yeet_home');
+ assert.equal(low.isError,undefined,JSON.stringify(low.content));
+ assert.equal(low.structuredContent.ready,'needs_funds');
+ assert.equal(low.structuredContent.fund_url,`${ORIGIN}/fund`);
+ assert.equal(low.structuredContent.xp.next_streak_milestone.days,3);
+ balances.usdcRaw=100_000_000n;
+ const ok=await carol.call('yeet_home');
+ assert.equal(ok.structuredContent.ready,'ready');
+ assert.equal('fund_url' in ok.structuredContent,false);
 });

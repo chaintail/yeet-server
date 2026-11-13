@@ -5,9 +5,10 @@ import {secret,equal,read,write,port,TEST,DEV_APP_ID} from '#shared/common.mjs';
 import {coins} from './coins.mjs';
 import {unavailable,failure} from './failure.mjs';
 import {tradeEngine,onTradeSettled} from './trade/runtime.mjs';
-import {xpRuntime,p2On,homeXp,homeXpKeys} from './xp/xp.mjs';
+import {xpRuntime,p2On,homeXp,homeXpKeys,checkSpinTable} from './xp/xp.mjs';
 import {z} from 'zod';
-import {toolSchemas,zodSchema} from '../mcp/tool-contract.mjs';
+import {toolSchemas,zodSchema,contract} from '../mcp/tool-contract.mjs';
+import {homeWithFundUrl,failureWithFundUrl} from './fund-link.mjs';
 // Accounts are created on the first verified sign-in (identity-store.mjs). The identity app is Privy in
 // production and the development stub only under TEST_PROFILE=1 with DEV_IDENTITY_STUB=1.
 const devStub=TEST&&process.env.DEV_IDENTITY_STUB==='1';
@@ -20,6 +21,8 @@ onTradeSettled(e=>{if(p2On())xpRuntime().onSettled(e)});
 /** XP never stands in the way of the answer it decorates: a failure is logged and the XP part is left out. */
 /** yeet_home's xp fields as the pinned contract lists them; the summary is cut to these. */
 const HOME_XP_KEYS=homeXpKeys(toolSchemas.yeet_home.output);
+// The card draws the wheel from the contract's x-yeet-spin; the server draws the award. Refuse to start if they differ.
+checkSpinTable(contract['x-yeet-spin']);
 const xpSafe=(what,fn,fallback)=>{try{return fn()}catch(e){console.error(JSON.stringify({event:'xp_failed',what,error:String(e?.message??e).slice(0,200)}));return fallback}};
 const app=express();app.use(express.json({limit:'32kb'}));
 app.get('/health',(_q,r)=>r.json({ok:true}));
@@ -57,14 +60,14 @@ function trade(tool,fn){
   if(!args.success)return r.status(400).json(failure('INVALID_ARGUMENT'));
   try{r.json(await fn(await tradeEngine(),ctx,args.data,q))}
   catch(e){
-   if(e?.name==='TradeError'){console.error(JSON.stringify({event:'trade_refused',route:q.route?.path,code:e.code,detail:String(e.detail??'').slice(0,200)}));return r.status(CODE_STATUS[e.code]??409).json(failure(e.code))}
+   if(e?.name==='TradeError'){console.error(JSON.stringify({event:'trade_refused',route:q.route?.path,code:e.code,detail:String(e.detail??'').slice(0,200)}));return r.status(CODE_STATUS[e.code]??409).json(failureWithFundUrl(failure(e.code)))}
    console.error(JSON.stringify({event:'trade_route_failed',route:q.route?.path,error:String(e?.message??e).slice(0,200)}));
    unavailable(r);
   }
  };
 }
 app.get('/home',trade('yeet_home',async(e,ctx)=>{
- const home=await e.home(ctx);
+ const home=homeWithFundUrl(await e.home(ctx));
  if(!p2On())return home;
  return {...home,xp:xpSafe('home',()=>homeXp(xpRuntime().summary(ctx.accountId),HOME_XP_KEYS),null),recent_wins:xpSafe('wins',()=>xpRuntime().recentWins(),[])};
 }));
