@@ -8,7 +8,9 @@
 //   1. confirm code bound to account, client, proposal, revision and quote; single use; a used code replays its trade
 //      (with fresh sign requests for legs still awaiting a signature)
 //   2. kill switch, YEET_LIVE, YEET_LIVE_ACCOUNTS and the chain pause; the chain's driver must be ready
-//   3. caps (min leg, max trade, daily) and the person's balance on the origin chain
+//   3. caps (min leg, max trade, daily) and the person's balance on the origin chain. The origin chain of a BUY is
+//      chosen per trade from the person's USDC on Base and on Solana (funding.mjs) unless YEET_BUY_CHAIN forces one;
+//      a SELL pays out on YEET_SELL_CHAIN (default sol: USDC lands in the person's Solana wallet)
 //   4. live 1Click plan, checked leg by leg (assertLivePlan); requote rule as before; cost cap
 //   5. commit: code, proposal, trade (origin_chain), legs `awaiting_signature`, today's spend, in one transaction
 //   6. sign requests from the driver (`status: awaiting_signature`, `sign_requests`): on Solana ONE request (one
@@ -28,13 +30,14 @@ import {OneClickClient,formatUnits,CATALOG} from '../trade/router.mjs';
 import {tx} from '../trade/db.mjs';
 import {refuse,newId,iso,usd,TradeError} from '../trade/util.mjs';
 import {statusTolerantFetch} from './oneclick-status.mjs';
-import {createTracker,receiptLeg,legDeadline} from './tracker.mjs';
+import {createTracker,receiptLeg,legDeadline,tradeNetworks} from './tracker.mjs';
 import {createLedger,appendEvent,OPEN_LEG} from './ledger.mjs';
 import {livePlan,assertLivePlan,usdcOn} from './oneclick-leg.mjs';
 import {createDrivers} from './drivers.mjs';
 import {walletDirectoryFromEnv} from './wallet-directory.mjs';
 import {readSponsorshipLimits} from './solana/sponsorship.mjs';
 import {WALLET_CHAIN,CHAINS} from './driver-interface.mjs';
+import {createFunding,forcedBuyChain,chainPaused,NETWORK} from './funding.mjs';
 import {xpRuntime} from '../xp/xp.mjs';
 
 export const PREVIEW_STALE_MS=60_000;
@@ -55,7 +58,8 @@ export function liveGate(env=process.env){
   if(l.killSwitch)refuse('TRADING_PAUSED','kill switch');
   if(!l.live)refuse('TRADING_PAUSED','YEET_LIVE is not set');
   if(!accountLive(l,accountId))refuse('TRADING_PAUSED','account not in YEET_LIVE_ACCOUNTS');
-  if(TRUE.includes(String((chain==='sol'?env.YEET_SOLANA_PAUSE:env.YEET_BASE_PAUSE)??'').toLowerCase()))refuse('TRADING_PAUSED','SOURCE_PAUSED');
+  // chain null: the account gates alone (a BUY whose network is not chosen yet).
+  if(chain&&chainPaused(env,chain))refuse('TRADING_PAUSED','SOURCE_PAUSED');
  };
 }
 const chainEnv=(env,name)=>{const v=env[name]?.trim()||'sol';if(!CHAINS.includes(v))throw Error(`Invalid ${name}`);return v};
@@ -68,7 +72,8 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
  /** The account's XP for the tier caps (limits.mjs); an unreadable XP store counts as 0 XP (Noob, the lowest caps). */
  const xpTotal=id=>{try{const n=Number(xpOf(id));return Number.isFinite(n)?n:0}catch{return 0}};
  const gateFor=liveGate(env);
- const buyChain=chainEnv(env,'YEET_BUY_CHAIN'),sellChain=chainEnv(env,'YEET_SELL_CHAIN');
+ // buyChain: the YEET_BUY_CHAIN override, or 'auto' (the network is chosen per trade, funding.mjs).
+ const buyChain=forcedBuyChain(env)??'auto',sellChain=chainEnv(env,'YEET_SELL_CHAIN');
  const event=e=>{try{log(JSON.stringify(e))}catch{}};
  client??=new OneClickClient({jwt:env.ONECLICK_JWT||undefined,timeoutMs:6000,retryDelayMs:500,fetch:statusTolerantFetch(fetch)});
  balances??=createRpcBalances({baseRpcUrl:env.BASE_RPC_URL,solanaRpcUrl:env.SOLANA_RPC_URL,fetch});
@@ -77,7 +82,18 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
  ledger??=createLedger({db,now,sponsorLimits:readSponsorshipLimits(env),log:l=>event(JSON.parse(l))});
  drivers??=createDrivers({env,db,ledger,fetch,now,log:event,gateFor,liveBroadcast,overrides:driverOverrides});
  const codes=createConfirmCodes({db,now,mintLimit:limits.codeMintLimit});
- const proposals=createProposals({db,client,limits,wallets,codes,now,catalog,xpOf:xpTotal});
+ const funding=createFunding({env,wallets,drivers,catalog,now});
+ /** Contract fields a proposal carries about its networks: who pays a YEET (funding) and where the result lands. */
+ const routeOf=async(w,direction,amountRaw)=>{
+  if(direction!=='yeet')return {lands_on:NETWORK[sellChain]};
+  if(!w)return {lands_on:'solana'};
+  const bal=await funding.balances(w),view=funding.view(bal,amountRaw);
+  // BALANCE_LOW only on what was read: an unreadable network adds no warning by itself.
+  const known=bal.base!==null||bal.sol!==null,forced=funding.forced();
+  const low=view.chosen===null&&(forced?bal[forced]!==null:known&&funding.open().some(c=>bal[c]!==null));
+  return {funding:view,lands_on:'solana',low};
+ };
+ const proposals=createProposals({db,client,limits,wallets,codes,now,catalog,xpOf:xpTotal,routeOf});
  const tracker=createTracker({db,client,now,onSettled,intervalMs:trackerIntervalMs,trackMaxHours:limits.trackMaxHours,accounting:{raiseAlert:a=>ledger.raiseAlert(a),
   // Review finding 2: held BUY amounts return to the daily cap only after the deposit deadline, on 1Click's word.
   async tick(){await ledger.releaseDue((addr,memo)=>client.status(addr,memo));for(const d of Object.values(drivers))try{await d.accountingTick?.()}catch(e){event({event:'accounting_tick_failed',chain:d.chain,error:String(e?.message??e).slice(0,120)})}}}});
@@ -147,13 +163,15 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
  const legView=(t,l)=>({symbol:l.symbol,deposit_address:l.deposit_address,tx_hash:l.send_status==='sent'||l.send_status==='signing'?l.tx_hash??null:null,
   explorer_url:explorer(t.origin_chain,l.send_status==='sent'?l.tx_hash:null),status:l.send_status});
  /** The execute_trade answer for a stored trade (also what a replayed code gets). */
+ /** Contract `funded_from` / `lands_on` of a trade (tracker.networksOf); nothing for a trade without legs. */
+ const networksOf=t=>t?.receipt_json?tradeNetworks(t):{};
  async function answer(tradeId){
   const t=trade(tradeId);
   if(!t)refuse('TEMPORARILY_UNAVAILABLE','trade missing');
   if(t.result_json){const r=JSON.parse(t.result_json);if(r.error)throw new TradeError(r.error,'replayed failure');return r}
   const sign_requests=await signRequests(t),legs=legsOf(t.id);
   return {trade_id:t.id,proposal_id:t.proposal_id,direction:t.direction,status:legs.some(l=>l.send_status==='awaiting_signature')?'awaiting_signature':'submitted',
-   legs:legs.map(l=>legView(t,l)),sign_requests};
+   legs:legs.map(l=>legView(t,l)),sign_requests,...networksOf(t)};
  }
  /** Once no leg is open: the proposal's final status, and the stored failure when nothing was sent. */
  function settle(tradeId,lastError){
@@ -258,24 +276,34 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   const code=codes.check({code:confirm,accountId:ctx.accountId,clientId:ctx.clientId,proposalId:proposal_id,revision});
   if(code.used)return replay(code.trade_id);
   const p=proposals.row(proposal_id);
-  const chain=opts.chain??(p.direction==='yeet'?buyChain:sellChain);
+  // A BUY without an override has no network yet (null): it is chosen below from the person's balances.
+  const fixed=opts.chain??(p.direction==='yeet'?funding.forced():sellChain);
+  let chain=fixed;
   checkKillSwitch(limits);
-  gateFor(chain)(ctx.accountId);
+  gateFor(fixed)(ctx.accountId);
   if(p.status!=='proposed'||p.revision!==revision){const prior=existingTrade(p.id);if(prior)return replay(prior);refuse('CONFIRMATION_REQUIRED','revision is not current')}
   const legs=proposals.legsOf(p.id,revision);
   if(quoteHash(p.id,revision,legs)!==code.quote_sha256)refuse('CONFIRMATION_REQUIRED','quote changed');
-  const driver=driverOf(chain),ready=driver.readiness();
-  if(!ready.ok)refuse('TEMPORARILY_UNAVAILABLE',`driver ${chain}: ${ready.reasons.join(',')}`);
+  const readyOrRefuse=c=>{const d=driverOf(c),ready=d.readiness();if(!ready.ok)refuse('TEMPORARILY_UNAVAILABLE',`driver ${c}: ${ready.reasons.join(',')}`);return d};
+  if(fixed)readyOrRefuse(fixed);
   const w=await wallets.require(ctx.accountId);
   const total=legs.reduce((a,l)=>a+BigInt(l.amount_in_raw),0n);
   let held;
   if(p.direction==='yeet'){
    const xp=xpTotal(ctx.accountId);checkBasket(limits,legs.map(l=>BigInt(l.amount_in_raw)),capsFor(db,limits,ctx.accountId,now(),xp));
    checkDaily(db,limits,ctx.accountId,now(),total,xp);
-   const usdc=usdcOn(chain,catalog);
-   const have=chain==='sol'?(await wallets.holdings(w.solana.address)).filter(h=>h.mint===usdc.address).reduce((a,h)=>a+h.raw,0n):await wallets.usdc(w.base.address);
-   if(have<total)refuse('BALANCE_LOW');
+   if(fixed){
+    const usdc=usdcOn(chain,catalog);
+    const have=chain==='sol'?(await wallets.holdings(w.solana.address)).filter(h=>h.mint===usdc.address).reduce((a,h)=>a+h.raw,0n):await wallets.usdc(w.base.address);
+    if(have<total)refuse('BALANCE_LOW');
+   }else{
+    // The network whose USDC covers the whole basket (the larger balance when both do); BALANCE_LOW names both.
+    const f=await funding.choose(w,total);chain=f.chain;
+    gateFor(chain)(ctx.accountId);
+    event({event:'buy_chain_chosen',chain,base_usdc:f.balances.base?.toString()??null,sol_usdc:f.balances.sol?.toString()??null,total:total.toString()});
+   }
   }else held=await wallets.holdings(w.solana.address);
+  const driver=readyOrRefuse(chain);
   const live=await livePlan({direction:p.direction,legs,w,chain,slippageBps:p.slippage_bps,client,now,catalog});
   assertLivePlan({direction:p.direction,chain,live,legs,w,catalog});
   if(p.direction==='skeet')for(const [i,l] of live.legs.entries()){
@@ -349,7 +377,7 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   const fresh=r.state==='expired'?await signRequests(trade(t.id)):[];
   const cur=trade(t.id);
   return {trade_id:t.id,status:cur.status,legs:legsOf(t.id).map(x=>({leg:x.idx,symbol:x.symbol,send_status:x.send_status,tx_hash:['sent','signing'].includes(x.send_status)?x.tx_hash??null:null})),
-   ...(fresh.length?{sign_requests:fresh}:{}),...(dryRun?{dry_run:{state:r.state,simulation:r.simulation??null,fee_lamports:r.feeLamports??null,rent_lamports:r.rentLamports??null}}:{})};
+   ...networksOf(cur),...(fresh.length?{sign_requests:fresh}:{}),...(dryRun?{dry_run:{state:r.state,simulation:r.simulation??null,fee_lamports:r.feeLamports??null,rent_lamports:r.rentLamports??null}}:{})};
  }
 
  /** Operator cancel: legs still awaiting a signature become not_sent (nothing was signed, nothing can move). A trade
@@ -378,10 +406,9 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
    prices={at:now(),bySymbol}}catch{}
   return prices.bySymbol;
  }
- const solUsdc=async owner=>{const m=usdcOn('sol',catalog)?.address;return (await wallets.holdings(owner)).filter(h=>h.mint===m).reduce((a,h)=>a+h.raw,0n)};
 
  return {
-  limits,wallets,proposals,tracker,codes,ledger,drivers,buyChain,sellChain,catalog,
+  limits,wallets,proposals,tracker,codes,ledger,drivers,buyChain,sellChain,catalog,funding,
   /** The 1Click client (dry quotes for the lucky wheel's coin availability, core/xp/availability.mjs). */
   client,
   /** The proposal a trade of the account came from (the lucky wheel's claim, core.mjs). */
@@ -405,12 +432,15 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   /** yeet_home: wallets and readiness (no signer state: the person's own wallet signs). */
   async home(ctx){
    const w=await wallets.require(ctx.accountId,{refresh:true});
-   let usdc=null,funding=null;
-   try{usdc=await wallets.usdc(w.base.address)}catch{}
-   try{funding=buyChain==='sol'?await solUsdc(w.solana.address):usdc}catch{}
-   const r=drivers[buyChain]?.readiness?.()??{ok:false};
-   const ready=limits.killSwitch||!limits.live||!accountLive(limits,ctx.accountId)||!r.ok?'paused':funding!==null&&funding<limits.minLegRaw?'needs_funds':'ready';
-   return {wallets:{base:{address:w.base.address,usdc:usdc===null?null:usd(formatUnits(usdc,6))},solana:{address:w.solana.address}},ready,xp:null,recent_wins:[],limits:capsView(capsFor(db,limits,ctx.accountId,now(),xpTotal(ctx.accountId)))};
+   // USDC on both networks (null: not readable just now). The networks a buy may be paid from: the override, or
+   // every network that is not paused and whose driver is ready. Ready when one of them holds the minimum per coin
+   // (or cannot be read: unknown is not "needs funds"); needs_funds only when every one of them is known to be short.
+   const bal=await funding.balances(w,{fresh:true}),forced=funding.forced();
+   const from=forced?(drivers[forced]?.readiness?.().ok&&!chainPaused(env,forced)?[forced]:[]):funding.open();
+   const short=from.every(c=>bal[c]!==null&&bal[c]<limits.minLegRaw);
+   const ready=limits.killSwitch||!limits.live||!accountLive(limits,ctx.accountId)||!from.length?'paused':short?'needs_funds':'ready';
+   return {wallets:{base:{address:w.base.address,usdc:bal.base===null?null:usd(formatUnits(bal.base,6))},solana:{address:w.solana.address}},
+    funding:funding.view(bal,limits.minLegRaw),ready,xp:null,recent_wins:[],limits:capsView(capsFor(db,limits,ctx.accountId,now(),xpTotal(ctx.accountId)))};
   },
   /** yeet_portfolio: catalogue coins held on Solana (USDC on Solana included), USDC on Base. */
   async portfolio(ctx){

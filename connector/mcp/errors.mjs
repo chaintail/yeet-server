@@ -5,7 +5,8 @@ import {refusalGuidance} from './guidance.mjs';
 export function toolError(value,ctx){
  const code=normalize(value?.error);
  // LIMIT_EXCEEDED: the core's sentence with the person's tier, limits and amount left today (trade/limits.mjs).
- const own=code==='LIMIT_EXCEEDED'&&typeof value?.message==='string'&&value.message.length>=1&&value.message.length<=500?value.message:null;
+ // BALANCE_LOW: the core's sentence with the person's USDC on Base and on Solana (pipeline/funding.mjs).
+ const own=(code==='LIMIT_EXCEEDED'||code==='BALANCE_LOW')&&typeof value?.message==='string'&&value.message.length>=1&&value.message.length<=500?value.message:null;
  const data={error:code,message:own??toolMessage(code),retryable:isRetryable(code)};
  // BALANCE_LOW: where the person adds USDC (contract $defs.failure fund_url, https only); the card shows Add funds.
  if(code==='BALANCE_LOW'&&typeof value?.fund_url==='string'&&/^https:\/\/[^\s]{1,500}$/.test(value.fund_url))data.fund_url=value.fund_url;

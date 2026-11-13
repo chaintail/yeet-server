@@ -28,6 +28,13 @@ export function destinationAmounts(legs){
 /** Where a trade's source funds sit: trades.origin_chain, else the legacy rule (YEET from Base, SKEET from Solana). */
 export const originWallet=t=>t.origin_chain==='sol'?'Solana':t.origin_chain==='base'?'Base':t.direction==='yeet'?'Base':'Solana';
 
+/** Contract networks of a trade: the wallet that pays it and the wallet its result lands in. A BUY is paid from
+ * origin_chain and lands on Solana; a SELL is paid from Solana and lands where origin_chain says (the legacy rule for
+ * rows without one: BUY from Base, SELL to Base). */
+export const tradeNetworks=t=>{
+ const own=t.origin_chain==='sol'?'solana':'base';
+ return t.direction==='yeet'?{funded_from:own,lands_on:'solana'}:{funded_from:'solana',lands_on:own};
+};
 /** A router ReceiptLeg for a live plan leg (same fields as the router's own emptyLeg). */
 export function receiptLeg(l){
  const leg={index:l.index,symbol:l.symbol,depositAddress:l.depositAddress,status:null,final:false,updatedAt:null,
@@ -211,7 +218,7 @@ export function createTracker({db,client,now=Date.now,onSettled=()=>{},intervalM
    return {trade_id:t.id,direction:t.direction,status:t.status,
     legs:view.map(({_dest,...v})=>v),
     received:view.filter(v=>v.status==='SUCCESS'&&v.amount_out).map(v=>({symbol:t.direction==='yeet'?v.symbol:v._dest,amount:v.amount_out})),
-    updated_at:iso(t.updated_at),xp_award:null};
+    updated_at:iso(t.updated_at),xp_award:null,...tradeNetworks(t)};
   },
  };
 }

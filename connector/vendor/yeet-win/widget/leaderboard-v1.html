@@ -1365,6 +1365,9 @@ const signerCfg={"app_id":null,"script":null,"page":null};  // {app_id,script,pa
 const CONFIRM_KEY='yeet/confirm',SIGNER_KEY='yeet/signer';
 const POLL_MS=5000,POLL_MAX=360,SKEW_MS=2000,MAX_PARTS=99,AMOUNT_MAX=25,MORE_USDC='5';
 const FINAL=new Set(['success','partial','refunded','failed']);
+const OWN_MESSAGE=new Set(['LIMIT_EXCEEDED','BALANCE_LOW']);
+const NET={base:'Base',solana:'Solana'};
+const netOf=(v,fallback)=>Object.hasOwn(NET,v)?NET[v]:fallback;
 const SYMBOL=/^[A-Z0-9]{2,12}$/,DECIMAL=/^-?(0|[1-9][0-9]*)(\.[0-9]+)?$/;
 const PROPOSAL_ID=/^p_[a-z0-9]{20}$/,TRADE_ID=/^t_[a-z0-9]{20}$/,CODE=/^[A-Za-z0-9_-]{43}$/;
 const EVM_TX=/^0x[0-9a-fA-F]{64}$/,SOL_TX=/^[1-9A-HJ-NP-Za-km-z]{43,90}$/;
@@ -1436,7 +1439,7 @@ function errorEnvelope(r){
  const text=Array.isArray(r?.content)?r.content.find(c=>c&&c.type==='text'&&typeof c.text==='string')?.text:undefined;
  if(typeof text!=='string'||text.length>ERROR_TEXT_MAX)return null;
  try{const v=JSON.parse(text);if(!v||typeof v!=='object'||typeof v.error!=='string'||!/^[A-Z_]{1,40}$/.test(v.error))return null;const fund=fundUrl(v.fund_url);const out=fund?{error:v.error,fund_url:fund}:{error:v.error};
- if(v.error==='LIMIT_EXCEEDED'&&typeof v.message==='string'&&v.message.length>0&&v.message.length<=500)out.message=v.message;return out}catch{return null}
+ if(OWN_MESSAGE.has(v.error)&&typeof v.message==='string'&&v.message.length>0&&v.message.length<=500)out.message=v.message;return out}catch{return null}
 }
 function unwrap(r){
  if(!r||typeof r!=='object')return {data:{error:'TEMPORARILY_UNAVAILABLE'},meta:null};
@@ -1972,15 +1975,15 @@ function sharePanel(scene){
 }
 
 const WARN={COST_HIGH:'Cost is above 3%',LEG_SMALL:'One coin is near the minimum',BALANCE_LOW:'Not enough funds yet',SIGNER_MISSING:'Wallet needs set-up'};
-/** Marlin's route: USDC on Base, through NEAR Intents, to Solana (the other way for a SKEET). The dashes run while a trade runs. */
-function route(direction,symbols,state){
+/** Marlin's route: USDC on its network (`usdcNet`: Base or Solana), through NEAR Intents, to Solana (the other way for a SKEET). The dashes run while a trade runs. */
+function route(direction,symbols,state,usdcNet='Base'){
  const skeet=direction==='skeet';const box=mark(el('div','route'),'route');box.dataset.state=state;box.dataset.direction=skeet?'skeet':'yeet';
- const n=symbols.length;box.setAttribute('aria-label',skeet?`${n===1?symbols[0]:`${n} coins`} on Solana, through NEAR Intents, to USDC on Base`:`USDC on Base, through NEAR Intents, to ${n===1?symbols[0]:`${n} coins`} on Solana`);
+ const n=symbols.length;box.setAttribute('aria-label',skeet?`${n===1?symbols[0]:`${n} coins`} on Solana, through NEAR Intents, to USDC on ${usdcNet}`:`USDC on ${usdcNet}, through NEAR Intents, to ${n===1?symbols[0]:`${n} coins`} on Solana`);
  const node=(ic,title,sub)=>{const d=el('div','node');d.append(ic,el('b',null,title),document.createTextNode(sub));return d};
  const logo=sym=>{const i=el('i','cvi');i.append(cv(sym));return i};
  const wire=()=>{const w=el('div','wire');w.append(el('i'));return w};
  const near=el('i');near.append(use('c-near'));
- const usdc=()=>node(logo('USDC'),'USDC','Base'),coins=()=>node(logo('SOL'),n===1?symbols[0]:`${n} coins`,'Solana');
+ const usdc=()=>node(logo('USDC'),'USDC',usdcNet),coins=()=>node(logo('SOL'),n===1?symbols[0]:`${n} coins`,'Solana');
  box.append(skeet?coins():usdc(),wire(),node(near,'NEAR','Intents'),wire(),skeet?usdc():coins());
  return box;
 }
@@ -2034,8 +2037,8 @@ function renderBasket(p){
  const warns=(Array.isArray(p.warnings)?p.warnings:[]).filter(w=>Object.hasOwn(WARN,w)&&w!=='COST_HIGH');
  if(warns.length){const box=mark(el('div','chips'),'warns');for(const w of warns)box.append(el('span','chip plain',WARN[w]));c.append(box)}
  if(hold){const h=alertBox(hold.title,hold.text,'hold');h.dataset.role='hold';c.append(h)}
- else if(inlineError){const e=ERRORS[inlineError]||ERRORS.TEMPORARILY_UNAVAILABLE;c.append(alertBox(e[0],inlineError==='LIMIT_EXCEEDED'&&inlineMessage?inlineMessage:e[1],'problem'))}
- c.append(route(p.direction,traded,busy?'run':'idle'));
+ else if(inlineError){const e=ERRORS[inlineError]||ERRORS.TEMPORARILY_UNAVAILABLE;c.append(alertBox(e[0],OWN_MESSAGE.has(inlineError)&&inlineMessage?inlineMessage.slice(0,500):e[1],'problem'))}
+ c.append(route(p.direction,traded,busy?'run':'idle',skeet?netOf(p.lands_on,'Base'):p.funding?netOf(p.funding.chosen,'Base or Solana'):'Base'));
  const kv=mark(el('dl','kv'),'kv');
  if(skeet){
   const sells=el('dd','gets');for(const r of rows)if(r.sym)sells.append(num(null,`${amount(r.leg.amount_in)??'—'} ${r.sym}`));
@@ -2083,7 +2086,7 @@ function renderBasket(p){
 }
 const TRADE_TITLE={signing:'Signing',submitted:'Sent',settling:'Swapping',success:'YEETED.',partial:'Partly done',refunded:'Refunded',failed:'Didn’t go through',requote_required:'Price moved'};
 /** Where a leg's funds are at each status: [YEET, SKEET]. FAILED has no line; the refund reason covers it. */
-const FUNDS_AT={not_sent:['still in your Base wallet','still in your Solana wallet'],sent:['on the way to the 1Click deposit address','on the way to the 1Click deposit address'],PENDING_DEPOSIT:['on the way to the 1Click deposit address','on the way to the 1Click deposit address'],KNOWN_DEPOSIT_TX:['at the 1Click deposit address','at the 1Click deposit address'],INCOMPLETE_DEPOSIT:['at the 1Click deposit address, short of the quote','at the 1Click deposit address, short of the quote'],PROCESSING:['being swapped on NEAR Intents','being swapped on NEAR Intents'],SUCCESS:['in your Solana wallet','in your Base wallet'],REFUNDED:['refunded to your Base wallet','refunded to your Solana wallet']};
+const FUNDS_AT={not_sent:['still in your {from} wallet','still in your {from} wallet'],sent:['on the way to the 1Click deposit address','on the way to the 1Click deposit address'],PENDING_DEPOSIT:['on the way to the 1Click deposit address','on the way to the 1Click deposit address'],KNOWN_DEPOSIT_TX:['at the 1Click deposit address','at the 1Click deposit address'],INCOMPLETE_DEPOSIT:['at the 1Click deposit address, short of the quote','at the 1Click deposit address, short of the quote'],PROCESSING:['being swapped on NEAR Intents','being swapped on NEAR Intents'],SUCCESS:['in your {to} wallet','in your {to} wallet'],REFUNDED:['refunded to your {from} wallet','refunded to your {from} wallet']};
 const ROUTE_STATE={success:'done',partial:'done',refunded:'off',failed:'off'};
 const SETTLE_MS=240000;
 /** One coin, in the person's words: [label, tone, state]. From trade_status legs[i].status (1Click) and, while this card
@@ -2120,7 +2123,7 @@ function legRows(t){
   const links=el('span','links');if(u1)links.append(link('Deposit',u1));if(u2)links.append(link('Swap',u2));if(links.childElementCount)right.append(links);
   r.append(right);
   const key=at==='sign'||at==='send'||(at==='failed'&&l.status!=='FAILED')?'not_sent':l.status;
-  const where=Object.hasOwn(FUNDS_AT,key)?FUNDS_AT[key][skeet?1:0]:null;
+  const where=Object.hasOwn(FUNDS_AT,key)?FUNDS_AT[key][skeet?1:0].replace('{from}',skeet?'Solana':netOf(t.funded_from,'Base')).replace('{to}',skeet?netOf(t.lands_on,'Base'):'Solana'):null;
   if(where)r.append(mark(el('p','where',`Funds ${where}`),`where:${sym}`,true));
   if(typeof l.refund_reason==='string'&&l.refund_reason)r.append(el('p','reason',l.refund_reason.slice(0,200)));
   list.append(r);
@@ -2154,7 +2157,7 @@ function renderReceipt(t){
  const mine=trading?.trade_id===t.trade_id?trading:null;
  let c;settleUi=null;
  if(t.status==='success'){
-  const when=clock(t.updated_at);c=card('receipt done',null,`Landed on ${skeet?'Base':'Solana'}${when?` · ${when}`:''}`);c.querySelector('.meta').style.marginLeft='0';
+  const when=clock(t.updated_at);c=card('receipt done',null,`Landed on ${skeet?netOf(t.lands_on,'Base'):'Solana'}${when?` · ${when}`:''}`);c.querySelector('.meta').style.marginLeft='0';
   const h=mark(el('div','done-h'),'done',true);h.append(el('span','shim',skeet?'SKEETED.':'YEETED.'));c.append(h);
   const coins=el('div','done-coins go');coins.setAttribute('aria-hidden','true');
   (skeet?['USDC']:got.map(r=>r.symbol)).slice(0,6).forEach((s,i)=>{const sp=el('span');sp.style.animationDelay=`${(i*.08).toFixed(2)}s`;sp.append(cv(s));coins.append(sp)});
@@ -2174,7 +2177,7 @@ function renderReceipt(t){
    if(page&&mine.page){const box=mark(el('div','yc-alert pagebox'),'page');box.append(el('strong',null,'A YEET page opened in your browser'),el('span',null,'Your wallet signs there. This card follows the trade.'));
     const a=link('Open the signing page',mine.page);a.dataset.role='sign-page';box.append(a);c.append(box)}
   }
-  if(syms.length)c.append(route(t.direction,syms,stopped?'off':ROUTE_STATE[t.status]??'run'));
+  if(syms.length)c.append(route(t.direction,syms,stopped?'off':ROUTE_STATE[t.status]??'run',skeet?netOf(t.lands_on,'Base'):netOf(t.funded_from,'Base')));
   if(legs.length)c.append(legRows(t));
   if(settleUi)c.append(settleUi.say);
   if(got.length){const kv=mark(el('dl','kv'),'got');kv.style.marginTop='12px';const g=el('dd','gets');for(const r of got)g.append(el('span','num',`${amount(r.amount)} ${r.symbol}`));const d=el('div');d.append(el('dt',null,'You got'),g);kv.append(d);c.append(kv)}
@@ -2189,14 +2192,16 @@ function renderReceipt(t){
  const when=clock(t.updated_at);if(when&&t.status!=='success')c.append(el('p','fine',`Updated ${when}`));
  return c;
 }
-const READY={ready:['Ready to YEET','ok'],needs_signer:['Finish wallet set-up','wait'],needs_funds:['Add USDC on Base','wait'],paused:['Trading paused','bad']};
+const READY={ready:['Ready to YEET','ok'],needs_signer:['Finish wallet set-up','wait'],needs_funds:['Add USDC','wait'],paused:['Trading paused','bad']};
 function renderHome(h){
  const c=card('home',null,null);const [label,tone]=READY[h.ready]??['Checking…','wait'];
  const hd=mark(el('div','yc-h'),'head',true);const logo=el('h1','home-logo');logo.append(el('span','sr','YEET'),brandMark('logo','wordmark'));hd.append(logo,el('span',`meta stat ${tone}`,label));c.append(hd);
- const tot=el('div','bag-tot');tot.append(mark(el('span','v num',money(h.wallets?.base?.usdc)??'—'),'usdc',true),el('span','next','USDC on Base'));c.append(tot);
+ const f=h.funding&&typeof h.funding==='object'?h.funding:null,fb=money(f?.base_usdc),fs=money(f?.solana_usdc);
+ const all=f?(fb||fs?usdFmt.format((fb?Number(f.base_usdc):0)+(fs?Number(f.solana_usdc):0)):null):money(h.wallets?.base?.usdc);
+ const tot=el('div','bag-tot');tot.append(mark(el('span','v num',all??'—'),'usdc',true),el('span','next',f?'USDC':'USDC on Base'));c.append(tot);
  const list=el('div','rows');
- const base=mark(el('div','prow usdc'),'row:base');base.append(cv('USDC'));{const nm=el('div','nm');nm.append(el('div','tk','USDC on Base'));const v=el('div','vline');v.append(el('span','pct',shortAddr(h.wallets?.base?.address)));nm.append(v);base.append(nm,el('span'))}
- const sol=mark(el('div','prow'),'row:sol');sol.append(cv('SOL'));{const nm=el('div','nm');nm.append(el('div','tk','Solana wallet'));const v=el('div','vline');v.append(el('span','pct',shortAddr(h.wallets?.solana?.address)));nm.append(v);sol.append(nm,el('span','next','Coins land here'))}
+ const base=mark(el('div','prow usdc'),'row:base');base.append(cv('USDC'));{const nm=el('div','nm');nm.append(el('div','tk','USDC on Base'));const v=el('div','vline');v.append(el('span','pct',shortAddr(h.wallets?.base?.address)));nm.append(v);base.append(nm,f?mark(el('span','next num',fb??'—'),'usdc:base',true):el('span'))}
+ const sol=mark(el('div','prow'),'row:sol');sol.append(cv('SOL'));{const nm=el('div','nm');nm.append(el('div','tk',f?'USDC on Solana':'Solana wallet'));const v=el('div','vline');v.append(el('span','pct',shortAddr(h.wallets?.solana?.address)));nm.append(v);sol.append(nm,f?mark(el('span','next num',fs??'—'),'usdc:solana',true):el('span','next','Coins land here'))}
  list.append(base,sol);list.style.marginBottom='12px';c.append(list);
  const fund=h.ready==='needs_funds'?fundUrl(h.fund_url):null;
  if(fund)c.append(fundButton(fund));
@@ -2260,7 +2265,7 @@ const REFRESHABLE=new Set(['REQUOTE_REQUIRED','CONFIRMATION_REQUIRED','COST_TOO_
 function renderError(d,proposal_id){
  const code=typeof d?.error==='string'&&Object.hasOwn(ERRORS,d.error)?d.error:'TEMPORARILY_UNAVAILABLE';const [title,body,retryable]=ERRORS[code];
  const c=card('problem',title,null);c.dataset.code=code;c.setAttribute('role','alert');
- c.append(el('p','msg',code==='LIMIT_EXCEEDED'&&typeof d?.message==='string'?d.message.slice(0,500):body));
+ c.append(el('p','msg',OWN_MESSAGE.has(code)&&typeof d?.message==='string'&&d.message?d.message.slice(0,500):body));
  const fund=code==='BALANCE_LOW'?fundUrl(d.fund_url):null;
  if(fund)c.append(fundButton(fund));
  const pid=proposal_id||state.proposal_id;

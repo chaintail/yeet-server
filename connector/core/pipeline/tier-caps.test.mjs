@@ -93,7 +93,7 @@ test('an XP store that cannot be read counts as 0 XP (Noob caps)',async()=>{
  await limitExceeded(buy(p,26),/Noob \(0 XP\)/);
 });
 
-test('the product sentence reaches the tool result: core failure -> MCP toolError (LIMIT_EXCEEDED only)',async()=>{
+test('the product sentence reaches the tool result: core failure -> MCP toolError (LIMIT_EXCEEDED and BALANCE_LOW only)',async()=>{
  const {failure,withUserMessage}=await import('../failure.mjs');
  const {toolError}=await import('../../mcp/errors.mjs');
  const {p}=fakePipeline({xp:0,holdings:rich});
@@ -105,9 +105,12 @@ test('the product sentence reaches the tool result: core failure -> MCP toolErro
  assert.equal(r.error,'LIMIT_EXCEEDED');assert.match(r.message,/25 USDC per-trade limit as a Noob \(0 XP\)/);
  // The guidance for the model names the tier from that sentence and what unlocks the next one (mcp/guidance.mjs).
  assert.match(r.guidance,/YEET/);
- // Any other code keeps the catalogue text.
- const other=JSON.parse(toolError({error:'BALANCE_LOW',message:'made up'}).content[0].text);
+ // BALANCE_LOW carries the core's sentence with both balances (pipeline/funding.mjs); any other code keeps the catalogue text.
+ const low=JSON.parse(toolError({error:'BALANCE_LOW',message:'you have $4.00 USDC on Base and you have $7.50 USDC on Solana.'}).content[0].text);
+ assert.match(low.message,/USDC on Base/);
+ const other=JSON.parse(toolError({error:'COST_TOO_HIGH',message:'made up'}).content[0].text);
  assert.notEqual(other.message,'made up');
+ assert.equal(withUserMessage(failure('COST_TOO_HIGH'),{userMessage:'made up'}).message,failure('COST_TOO_HIGH').message);
 });
 
 test('SELL is never capped: above every cap, on an account whose daily BUY limit is used up, it goes through and is not counted',async()=>{

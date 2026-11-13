@@ -27,7 +27,10 @@ export async function routed(fn){
 /** Hash of what a confirm code approves: proposal, revision and each leg's coin, exact input and minimum output. */
 export const quoteHash=(proposalId,revision,legs)=>sha256({proposalId,revision,legs:legs.map(l=>({symbol:l.symbol,asset:l.asset_id,in:l.amount_in_raw,min:l.dry_min_out_raw}))});
 
-export function createProposals({db,client,limits,wallets,codes,now=Date.now,catalog=CATALOG,xpOf}){
+export function createProposals({db,client,limits,wallets,codes,now=Date.now,catalog=CATALOG,xpOf,routeOf}){
+ // routeOf(w, direction, amountRaw) -> {funding?, lands_on, low?} (the pipeline, funding.mjs): the person's USDC on
+ // both networks, the network that pays this YEET, and where the result lands. Without it (old engine) a YEET is
+ // checked against USDC on Base alone and the proposal carries neither field.
  // XP tier caps (limits.mjs TIER_DEFAULTS) when an XP reader is given (the pipeline); without one (old engine) the
  // account-blind ceiling applies. BUY only: SKEET is never capped.
  const xp=accountId=>{if(!xpOf)return undefined;try{const n=Number(xpOf(accountId));return Number.isFinite(n)?n:0}catch{return 0}};
@@ -73,9 +76,10 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
   for(const l of legs)ins.run(id,revision,l.idx,l.symbol,l.asset_id,l.parts,l.percent,l.amount_in_raw,l.amount_in,l.in_usd,l.dry_out_raw,l.dry_out,l.dry_min_out_raw,l.dry_min_out,l.out_usd,l.time_estimate_s,l.quoted_at);
  }
  /** Warnings that depend on the person's wallet: balance and signer. Failures to read the balance add none. */
- async function walletWarnings(w,direction,amount){
+ async function walletWarnings(w,direction,amount,route){
   const out=[];
-  if(direction==='yeet'&&w){try{if(await wallets.usdc(w.base.address)<amount)out.push('BALANCE_LOW')}catch{}}
+  if(route){if(route.low)out.push('BALANCE_LOW')}
+  else if(direction==='yeet'&&w){try{if(await wallets.usdc(w.base.address)<amount)out.push('BALANCE_LOW')}catch{}}
   if(w&&w.base.signerState!=='granted')out.push('SIGNER_MISSING');
   return out;
  }
@@ -103,7 +107,10 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
   return codes.mint({accountId,clientId,proposalId:p.id,revision,quoteSha:quoteHash(p.id,revision,legsOf(p.id,revision))},opts);
  }
  async function present(p,revision,ctx,w){
-  const out=withLimits(view(p,revision,await walletWarnings(w,p.direction,BigInt(p.amount_in_raw))),ctx.accountId);
+  let route=null;
+  if(routeOf){try{route=await routeOf(w,p.direction,BigInt(p.amount_in_raw))}catch{route=null}}
+  const {low:_low,...networks}=route??{};
+  const out={...withLimits(view(p,revision,await walletWarnings(w,p.direction,BigInt(p.amount_in_raw),route)),ctx.accountId),...networks};
   return p.status==='proposed'&&p.revision===revision?{...out,confirm:mint(p,revision,ctx.accountId,ctx.clientId)}:out;
  }
  /** Same request again: the stored proposal (latest revision). Another payload under the same id: INVALID_ARGUMENT. */

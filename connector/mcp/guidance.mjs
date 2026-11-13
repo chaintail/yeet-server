@@ -11,6 +11,9 @@ export const COPY=Object.freeze({
   needs_funds_no_wheel:"YEET yeet_home.needs_funds_no_wheel.",
   ready_spin:"YEET yeet_home.ready_spin.",
   ready_usdc:"YEET yeet_home.ready_usdc: {usdc}.",
+
+  ready_funding:"YEET yeet_home.ready_funding: {base} {solana} {network}.",
+  ready_funding_unread:"YEET yeet_home.ready_funding_unread: {usdc} {network} {other}.",
   ready:"YEET yeet_home.ready.",
  },
  yeet_coins:{
@@ -19,8 +22,13 @@ export const COPY=Object.freeze({
 
  propose_yeet:{
   base:"YEET propose_yeet.base.",
+
+  base_funded:"YEET propose_yeet.base_funded: {network}.",
+  base_funded_unread:"YEET propose_yeet.base_funded_unread: {network} {other}.",
   signer_missing:"YEET propose_yeet.signer_missing.",
   balance_low:"YEET propose_yeet.balance_low.",
+
+  balance_low_funding:"YEET propose_yeet.balance_low_funding: {base} {solana}.",
   cost_high:"YEET propose_yeet.cost_high: {cost_pct}.",
   risk:"YEET propose_yeet.risk.",
  },
@@ -31,6 +39,7 @@ export const COPY=Object.freeze({
  },
  execute_trade:{
   awaiting_signature:"YEET execute_trade.awaiting_signature.",
+  awaiting_signature_yeet:"YEET execute_trade.awaiting_signature_yeet: {network}.",
   submitted:"YEET execute_trade.submitted.",
   requote_required:"YEET execute_trade.requote_required.",
  },
@@ -44,6 +53,10 @@ export const COPY=Object.freeze({
   success_yeet_no_wheel:"YEET trade.success_yeet_no_wheel.",
   success_skeet_xp:"YEET trade.success_skeet_xp: {points}.",
   success_skeet:"YEET trade.success_skeet.",
+
+  success_skeet_xp_on:"YEET trade.success_skeet_xp_on: {network} {points}.",
+  success_skeet_on:"YEET trade.success_skeet_on: {network}.",
+  refunded_yeet_on:"YEET trade.refunded_yeet_on: {network}.",
   partial:"YEET trade.partial.",
   refunded_yeet:"YEET trade.refunded_yeet.",
   refunded_skeet:"YEET trade.refunded_skeet.",
@@ -87,6 +100,8 @@ export const COPY=Object.freeze({
   TRADING_PAUSED:"YEET errors.TRADING_PAUSED.",
   TRADING_PAUSED_no_wheel:"YEET errors.TRADING_PAUSED_no_wheel.",
   BALANCE_LOW:"YEET errors.BALANCE_LOW.",
+
+  BALANCE_LOW_usdc:"YEET errors.BALANCE_LOW_usdc.",
   TEMPORARILY_UNAVAILABLE:"YEET errors.TEMPORARILY_UNAVAILABLE_no_send.",
   COST_TOO_HIGH:"YEET errors.COST_TOO_HIGH.",
   AMOUNT_TOO_SMALL:"YEET errors.AMOUNT_TOO_SMALL.",
@@ -113,12 +128,23 @@ const hasWheel=ctx=>!ctx||!ctx.tools||ctx.tools.has('daily_spin');
 const hasLucky=ctx=>!ctx||!ctx.tools||ctx.tools.has('lucky_wheel');
 const positive=v=>typeof v==='string'&&Number(v)>0;
 
+const NET={base:'Base',solana:'Solana'};
+const netName=v=>Object.hasOwn(NET,v)?NET[v]:null;
+const fundingOf=r=>r?.funding&&typeof r.funding==='object'&&netName(r.funding.chosen)?r.funding:null;
+const otherOf=n=>n==='base'?'Solana':'Base';
+const usdcOf=(f,n)=>n==='base'?f.base_usdc:f.solana_usdc;
+
 function home(r,ctx){
  const c=COPY.yeet_home,spin=r.xp?.spin_available===true||(r.xp?.spins_available??0)>0;
  if(r.ready==='paused')return hasWheel(ctx)?c.paused:c.paused_no_wheel;
  if(r.ready==='needs_signer')return c.needs_signer;
  if(r.ready==='needs_funds')return !hasWheel(ctx)||!r.xp?c.needs_funds_no_wheel:spin?c.needs_funds_spin:c.needs_funds;
  if(spin&&hasWheel(ctx))return c.ready_spin;
+ const f=fundingOf(r);
+ if(f){
+  if(typeof f.base_usdc==='string'&&typeof f.solana_usdc==='string')return fill(c.ready_funding,{base:f.base_usdc,solana:f.solana_usdc,network:netName(f.chosen)});
+  if(positive(usdcOf(f,f.chosen)))return fill(c.ready_funding_unread,{usdc:usdcOf(f,f.chosen),network:netName(f.chosen),other:otherOf(f.chosen)});
+ }
  const usdc=r.wallets?.base?.usdc;
  return positive(usdc)?fill(c.ready_usdc,{usdc}):c.ready;
 }
@@ -129,8 +155,11 @@ function proposal(r){
   return join(c.base,w.has('COST_HIGH')?fill(c.cost_high,{cost_pct:r.totals?.cost_pct}):'');
  }
  const c=COPY.propose_yeet;
- const note=w.has('SIGNER_MISSING')?c.signer_missing:w.has('BALANCE_LOW')?c.balance_low:w.has('COST_HIGH')?fill(c.cost_high,{cost_pct:r.totals?.cost_pct}):'';
- return join(c.base,note,c.risk);
+ const f=fundingOf(r),both=r.funding&&typeof r.funding.base_usdc==='string'&&typeof r.funding.solana_usdc==='string';
+ const low=both?fill(c.balance_low_funding,{base:r.funding.base_usdc,solana:r.funding.solana_usdc}):c.balance_low;
+ const note=w.has('SIGNER_MISSING')?c.signer_missing:w.has('BALANCE_LOW')?low:w.has('COST_HIGH')?fill(c.cost_high,{cost_pct:r.totals?.cost_pct}):'';
+ const head=!f?c.base:usdcOf(f,otherOf(f.chosen).toLowerCase())===null?fill(c.base_funded_unread,{network:netName(f.chosen),other:otherOf(f.chosen)}):fill(c.base_funded,{network:netName(f.chosen)});
+ return join(head,note,c.risk);
 }
 function trade(r,ctx){
  const c=COPY.trade,skeet=r.direction==='skeet',left=(r.sign_requests??[]).length;
@@ -139,11 +168,11 @@ function trade(r,ctx){
   case 'signing':return left>0?fill(c.signing_more,{left,s:plural(left)}):skeet?c.settling_skeet:c.settling_yeet;
   case 'submitted':case 'settling':return skeet?c.settling_skeet:c.settling_yeet;
   case 'success':
-   if(skeet)return points?fill(c.success_skeet_xp,{points}):c.success_skeet;
+   if(skeet){const network=netName(r.lands_on);return network?(points?fill(c.success_skeet_xp_on,{network,points}):fill(c.success_skeet_on,{network})):points?fill(c.success_skeet_xp,{points}):c.success_skeet}
    if(!hasWheel(ctx))return c.success_yeet_no_wheel;
    return points?fill(c.success_yeet_xp,{points}):c.success_yeet;
   case 'partial':return c.partial;
-  case 'refunded':return skeet?c.refunded_skeet:c.refunded_yeet;
+  case 'refunded':return skeet?c.refunded_skeet:netName(r.funded_from)?fill(c.refunded_yeet_on,{network:netName(r.funded_from)}):c.refunded_yeet;
   default:return c.failed;
  }
 }
@@ -151,7 +180,7 @@ function execute(r,ctx){
  const c=COPY.execute_trade;
  if(r.status==='requote_required')return c.requote_required;
  if(r.status==='submitted')return c.submitted;
- return c.awaiting_signature;
+ return r.direction==='yeet'&&netName(r.funded_from)?fill(c.awaiting_signature_yeet,{network:netName(r.funded_from)}):c.awaiting_signature;
 }
 function portfolio(r){
  const c=COPY.yeet_portfolio,held=(r.solana?.holdings??[]).filter(h=>positive(h.amount));
@@ -202,5 +231,6 @@ export function refusalGuidance(code,message,ctx){
   return fill(tier?e[`LIMIT_EXCEEDED_${tier}`]:e.LIMIT_EXCEEDED,TIER_XP);
  }
  if(code==='TRADING_PAUSED'&&!hasWheel(ctx))return e.TRADING_PAUSED_no_wheel;
+ if(code==='BALANCE_LOW'&&typeof message==='string'&&/USDC on Base/.test(message)&&/Solana/.test(message))return e.BALANCE_LOW_usdc;
  return e[code];
 }

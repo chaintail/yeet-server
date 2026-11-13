@@ -238,6 +238,13 @@
         "limits": {
           "$ref": "#/$defs/limits"
         },
+        "funding": {
+          "$ref": "#/$defs/funding"
+        },
+        "lands_on": {
+          "$ref": "#/$defs/network",
+          "description": "The network the result lands on: coins on Solana for a YEET; for a SKEET the network the USDC is paid out on."
+        },
         "guidance": {
           "$ref": "#/$defs/guidance"
         }
@@ -280,7 +287,8 @@
         "message": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 500
+          "maxLength": 500,
+          "description": "With BALANCE_LOW on a trade it names the person’s USDC on Base and on Solana."
         },
         "retryable": {
           "type": "boolean"
@@ -1183,6 +1191,56 @@
       "minLength": 1,
       "maxLength": 500,
       "description": "Text for the assistant about this result; the card does not read it."
+    },
+    "network": {
+      "enum": [
+        "base",
+        "solana"
+      ],
+      "description": "A network one of the person’s two YEET wallets is on."
+    },
+    "funding": {
+      "type": "object",
+      "description": "The person’s USDC on each network and the network that pays a YEET. USDC on Base or on Solana can pay; one network pays the whole basket (never split). A null balance could not be read just now.",
+      "properties": {
+        "base_usdc": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/usdc"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "solana_usdc": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/usdc"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "chosen": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/network"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The network whose USDC pays: the one that covers the amount, the larger balance when both do. null when neither covers it."
+        }
+      },
+      "required": [
+        "base_usdc",
+        "solana_usdc",
+        "chosen"
+      ],
+      "additionalProperties": false
     }
   },
   "tools": {
@@ -1241,6 +1299,9 @@
             ],
             "additionalProperties": false
           },
+          "funding": {
+            "$ref": "#/$defs/funding"
+          },
           "ready": {
             "enum": [
               "ready",
@@ -1251,7 +1312,7 @@
           },
           "fund_url": {
             "$ref": "#/$defs/https_url",
-            "description": "Where the person adds USDC on Base. The card opens it from its Add funds button while ready is needs_funds."
+            "description": "Where the person adds USDC: a transfer on Base or on Solana, or by card. The card opens it from its Add funds button while ready is needs_funds."
           },
           "xp": {
             "anyOf": [
@@ -1728,6 +1789,14 @@
             "minItems": 0,
             "maxItems": 5
           },
+          "funded_from": {
+            "$ref": "#/$defs/network",
+            "description": "The network of the wallet that pays this trade: USDC on that network for a YEET, the coins on Solana for a SKEET."
+          },
+          "lands_on": {
+            "$ref": "#/$defs/network",
+            "description": "The network the result lands on: coins on Solana for a YEET; for a SKEET the network the USDC is paid out on."
+          },
           "requote": {
             "$ref": "#/$defs/proposal"
           },
@@ -1863,6 +1932,14 @@
             },
             "minItems": 1,
             "maxItems": 5
+          },
+          "funded_from": {
+            "$ref": "#/$defs/network",
+            "description": "The network of the wallet that pays this trade: USDC on that network for a YEET, the coins on Solana for a SKEET."
+          },
+          "lands_on": {
+            "$ref": "#/$defs/network",
+            "description": "The network the result lands on: coins on Solana for a YEET; for a SKEET the network the USDC is paid out on."
           },
           "sign_requests": {
             "$ref": "#/$defs/sign_requests"
@@ -2002,6 +2079,14 @@
             },
             "minItems": 1,
             "maxItems": 5
+          },
+          "funded_from": {
+            "$ref": "#/$defs/network",
+            "description": "The network of the wallet that pays this trade: USDC on that network for a YEET, the coins on Solana for a SKEET."
+          },
+          "lands_on": {
+            "$ref": "#/$defs/network",
+            "description": "The network the result lands on: coins on Solana for a YEET; for a SKEET the network the USDC is paid out on."
           },
           "received": {
             "type": "array",
