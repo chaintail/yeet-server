@@ -186,7 +186,9 @@ test('A-4: a signed-in, consented token lists the P0 and P1 tools over HTTP, exe
  const trade=await call('execute_trade',{proposal_id:'p_abcdefghij0123456789',revision:1,confirm:'a'.repeat(43)});
  assert.equal(JSON.parse(trade.content[0].text).error,'CONFIRMATION_REQUIRED');
  const templates=await (await rpc({jsonrpc:'2.0',id:4,method:'resources/list'},tok.access_token)).json();
- assert.deepEqual(templates.result.resources.map(x=>x.uri).sort(),['ui://yeet/basket-v1.html','ui://yeet/home-v1.html','ui://yeet/leaderboard-v1.html','ui://yeet/portfolio-v1.html','ui://yeet/receipt-v1.html']);
+ const served=templates.result.resources.map(x=>x.uri).sort();
+ assert.deepEqual(served,Object.values((await import('../mcp/tool-contract.mjs')).CARDS).map(c=>c.uri).sort(),'one template per contract card');
+ for(const uri of ['ui://yeet/overview-v1.html','ui://yeet/basket-v1.html','ui://yeet/home-v1.html','ui://yeet/leaderboard-v1.html','ui://yeet/portfolio-v1.html','ui://yeet/receipt-v1.html'])assert.ok(served.includes(uri),uri);
 });
 
 test('B-1 end to end through the connector with a real token: propose, quote, execute, the wallet signs, submit_trade_signature, trade_status success',async()=>{

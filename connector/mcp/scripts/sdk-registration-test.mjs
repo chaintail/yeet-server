@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
 import {createMcpServer,TOOLS} from '../tool-registration.mjs';
-import {HOME_UI_URI,BASKET_UI_URI,RECEIPT_UI_URI,PORTFOLIO_UI_URI,LEADERBOARD_UI_URI,CONFIRM_META_KEY,TEMPLATE_MIME} from '../widgets.mjs';
+import {OVERVIEW_UI_URI,HOME_UI_URI,BASKET_UI_URI,RECEIPT_UI_URI,PORTFOLIO_UI_URI,LEADERBOARD_UI_URI,CONFIRM_META_KEY,TEMPLATE_MIME} from '../widgets.mjs';
 import {allScopes} from '#scope-catalog';
 import {instructions} from '../instructions.mjs';
 import {COPY} from '../guidance.mjs';
+import {contract} from '../tool-contract.mjs';
 
 const LISTED=['execute_trade','skeet_propose','submit_trade_signature','trade_status','yeet_coins','yeet_home','yeet_overview','yeet_portfolio','yeet_propose','yeet_quote'];
 const P2=['daily_spin','yeet_leaderboard','yeet_set_username','lucky_wheel','lucky_spin'];
@@ -35,7 +36,7 @@ test('tools/list: P0 and P1 tools with the contract annotations, scopes, cards a
   for(const n of ['yeet_propose','yeet_quote','skeet_propose'])assert.deepEqual(by[n].annotations,{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},n);
   assert.deepEqual(by.execute_trade.annotations,{readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:true});
   const template=Object.fromEntries(tools.map(t=>[t.name,t._meta?.['openai/outputTemplate']]));
-  assert.deepEqual(template,{yeet_overview:undefined,yeet_home:HOME_UI_URI,yeet_coins:undefined,yeet_propose:BASKET_UI_URI,yeet_quote:BASKET_UI_URI,execute_trade:RECEIPT_UI_URI,trade_status:RECEIPT_UI_URI,yeet_portfolio:PORTFOLIO_UI_URI,skeet_propose:BASKET_UI_URI,submit_trade_signature:RECEIPT_UI_URI});
+  assert.deepEqual(template,{yeet_overview:OVERVIEW_UI_URI,yeet_home:HOME_UI_URI,yeet_coins:undefined,yeet_propose:BASKET_UI_URI,yeet_quote:BASKET_UI_URI,execute_trade:RECEIPT_UI_URI,trade_status:RECEIPT_UI_URI,yeet_portfolio:PORTFOLIO_UI_URI,skeet_propose:BASKET_UI_URI,submit_trade_signature:RECEIPT_UI_URI});
   for(const t of tools)assert.equal(t._meta?.ui?.resourceUri,template[t.name]);
   const access=Object.fromEntries(tools.map(t=>[t.name,t._meta?.['openai/widgetAccessible']]));
   assert.deepEqual(access,{yeet_overview:true,yeet_home:true,yeet_coins:false,yeet_propose:true,yeet_quote:true,execute_trade:true,submit_trade_signature:true,trade_status:true,yeet_portfolio:true,skeet_propose:true});
@@ -74,11 +75,12 @@ test('server info and instructions are YEET (plan 2.4)',async()=>{
  }finally{await close()}
 });
 
-test('resources: the five vendored card templates are served with the app MIME type and a script',async()=>{
+test('resources: every vendored card template is served with the app MIME type and a script',async()=>{
  const {client,close}=await connect({scope:allScopes.join(' ')},async()=>({}));
  try{
   const {resources}=await client.listResources();
-  assert.deepEqual(resources.map(r=>r.uri).sort(),[BASKET_UI_URI,HOME_UI_URI,LEADERBOARD_UI_URI,PORTFOLIO_UI_URI,RECEIPT_UI_URI].sort());
+  assert.deepEqual(resources.map(r=>r.uri).sort(),Object.values(contract['x-yeet-cards']).map(c=>c.uri).sort());
+  for(const uri of [OVERVIEW_UI_URI,BASKET_UI_URI,HOME_UI_URI,LEADERBOARD_UI_URI,PORTFOLIO_UI_URI,RECEIPT_UI_URI])assert.ok(resources.some(r=>r.uri===uri),uri);
   for(const r of resources){
    const {contents:[c]}=await client.readResource({uri:r.uri});
    assert.equal(c.mimeType,TEMPLATE_MIME);assert.match(c.text,/<script>/);assert.doesNotMatch(c.text,/yeet\/confirm.{0,40}[A-Za-z0-9_-]{43}/);

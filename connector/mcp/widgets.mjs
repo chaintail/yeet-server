@@ -1,5 +1,5 @@
 // ChatGPT cards from the vendored yeet-win widget package (vendor/yeet-win/widget/, commit in vendor/yeet-win/PINNED):
-// home, basket, receipt, portfolio and leaderboard, one self-contained template each. Card ids, URIs, titles and
+// one self-contained template per card (overview, home, basket, receipt, portfolio, leaderboard, ...). Card ids, URIs, titles and
 // descriptions come from the contract's `x-yeet-cards`; the template file per URI from the widget's templates.json.
 import {readFileSync} from 'node:fs';
 import {CARDS,META_KEYS,toolSpecs} from './tool-contract.mjs';
@@ -11,6 +11,7 @@ export const CARD_META_KEY = META_KEYS.card;
 export const CONFIRM_META_KEY = META_KEYS.confirm;
 /** Protocol MIME type for app templates. */
 export const TEMPLATE_MIME = 'text/html;profile=mcp-app';
+export const OVERVIEW_UI_URI = CARDS.overview.uri;
 export const HOME_UI_URI = CARDS.home.uri;
 export const BASKET_UI_URI = CARDS.basket.uri;
 export const RECEIPT_UI_URI = CARDS.receipt.uri;

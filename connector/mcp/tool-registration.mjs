@@ -64,9 +64,9 @@ export const registeredTools=(env=process.env)=>Object.values(toolSpecs).filter(
 export const TOOLS=Object.freeze(Object.values(toolSpecs).map(t=>Object.freeze({...t,route:ROUTES[t.name]})));
 for(const t of TOOLS)if(!t.route)throw Error(`No core route for contract tool ${t.name}`);
 
-/** Results that carry `_meta['yeet/signer']` (CARD-SIGNING.md section 2.3a): the proposals the card trades from and the
- * trade answers it signs and follows. Card-only, like the confirm code; never in structuredContent or content. */
-export const SIGNER_TOOLS=new Set(['yeet_propose','yeet_quote','skeet_propose','execute_trade','submit_trade_signature','trade_status']);
+/** Results that carry `_meta['yeet/signer']` (CARD-SIGNING.md section 2.3a): the overview (its card checks the device
+ * sign-in and shows the sign-in when needed), the proposals the card trades from and the trade answers it follows. Card-only, like the confirm code; never in structuredContent or content. */
+export const SIGNER_TOOLS=new Set(['yeet_overview','yeet_propose','yeet_quote','skeet_propose','execute_trade','submit_trade_signature','trade_status']);
 export function createMcpServer({token,callCore,env=process.env}) {
  const server=new McpServer({name:'yeet',version:'0.2.0'},{instructions});
  // Signing set up here (https RESOURCE, PRIVY_APP_ID, vendored signer): the signing cards declare the signing domains

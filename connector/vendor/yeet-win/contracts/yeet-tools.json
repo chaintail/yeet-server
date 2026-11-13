@@ -1427,7 +1427,7 @@
         "openWorldHint": false
       },
       "scope": "yeet:read",
-      "card": null,
+      "card": "overview",
       "visible": true,
       "widgetAccessible": true,
       "errors": [
@@ -2967,6 +2967,11 @@
     }
   },
   "x-yeet-cards": {
+    "overview": {
+      "uri": "ui://yeet/overview-v1.html",
+      "title": "YEET",
+      "description": "The person’s name, USDC, XP, tier and streak. On a device that is not signed in yet it is the sign-in: email, then a code."
+    },
     "home": {
       "uri": "ui://yeet/home-v1.html",
       "title": "YEET home",

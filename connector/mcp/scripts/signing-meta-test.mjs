@@ -21,12 +21,14 @@ const tradeAnswer={trade_id:'t_abcdefghij0123456789',proposal_id:proposal.propos
 const statusAnswer={trade_id:tradeAnswer.trade_id,direction:'yeet',status:'signing',legs:[{symbol:'WIF',status:'PENDING_DEPOSIT',amount_in:'20',amount_out:null,origin_tx:null,destination_tx:null,refund_reason:null}],received:[],updated_at:'2026-11-12T00:00:05Z',xp_award:null};
 const submitAnswer={trade_id:tradeAnswer.trade_id,status:'submitted',legs:[{leg:0,symbol:'WIF',send_status:'signing',tx_hash:null}]};
 const home={wallets:{base:{address:'0x'+'a'.repeat(40),usdc:'20'},solana:{address:'S'.repeat(44)}},ready:'ready',xp:null,recent_wins:[],limits};
+const overviewAnswer={username:'Lucky Otter 42',usdc:'20',xp:5,tier:'Noob',streak_days:1,checkin_open:true,holdings_count:0,top_winner:null,trading:'live',needs_card_sign_in:'unknown',suggestions:[{id:'checkin',label:'Do your daily check-in',say:'Do my daily check-in'}]};
 const core=async route=>{
  if(route==='/proposals'||route==='/proposals/skeet'||/\/quote$/.test(route))return {...proposal,confirm};
  if(route==='/trades')return tradeAnswer;
  if(/\/signature$/.test(route))return submitAnswer;
  if(/^\/trades\/t_/.test(route))return statusAnswer;
  if(route==='/home')return home;
+ if(route==='/overview')return overviewAnswer;
  if(route==='/portfolio')return {solana:{address:'S'.repeat(44),holdings:[]},base:{address:'0x'+'a'.repeat(40),usdc:'20'},total_usd:'20',priced_at:'2026-11-12T00:00:00Z'};
  throw {error:'TEMPORARILY_UNAVAILABLE'};
 };
@@ -41,7 +43,7 @@ const CALLS={
  yeet_propose:{request_id:'r1',amount_usdc:'20',legs:[{symbol:'WIF',parts:10}]},yeet_quote:{proposal_id:proposal.proposal_id},
  skeet_propose:{request_id:'r2',legs:[{symbol:'WIF',percent:100}]},execute_trade:{proposal_id:proposal.proposal_id,revision:1,confirm:'a'.repeat(43)},
  submit_trade_signature:{trade_id:tradeAnswer.trade_id,leg:0,attempt_id:'b'.repeat(64),signed:'AQID'},trade_status:{trade_id:tradeAnswer.trade_id},
- yeet_home:{},yeet_portfolio:{},
+ yeet_home:{},yeet_portfolio:{},yeet_overview:{},
 };
 // CARD-SIGNING.md section 3, verbatim with the production origin.
 const SIGNING_META={
@@ -64,8 +66,8 @@ test('the vendored signer is present and its URL carries its content hash',()=>{
  assert.equal(publicOrigin('https://chatgpt.yeet.win/'),ORIGIN);assert.equal(publicOrigin('https://u:p@x.example'),null);
 });
 
-test('resources: basket, portfolio and receipt declare exactly the signing CSP; home and leaderboard stay closed; no ui.domain',async()=>{
- assert.deepEqual([...SIGNING_VIEWS],['basket','portfolio','receipt']);
+test('resources: overview, basket, portfolio and receipt declare exactly the signing CSP; home and leaderboard stay closed; no ui.domain',async()=>{
+ assert.deepEqual([...SIGNING_VIEWS],['overview','basket','portfolio','receipt']);
  const {client,close}=await connect(ENV);
  try{
   for(const [view,{uri}] of Object.entries(CARDS)){
@@ -88,8 +90,8 @@ test('resources: basket, portfolio and receipt declare exactly the signing CSP; 
  assert.deepEqual(resourceMeta('home',{signOrigin:ORIGIN}).ui.csp,{connectDomains:[],resourceDomains:[]});
 });
 
-test("results: _meta['yeet/signer'] on proposal and trade results only, card-only, next to the confirm code",async()=>{
- assert.deepEqual([...SIGNER_TOOLS].sort(),['execute_trade','skeet_propose','submit_trade_signature','trade_status','yeet_propose','yeet_quote']);
+test("results: _meta['yeet/signer'] on the overview, proposal and trade results only, card-only, next to the confirm code",async()=>{
+ assert.deepEqual([...SIGNER_TOOLS].sort(),['execute_trade','skeet_propose','submit_trade_signature','trade_status','yeet_overview','yeet_propose','yeet_quote']);
  const want={privy_app_id:APP,script_url:`${ORIGIN}${asset.path}`,sign_page_url:`${ORIGIN}/sign`};
  const {client,close}=await connect(ENV);
  try{
