@@ -135,7 +135,12 @@ null and the two P2 tools are not registered. It is just XP: no money, no prizes
   `YEET_SIGNER` (`delegated` | `custodial`), `YEET_GAS_WALLET_ID`, `YEET_SOL_FEE_PAYER_ID`, `BASE_RPC_URL`,
   `SOLANA_RPC_URL`, `ONECLICK_JWT`, `YEET_LIVE` (`1` to execute), `YEET_KILL_SWITCH`, `YEET_MAX_TRADE_USDC` (25),
   `YEET_DAILY_CAP_USDC` (50), `YEET_MIN_LEG_USDC` (3), `YEET_MAX_COST_BPS` (800), `YEET_MAX_ACCOUNTS` (200),
-  `YEET_P2` (`1` turns XP on), `YEET_XP_SECRET` (spin draw key, 16+ characters), `STATE_DIR`.
+  `YEET_P2` (`1` turns XP on), `YEET_XP_SECRET` (spin draw key, 16+ characters), `YEET_REQUOTE_TOLERANCE_BPS` (50),
+  `YEET_CODE_MINT_LIMIT` (20), `YEET_TRACK_MAX_HOURS` (24), `YEET_BALANCE_TOLERANCE_BPS` (100),
+  `YEET_STUCK_AFTER_MINUTES` (30), `STATE_DIR`.
+- Operator scripts: `YEET_POLICY_ADMIN_QUORUM_ID` (policy-create.mjs), `TRADE_DB` (trade-alerts.mjs).
+- What each one means, and the compose defaults (`REFRESH_FAMILY_TTL=14400`, `REFRESH_CONSENT_COMPAT=1`,
+  `REFRESH_DIAGNOSTICS=1`, Folio's working values for ChatGPT): `ops/README.md`, "Variables".
 - All roles, for local runs and tests: `AS_PORT`, `CONNECTOR_PORT`, `CORE_PORT`, `ADMIN_PORT`, `LISTEN_HOST`,
   `SECRETS_DIR` (defaults: 38312, 38313, 38316, 38317, `0.0.0.0`, `/secrets`).
 
