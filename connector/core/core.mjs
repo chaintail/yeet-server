@@ -72,7 +72,9 @@ app.post('/operator/trading',operatorTrade('trading',(e,ctx)=>{
  const l=e.limits,allowed=!!l.liveAccounts?.includes(ctx.accountId);
  return {trading:l.live&&!l.killSwitch?'live':'paused',live:l.live,kill_switch:l.killSwitch,scope:l.liveAccounts?'allowlist':'all',
   live_accounts:l.liveAccounts?.length??0,account_allowed:allowed,operator_trades:allowed&&l.live&&!l.killSwitch,
-  base_gas:e.signer.gasMode??null};// sponsored | self | gas_wallet (signer-privy.mjs YEET_BASE_GAS)
+  // The person's own wallet signs; YEET only adds the network fee. Each chain driver's readiness (fee payer, gas wallet).
+  signing:'user_wallet',buy_chain:e.buyChain,sell_chain:e.sellChain,
+  drivers:Object.fromEntries(Object.entries(e.drivers).map(([c,d])=>{const r=d.readiness();return [c,{ok:r.ok,reasons:r.reasons}]}))};
 }));
 app.post('/operator/trades/propose',operatorTrade('propose',(e,ctx,a)=>e.propose(ctx,a)));
 app.post('/operator/trades/execute',operatorTrade('execute',(e,ctx,a)=>e.execute(ctx,a)));
@@ -101,6 +103,7 @@ export const ROUTE_SCOPES=Object.freeze([
  ['POST',/^\/proposals\/skeet$/,'yeet:write'],
  ['POST',/^\/proposals\/p_[a-z0-9]{20}\/quote$/,'yeet:write'],
  ['POST',/^\/trades$/,'yeet:trade'],
+ ['POST',/^\/trades\/t_[a-z0-9]{20}\/signature$/,'yeet:trade'],
  ['GET',/^\/trades\/t_[a-z0-9]{20}$/,'yeet:read'],
  ['GET',/^\/portfolio$/,'yeet:read'],
  ['GET',/^\/leaderboard\/(xp|week)$/,'yeet:read'],
@@ -147,6 +150,8 @@ app.post('/proposals',trade('yeet_propose',(e,ctx,a)=>e.propose(ctx,a)));
 app.post('/proposals/skeet',trade('skeet_propose',(e,ctx,a)=>e.skeet(ctx,a)));
 app.post('/proposals/:id/quote',trade(null,(e,ctx,_a,q)=>{const a=inputs.yeet_quote.safeParse({...q.body,proposal_id:q.params.id});if(!a.success)throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});return e.quote(ctx,a.data)}));
 app.post('/trades',trade('execute_trade',(e,ctx,a)=>e.execute(ctx,a)));
+// submit_trade_signature: bytes the person's own wallet signed for one leg (pipeline.submit checks and sponsors them).
+app.post('/trades/:id/signature',trade(null,(e,ctx,_a,q)=>{const a=inputs.submit_trade_signature.safeParse({...q.body,trade_id:q.params.id});if(!a.success)throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});return e.submit(ctx,a.data)}));
 app.get('/trades/:id',trade(null,(e,ctx,_a,q)=>{
  const view=e.status(ctx,q.params.id);
  return p2On()?{...view,xp_award:xpSafe('trade',()=>xpRuntime().tradeAward(ctx.accountId,view),null)}:view;

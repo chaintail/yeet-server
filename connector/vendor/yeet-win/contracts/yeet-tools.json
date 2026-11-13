@@ -296,6 +296,204 @@
       "properties": {},
       "required": [],
       "additionalProperties": false
+    },
+    "attempt_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "One sign attempt of one trade leg."
+    },
+    "send_status": {
+      "enum": [
+        "awaiting_signature",
+        "signing",
+        "awaiting_gas",
+        "sent",
+        "failed",
+        "not_sent"
+      ],
+      "description": "awaiting_signature: the person has not signed yet; signing: signed and on its way; awaiting_gas: signed, network fee on its way; sent: on chain; failed and not_sent: nothing moved."
+    },
+    "solana_tx_payload": {
+      "type": "object",
+      "properties": {
+        "transaction_base64": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1644
+        },
+        "last_valid_block_height": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}$"
+        }
+      },
+      "required": [
+        "transaction_base64",
+        "last_valid_block_height"
+      ],
+      "additionalProperties": false,
+      "description": "A Solana transaction for the person to sign as its second signer. YEET pays the network fee as the first signer."
+    },
+    "evm_tx_payload": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "eip1559"
+        },
+        "chainId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]{40}$"
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,77})$"
+        },
+        "data": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]{0,1024}$"
+        },
+        "nonce": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "gas": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,77})$"
+        },
+        "maxFeePerGas": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,77})$"
+        },
+        "maxPriorityFeePerGas": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,77})$"
+        }
+      },
+      "required": [
+        "type",
+        "chainId",
+        "to",
+        "value",
+        "data",
+        "nonce",
+        "gas",
+        "maxFeePerGas",
+        "maxPriorityFeePerGas"
+      ],
+      "additionalProperties": false,
+      "description": "An EIP-1559 transaction for the person to sign (sign only, never send). Integers above 2^53 are decimal strings."
+    },
+    "sign_request": {
+      "type": "object",
+      "properties": {
+        "trade_id": {
+          "$ref": "#/$defs/trade_id"
+        },
+        "leg": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/attempt_id"
+        },
+        "kind": {
+          "enum": [
+            "solana_tx",
+            "evm_tx"
+          ]
+        },
+        "chain": {
+          "enum": [
+            "sol",
+            "base"
+          ]
+        },
+        "wallet": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 44,
+          "description": "The address that must sign."
+        },
+        "payload": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/solana_tx_payload"
+            },
+            {
+              "$ref": "#/$defs/evm_tx_payload"
+            }
+          ]
+        },
+        "payload_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/time"
+        },
+        "summary": {
+          "type": "object",
+          "properties": {
+            "side": {
+              "enum": [
+                "buy",
+                "sell"
+              ]
+            },
+            "asset": {
+              "$ref": "#/$defs/symbol"
+            },
+            "amount_raw": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,77})$"
+            },
+            "decimals": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18
+            },
+            "to": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "side",
+            "asset",
+            "amount_raw",
+            "decimals",
+            "to"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "trade_id",
+        "leg",
+        "attempt_id",
+        "kind",
+        "chain",
+        "wallet",
+        "payload",
+        "payload_sha256",
+        "expires_at",
+        "summary"
+      ],
+      "additionalProperties": false,
+      "description": "What the person's own wallet signs for one trade leg. Sign it with the wallet named in `wallet`, sign only, never broadcast."
+    },
+    "sign_requests": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/sign_request"
+      },
+      "minItems": 0,
+      "maxItems": 5
     }
   },
   "tools": {
@@ -703,7 +901,7 @@
     "execute_trade": {
       "priority": "P0",
       "title": "Run a confirmed trade",
-      "description": "Runs a quoted basket after the person taps the button in the card. Only the card can call this; it needs the one-time code the card holds.",
+      "description": "Runs a quoted basket after the person taps the button in the card. Only the card can call this; it needs the one-time code the card holds. Answers one sign request per coin for the person's own wallet.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -739,6 +937,7 @@
           },
           "status": {
             "enum": [
+              "awaiting_signature",
               "submitted",
               "requote_required"
             ]
@@ -777,11 +976,7 @@
                   ]
                 },
                 "status": {
-                  "enum": [
-                    "sent",
-                    "failed",
-                    "not_sent"
-                  ]
+                  "$ref": "#/$defs/send_status"
                 }
               },
               "required": [
@@ -798,6 +993,9 @@
           },
           "requote": {
             "$ref": "#/$defs/proposal"
+          },
+          "sign_requests": {
+            "$ref": "#/$defs/sign_requests"
           }
         },
         "required": [
@@ -834,6 +1032,123 @@
         "LIMIT_EXCEEDED",
         "BALANCE_LOW",
         "WALLET_NOT_READY",
+        "TRADING_PAUSED"
+      ]
+    },
+    "submit_trade_signature": {
+      "priority": "P0",
+      "title": "Send a signed trade transfer",
+      "description": "Takes the transfer the person's own wallet signed for one coin of a trade. Only the card calls this, once per sign request; YEET checks it, adds the network fee and sends it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "trade_id": {
+            "$ref": "#/$defs/trade_id"
+          },
+          "leg": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4
+          },
+          "attempt_id": {
+            "$ref": "#/$defs/attempt_id"
+          },
+          "signed": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "The signed transaction: base64 (Solana) or 0x02 hex (Base)."
+          }
+        },
+        "required": [
+          "trade_id",
+          "leg",
+          "attempt_id",
+          "signed"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "trade_id": {
+            "$ref": "#/$defs/trade_id"
+          },
+          "status": {
+            "enum": [
+              "signing",
+              "submitted",
+              "settling",
+              "success",
+              "partial",
+              "refunded",
+              "failed"
+            ]
+          },
+          "legs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "leg": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4
+                },
+                "symbol": {
+                  "$ref": "#/$defs/symbol"
+                },
+                "send_status": {
+                  "$ref": "#/$defs/send_status"
+                },
+                "tx_hash": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/tx_hash"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "leg",
+                "symbol",
+                "send_status",
+                "tx_hash"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 5
+          },
+          "sign_requests": {
+            "$ref": "#/$defs/sign_requests"
+          }
+        },
+        "required": [
+          "trade_id",
+          "status",
+          "legs"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      },
+      "scope": "yeet:trade",
+      "card": "receipt",
+      "visible": false,
+      "widgetAccessible": true,
+      "errors": [
+        "INVALID_ARGUMENT",
+        "REAUTH_REQUIRED",
+        "TEMPORARILY_UNAVAILABLE",
+        "LIMIT_EXCEEDED",
         "TRADING_PAUSED"
       ]
     },

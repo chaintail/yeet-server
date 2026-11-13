@@ -34,7 +34,7 @@ after(async()=>{
  rmSync(root,{recursive:true,force:true});
 });
 
-const LISTED=['execute_trade','skeet_propose','trade_status','yeet_coins','yeet_home','yeet_portfolio','yeet_propose','yeet_quote'];
+const LISTED=['execute_trade','skeet_propose','submit_trade_signature','trade_status','yeet_coins','yeet_home','yeet_portfolio','yeet_propose','yeet_quote'];
 const SCOPES=['openid','offline_access','yeet:read','yeet:write','yeet:trade'];
 const local=url=>{const u=new URL(url,ORIGIN);return u.origin===ORIGIN?`${AS}${u.pathname}${u.search}`:u.href};
 function jar(){const c=new Map();return {header:()=>[...c].map(([k,v])=>`${k}=${v}`).join('; '),add(r){for(const s of r.headers.getSetCookie()){const p=s.split(';')[0],i=p.indexOf('=');c.set(p.slice(0,i),p.slice(i+1))}}}}
@@ -188,13 +188,13 @@ test('A-4: a signed-in, consented token lists the P0 and P1 tools over HTTP, exe
  assert.deepEqual(templates.result.resources.map(x=>x.uri).sort(),['ui://yeet/basket-v1.html','ui://yeet/home-v1.html','ui://yeet/leaderboard-v1.html','ui://yeet/portfolio-v1.html','ui://yeet/receipt-v1.html']);
 });
 
-test('B-1 end to end through the connector with a real token: propose, quote, execute (fake signer), trade_status success',async()=>{
+test('B-1 end to end through the connector with a real token: propose, quote, execute, the wallet signs, submit_trade_signature, trade_status success',async()=>{
  const tok=await token();
  const call=async(name,args)=>(await (await rpc({jsonrpc:'2.0',id:5,method:'tools/call',params:{name,arguments:args}},tok.access_token)).json()).result;
  const {configureTradeEngine,tradeEngine}=await import('../core/trade/runtime.mjs');
- const {fakeOneClick,fakeSigner,fakeBalances,fakeChain,FAKE_POLICY_ENV}=await import('../core/trade/fakes.mjs');
- const oneclick=fakeOneClick(),signer=fakeSigner(),balances=fakeBalances();
- configureTradeEngine({client:oneclick,signer,balances,chain:fakeChain({balances,signer}),env:{...process.env,...FAKE_POLICY_ENV,YEET_LIVE:'1'},trackerIntervalMs:0});
+ const {fakeRuntime,signAs}=await import('../core/pipeline/fakes.mjs');
+ const f=fakeRuntime(),{oneclick,rpc:chain,feePayer,wallet}=f;
+ configureTradeEngine(f.overrides);
  // The confirm code may appear only in result _meta["yeet/confirm"]: never in structuredContent or the text content.
  const modelSees=r=>JSON.stringify(r.structuredContent)+JSON.stringify(r.content);
  const cardOnly=r=>{const c=r._meta?.['yeet/confirm'];assert.match(c.code,/^[A-Za-z0-9_-]{43}$/);assert.ok(!modelSees(r).includes(c.code),'code leaked to the model');assert.doesNotMatch(modelSees(r),/"confirm"|yeet\/confirm/);return c};
@@ -210,8 +210,24 @@ test('B-1 end to end through the connector with a real token: propose, quote, ex
   assert.equal(JSON.parse(stale.content[0].text).error,'CONFIRMATION_REQUIRED');
   const x=await call('execute_trade',{proposal_id:p.structuredContent.proposal_id,revision:2,confirm:c2.code});
   assert.equal(x.isError,undefined,JSON.stringify(x.content));
-  assert.equal(x.structuredContent.status,'submitted');assert.equal(x._meta,undefined);assert.ok(!modelSees(x).includes(c2.code));
-  assert.deepEqual(signer.sent.map(t=>t.amountRaw),['10000000','10000000']);
+  assert.equal(x.structuredContent.status,'awaiting_signature');assert.equal(x._meta,undefined);assert.ok(!modelSees(x).includes(c2.code));
+  const reqs=x.structuredContent.sign_requests;
+  assert.deepEqual(reqs.map(r=>[r.kind,r.wallet,r.summary.amount_raw]),[['solana_tx',wallet.address,'10000000'],['solana_tx',wallet.address,'10000000']]);
+  assert.equal(feePayer.calls,0,'nothing is co-signed before the person signs');
+  // The card hands each leg's signed bytes to submit_trade_signature; the fee payer co-signs only then.
+  const hashes=[];
+  for(const r of reqs){
+   const s=await call('submit_trade_signature',{trade_id:r.trade_id,leg:r.leg,attempt_id:r.attempt_id,signed:signAs(wallet,r)});
+   assert.equal(s.isError,undefined,JSON.stringify(s.content));
+   assert.equal(s.structuredContent.legs[r.leg].send_status,'signing');hashes.push(s.structuredContent.legs[r.leg].tx_hash);
+  }
+  assert.equal(feePayer.calls,2);assert.equal(chain.sent.length,2);
+  // A repeated submit with the same bytes answers the stored hash: no second co-sign; at most the same bytes again.
+  const again=await call('submit_trade_signature',{trade_id:reqs[0].trade_id,leg:reqs[0].leg,attempt_id:reqs[0].attempt_id,signed:signAs(wallet,reqs[0])});
+  assert.equal(again.isError,undefined,JSON.stringify(again.content));assert.equal(feePayer.calls,2);
+  assert.equal(again.structuredContent.legs[reqs[0].leg].tx_hash,hashes[0]);
+  assert.equal(new Set(chain.sent).size,2,'a replay never sends new bytes');
+  f.confirmSent();
   // A price move at the tap: the requote's new code also goes to the card only.
   const p2=await call('yeet_propose',{request_id:'e2e-2',amount_usdc:'5',legs:[{symbol:'WIF',parts:10}]});
   oneclick.liveRatio=0.9;
@@ -219,7 +235,7 @@ test('B-1 end to end through the connector with a real token: propose, quote, ex
   assert.equal(rq.structuredContent.status,'requote_required');cardOnly(rq);
   oneclick.liveRatio=1;
   const engine=await tradeEngine();
-  await engine.tracker.pollOnce();await engine.tracker.pollOnce();
+  await engine.tracker.pollOnce();await engine.tracker.pollOnce();await engine.tracker.pollOnce();
   const st=await call('trade_status',{trade_id:x.structuredContent.trade_id});
   assert.equal(st.isError,undefined,JSON.stringify(st.content));
   assert.equal(st.structuredContent.status,'success');assert.deepEqual(st.structuredContent.received.map(r=>r.symbol),['WIF','BOME']);
@@ -235,32 +251,35 @@ test('operator trades (ops/first-trade.mjs): only with the operator secret, only
  const as=(role,path,body)=>fetch(CORE_URL+path,{method:'POST',headers:{authorization:`Bearer ${readFileSync(join(secrets,role),'utf8').trim()}`,'content-type':'application/json'},body:JSON.stringify(body)});
  const op=(path,body)=>as('core-operator',path,body);
  const {configureTradeEngine}=await import('../core/trade/runtime.mjs');
- const {fakeOneClick,fakeSigner,fakeBalances,fakeChain,FAKE_POLICY_ENV}=await import('../core/trade/fakes.mjs');
+ const {fakeRuntime}=await import('../core/pipeline/fakes.mjs');
  const basket={request_id:'op-1',amount_usdc:'5',legs:[{symbol:'WIF',parts:10}]};
- const setup=extra=>{const oneclick=fakeOneClick(),signer=fakeSigner(),balances=fakeBalances();
-  configureTradeEngine({client:oneclick,signer,balances,chain:fakeChain({balances,signer}),env:{...process.env,...FAKE_POLICY_ENV,YEET_LIVE:'1',...extra},trackerIntervalMs:0});return signer};
+ const setup=extra=>{const f=fakeRuntime({env:extra});configureTradeEngine(f.overrides);return f};
  try{
   // No allowlist: the operator can read, never trade.
   setup({});
   assert.equal((await as('core-mcp','/operator/trading',{account:me.sub})).status,403,'only the operator role');
   assert.equal((await op('/operator/trading',{account:'yeet-privy-nobody'})).status,400);
-  assert.deepEqual(await (await op('/operator/trading',{account:me.sub})).json(),{trading:'live',live:true,kill_switch:false,scope:'all',live_accounts:0,account_allowed:false,operator_trades:false,base_gas:null});
+  assert.deepEqual(await (await op('/operator/trading',{account:me.sub})).json(),{trading:'live',live:true,kill_switch:false,scope:'all',live_accounts:0,account_allowed:false,operator_trades:false,
+   signing:'user_wallet',buy_chain:'sol',sell_chain:'sol',drivers:{sol:{ok:true,reasons:[]}}});
   const refused=await op('/operator/trades/propose',{account:me.sub,...basket});
   assert.equal(refused.status,403);assert.equal((await refused.json()).error,'TRADING_PAUSED');
   // Listed: propose, execute with the minted code, follow the status; the trade is the engine's own.
-  const signer=setup({YEET_LIVE_ACCOUNTS:me.sub});
+  const f=setup({YEET_LIVE_ACCOUNTS:me.sub});
   assert.equal((await (await op('/operator/trading',{account:me.sub})).json()).operator_trades,true);
   assert.equal((await op('/operator/trades/propose',{account:me.sub,...basket,extra:1})).status,400,'contract input only');
   const p=await (await op('/operator/trades/propose',{account:me.sub,...basket})).json();
   assert.match(p.proposal_id,/^p_/);assert.match(p.confirm.code,/^[A-Za-z0-9_-]{43}$/);
   const x=await (await op('/operator/trades/execute',{account:me.sub,proposal_id:p.proposal_id,revision:p.revision,confirm:p.confirm.code})).json();
-  assert.equal(x.status,'submitted');assert.deepEqual(signer.sent.map(s=>s.amountRaw),['5000000']);
+  // The operator route never signs: it answers the sign request the person's wallet must sign.
+  assert.equal(x.status,'awaiting_signature');assert.deepEqual(x.sign_requests.map(r=>r.summary.amount_raw),['5000000']);
+  assert.equal(f.feePayer.calls,0);assert.equal(f.rpc.sent.length,0);
   const st=await (await op('/operator/trades/status',{account:me.sub,trade_id:x.trade_id})).json();
-  assert.equal(st.trade_id,x.trade_id);assert.ok(Array.isArray(st.record.events)&&st.record.events.some(e=>e.to==='signing'));
+  assert.equal(st.trade_id,x.trade_id);assert.ok(Array.isArray(st.record.events)&&st.record.events.some(e=>e.to==='awaiting_signature'));
   assert.equal(st.record.proposal_id,p.proposal_id);
   // The engine's own code check: the code is single use; presenting it again replays the same trade.
   const again=await (await op('/operator/trades/execute',{account:me.sub,proposal_id:p.proposal_id,revision:p.revision,confirm:p.confirm.code})).json();
-  assert.equal(again.trade_id,x.trade_id);assert.equal(signer.sent.length,1,'a replayed code sends nothing');
+  assert.equal(again.trade_id,x.trade_id);assert.equal(again.sign_requests[0].attempt_id,x.sign_requests[0].attempt_id,'a replayed code answers the same open attempt');
+  assert.equal(f.rpc.sent.length,0,'a replayed code sends nothing');
   assert.equal((await op('/operator/trades/status',{account:me.sub,trade_id:'t_nope'})).status,409);
   // Trading off again (allowlist removed): status stays readable, nothing new can start.
   setup({});

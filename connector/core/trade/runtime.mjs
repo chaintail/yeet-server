@@ -1,8 +1,9 @@
-// The core's one trade engine, created on first use from the environment ($STATE_DIR/trade.sqlite, YEET_SIGNER,
-// ONECLICK_JWT, BASE_RPC_URL, SOLANA_RPC_URL, limits). In-process tests (TEST_PROFILE=1 only) swap in fakes for
-// 1Click, the signer and the balances with configureTradeEngine.
+// The core's one trade pipeline (pipeline/pipeline.mjs: the person's own wallet signs, YEET adds only the network fee),
+// created on first use from the environment ($STATE_DIR/trade.sqlite, ONECLICK_JWT, SOLANA_RPC_URL, BASE_RPC_URL, the
+// fee payer and the limits). In-process tests (TEST_PROFILE=1 only) swap in fakes for 1Click, the wallets and the
+// drivers with configureTradeEngine.
 import {openTradeDb} from './db.mjs';
-import {createEngine} from './engine.mjs';
+import {createPipeline} from '../pipeline/pipeline.mjs';
 import {didFor} from '../identity-store.mjs';
 import {TEST} from '#shared/common.mjs';
 
@@ -22,7 +23,7 @@ export function configureTradeEngine(o={}){
 }
 export function tradeEngine(){
  return pending??=(async()=>{
-  const e=await createEngine({db:overrides.db??openTradeDb(),didFor,onSettled:settled,...overrides});
+  const e=createPipeline({db:overrides.db??openTradeDb(),didFor,onSettled:settled,...overrides});
   e.tracker.start();
   return e;
  })();

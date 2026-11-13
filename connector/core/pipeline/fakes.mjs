@@ -51,5 +51,17 @@ export function fakePipeline({env={},now=fakeClock(),oneclick=fakeOneClick(),hol
   driverOverrides:{rpc,signatureStatus:rpc.signatureStatus,historySignatureStatus:rpc.signatureStatus,feePayer,...(floor!==undefined?{floor}:{})}});
  return {p,db,env:fullEnv,now,oneclick,rpc,feePayer,balances,logs};
 }
+/** Overrides for trade/runtime.mjs configureTradeEngine in the in-process connector tests: every signed-in account
+ * maps to the local test wallet (`wallet`), 1Click from the recorded fixtures, the Solana RPC double and a local fee
+ * payer. Returns the overrides plus the handles a test needs to sign and confirm. */
+export function fakeRuntime({env={},oneclick=fakeOneClick(),holdings,usdc,rpc=fakeSolanaRpc(),feePayer=fakeFeePayer(),wallet=aliceWallet}={}){
+ const balances=fakeBalances({...(usdc!==undefined?{usdc}:{}),holdings:holdings??[{mint:USDC_SOLANA,raw:100_000_000n,decimals:6},{mint:WIF_MINT,raw:1_000_000_000n,decimals:6}]});
+ const directory={stable:true,async lookup(){return {base:{address:BASE_WALLET,walletId:null,signerState:'none',policyId:null},solana:{address:wallet.address,walletId:null,signerState:'none',policyId:null}}}};
+ const overrides={client:oneclick,directory,balances,env:{...process.env,YEET_LIVE:'1',...env},trackerIntervalMs:0,
+  driverOverrides:{rpc,signatureStatus:rpc.signatureStatus,historySignatureStatus:rpc.signatureStatus,feePayer}};
+ /** Mark every landed signature confirmed, the way the chain would. */
+ const confirmSent=()=>{for(const b64 of rpc.sent)rpc.statuses.set(base58Encode(decodeTransaction(Buffer.from(b64,'base64')).signatures[0]),{status:'confirmed',commitment:'confirmed',slot:5})};
+ return {overrides,oneclick,rpc,feePayer,balances,wallet,confirmSent};
+}
 /** The person's wallet signing a sign request (sign only). */
 export const signAs=(wallet,req)=>Buffer.from(wallet.signTransaction(Buffer.from(req.payload.transaction_base64,'base64'))).toString('base64');

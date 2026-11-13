@@ -340,3 +340,22 @@ test('live gate is read per call, not at boot',()=>{
  const env={YEET_LIVE:'1'};
  assert.equal(limitsFromEnv(env).live,true);
 });
+
+test('a repeated submit of the same signed bytes returns the stored hash: no second co-sign, never new bytes; other bytes for that attempt are refused',async()=>{
+ const f=fakePipeline({holdings:[{mint:USDC_SOLANA,raw:100_000_000n,decimals:6}]});const {p,rpc,feePayer}=f;
+ const prop=await p.propose(ALICE,{request_id:'rep',amount_usdc:'5',legs:[{symbol:'WIF',parts:1}]});
+ const x=await exec(p,ALICE,prop);const r=x.sign_requests[0],signed=signAs(aliceWallet,r);
+ const first=await sub(p,ALICE,r,signed);
+ const hash=first.legs[0].tx_hash;assert.ok(hash);assert.equal(feePayer.calls,1);
+ for(let i=0;i<3;i++){
+  const again=await sub(p,ALICE,r,signed);
+  assert.equal(again.legs[0].tx_hash,hash);
+ }
+ assert.equal(feePayer.calls,1,'never a second co-sign');
+ assert.equal(new Set(rpc.sent).size,1,'only the stored bytes are ever sent');
+ // Other bytes for the same attempt (the person's signature altered, slot 1 at offset 65): refused, nothing co-signed.
+ const bad=Buffer.from(signed,'base64');bad[70]^=1;
+ await code(sub(p,ALICE,r,bad.toString('base64')),'INVALID_ARGUMENT');
+ assert.equal(feePayer.calls,1);
+});
+

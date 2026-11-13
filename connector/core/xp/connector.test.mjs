@@ -26,7 +26,8 @@ const core=await import('../core.mjs');
 const as=await import('../../as/as.mjs');
 const connector=await import('../../mcp/mcp.mjs');
 const {configureTradeEngine,tradeEngine}=await import('../trade/runtime.mjs');
-const {fakeOneClick,fakeSigner,fakeBalances,FAKE_POLICY_ENV}=await import('../trade/fakes.mjs');
+const {fakeRuntime,signAs}=await import('../pipeline/fakes.mjs');
+const {USDC_SOLANA}=await import('../pipeline/solana/message.mjs');
 const {handle}=await import('./board.mjs');
 after(async()=>{
  configureTradeEngine({});
@@ -72,8 +73,8 @@ test('YEET_P2=1: tools/list adds the leaderboard (model and card) and daily_spin
 });
 
 test('YEET_P2=1 end to end: home -> spin -> leaderboard, then a settled trade shows its xp_award',async()=>{
- const oneclick=fakeOneClick();
- configureTradeEngine({client:oneclick,signer:fakeSigner(),balances:fakeBalances(),env:{...process.env,...FAKE_POLICY_ENV,YEET_LIVE:'1'},trackerIntervalMs:0});
+ const f=fakeRuntime();
+ configureTradeEngine(f.overrides);
  const alice=await signIn('did:privy:xp-alice'),bob=await signIn('did:privy:xp-bob');
 
  // Sign-in paid 5 XP once today; the spin is open; no wins are invented.
@@ -105,10 +106,15 @@ test('YEET_P2=1 end to end: home -> spin -> leaderboard, then a settled trade sh
  // A trade: no award while open, 70 XP once settled (first YEET 50 + YEET settled 20), the same on every read.
  const p=await alice.call('yeet_propose',{request_id:'xp-e2e-1',amount_usdc:'20',legs:[{symbol:'WIF',parts:6},{symbol:'BOME',parts:4}]});
  const x=await alice.call('execute_trade',{proposal_id:p.structuredContent.proposal_id,revision:1,confirm:p._meta['yeet/confirm'].code});
- assert.equal(x.structuredContent.status,'submitted');
+ assert.equal(x.structuredContent.status,'awaiting_signature');
  const id=x.structuredContent.trade_id;
+ for(const r of x.structuredContent.sign_requests){
+  const s=await alice.call('submit_trade_signature',{trade_id:r.trade_id,leg:r.leg,attempt_id:r.attempt_id,signed:signAs(f.wallet,r)});
+  assert.equal(s.isError,undefined,JSON.stringify(s.content));
+ }
  assert.equal((await alice.call('trade_status',{trade_id:id})).structuredContent.xp_award,null);
- const engine=await tradeEngine();await engine.tracker.pollOnce();await engine.tracker.pollOnce();
+ f.confirmSent();
+ const engine=await tradeEngine();await engine.tracker.pollOnce();await engine.tracker.pollOnce();await engine.tracker.pollOnce();
  const total=5+s.xp_won+70;
  for(let i=0;i<2;i++){
   const st=await alice.call('trade_status',{trade_id:id});
@@ -119,15 +125,16 @@ test('YEET_P2=1 end to end: home -> spin -> leaderboard, then a settled trade sh
 });
 
 test('yeet_home: needs_funds carries fund_url on the public origin; a funded wallet carries none',async()=>{
- const balances=fakeBalances({usdc:'0.5'});
- configureTradeEngine({client:fakeOneClick(),signer:fakeSigner(),balances,env:{...process.env,...FAKE_POLICY_ENV,YEET_LIVE:'1'},trackerIntervalMs:0});
+ // BUY pays with USDC on Solana: the funding check reads the Solana USDC holding.
+ const f=fakeRuntime({usdc:'0.5',holdings:[{mint:USDC_SOLANA,raw:500_000n,decimals:6}]}),{balances}=f;
+ configureTradeEngine(f.overrides);
  const carol=await signIn('did:privy:fund-carol');
  const low=await carol.call('yeet_home');
  assert.equal(low.isError,undefined,JSON.stringify(low.content));
  assert.equal(low.structuredContent.ready,'needs_funds');
  assert.equal(low.structuredContent.fund_url,`${ORIGIN}/fund`);
  assert.equal(low.structuredContent.xp.next_streak_milestone.days,3);
- balances.usdcRaw=100_000_000n;
+ balances.holdings=[{mint:USDC_SOLANA,raw:100_000_000n,decimals:6}];
  const ok=await carol.call('yeet_home');
  assert.equal(ok.structuredContent.ready,'ready');
  assert.equal('fund_url' in ok.structuredContent,false);
