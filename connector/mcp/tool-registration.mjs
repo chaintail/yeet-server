@@ -21,6 +21,17 @@ const ROUTES={
  // Registered once the pinned contract lists the tool.
  yeet_set_username:({username})=>['/username',{username}],
 };
+/** daily_spin's text for the model: one plain sentence (the card reads structuredContent). */
+export function spinText(r){
+ const s=r?.stamp;
+ if(!s)return `You won ${r.xp_won} XP.`;
+ const set=s.set_completed?`, completing a ${s.coin} set${r.set_bonus_xp>0?` YEET spin.head.bonus: ${r.set_bonus_xp}.`:''}`:'';
+ return `You won ${r.xp_won} XP and a ${s.coin} stamp (${s.filled} of ${s.slots})${set}.`;
+}
+/** Tools whose core result may carry fields the pinned contract does not list yet (stamps): cut to the contract's
+ * top-level properties so the closed output schema still passes; the fields flow through once the contract lists them. */
+const CUT_TO_CONTRACT=new Set(['daily_spin']);
+const TEXT={daily_spin:spinText};
 /** P0 and P1 are always registered; P2 (leaderboard, spin) only with YEET_P2=1. */
 export const registeredTools=(env=process.env)=>Object.values(toolSpecs).filter(t=>t.priority!=='P2'||env.YEET_P2==='1');
 export const TOOLS=Object.freeze(Object.values(toolSpecs).map(t=>Object.freeze({...t,route:ROUTES[t.name]})));
@@ -43,10 +54,12 @@ export function createMcpServer({token,callCore,env=process.env}) {
     // The one-time confirm code goes to the card only (_meta). content repeats structuredContent, so neither may carry it.
     const isObject=result&&typeof result==='object'&&!Array.isArray(result);
     const confirm=tool.confirm&&isObject?result.confirm:undefined;
-    const data=isObject?Object.fromEntries(Object.entries(result).filter(([k])=>k!=='confirm')):result;
+    const listed=CUT_TO_CONTRACT.has(name)&&schemas.output.properties?new Set(Object.keys(schemas.output.properties)):null;
+    const data=isObject?Object.fromEntries(Object.entries(result).filter(([k])=>k!=='confirm'&&(!listed||listed.has(k)))):result;
     const parsed=output.safeParse(data);
     if(!parsed.success)return toolError({error:'TEMPORARILY_UNAVAILABLE'});
-    return {structuredContent:parsed.data,...(confirm?{_meta:{[CONFIRM_META_KEY]:confirm}}:{}),content:[{type:'text',text:JSON.stringify(parsed.data)}]};
+    const text=TEXT[name]?TEXT[name](result):JSON.stringify(parsed.data);
+    return {structuredContent:parsed.data,...(confirm?{_meta:{[CONFIRM_META_KEY]:confirm}}:{}),content:[{type:'text',text}]};
    }catch(e){return toolError(e)}
   });
  }

@@ -27,13 +27,13 @@ export const serverSpinTable=()=>({base_xp:DEFAULT_RULES.find(r=>r.rule_id==='da
 /** Throws unless the server table matches the contract's x-yeet-spin (values, order, weights summing to 100). */
 export const checkSpinTable=(spec,table=serverSpinTable())=>assertSpinTable(table,spec);
 
-export function openXp({file=':memory:',secret,now=Date.now}={}){
+export function openXp({file=':memory:',secret,now=Date.now,coins}={}){
  const ledger=openLedger(file,{now});
  const db=ledger.db;
  db.exec(`CREATE TABLE IF NOT EXISTS xp_trade(
    trade_id TEXT PRIMARY KEY, account_id TEXT NOT NULL, direction TEXT NOT NULL, status TEXT NOT NULL,
    points INTEGER NOT NULL, settled_at TEXT NOT NULL);`);
- const spin=createSpin({ledger,secret});
+ const spin=createSpin({ledger,secret,coins});
  const tradeRow=id=>db.prepare('SELECT * FROM xp_trade WHERE trade_id=?').get(id);
 
  /** Records a settled trade and pays its XP; a second call for the same trade returns the first result. */
@@ -73,11 +73,12 @@ export function openXp({file=':memory:',secret,now=Date.now}={}){
    return row&&row.account_id===who?{points:Number(row.points),total:ledger.total(who)}:null;
   },
   /** The XP summary behind yeet_home's xp block (homeXp cuts it to the contract). next_streak_milestone: {days, xp} of
-   * the next streak length that pays a bonus, or null when the spin is off. */
+   * the next streak length that pays a bonus, or null when the spin is off. stamps: every coin's stamp card (catalog
+   * order, zero counts included); sets_completed: cards filled so far (docs/WHEEL-STAMPS.md). */
   summary(who){
    const at=ledger.iso();
    return {total:ledger.total(who),streak_days:streakDays(db,who,dayOf(at)),spin_available:spin.available(who,at),
-    next_streak_milestone:spin.nextMilestone(who,at)};
+    next_streak_milestone:spin.nextMilestone(who,at),stamps:spin.stamps.list(who),sets_completed:spin.stamps.setsCompleted(who)};
   },
   /** yeet_home's recent_wins. The contract asks for {symbol, pct}; the stored data has what a leg paid and received
    * but no later price, so no gain since the buy can be stated truthfully. An empty list until a price history exists. */

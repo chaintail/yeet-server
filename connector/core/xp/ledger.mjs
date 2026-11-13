@@ -4,16 +4,21 @@
 import {DatabaseSync} from 'node:sqlite';
 import {randomUUID} from 'node:crypto';
 
-export const XP_EVENTS=Object.freeze(['sign_in','first_yeet','yeet_settled','skeet_settled','daily_spin']);
+/** XP for completing a stamp card (7 stamps of one coin). Modest: below first_yeet (50), above the streak bonus (25). */
+export const SET_COMPLETE_XP=30;
+
+export const XP_EVENTS=Object.freeze(['sign_in','first_yeet','yeet_settled','skeet_settled','daily_spin','set_completed']);
 
 /** Default rules, written on first open only (an operator may edit the rows later; a restart never overwrites them).
- * daily_spin's points are the base of a spin; spin.mjs adds the draw and the streak bonus to that event's row. */
+ * daily_spin's points are the base of a spin; spin.mjs adds the draw and the streak bonus to that event's row.
+ * set_completed pays once per filled stamp card (stamps.mjs; its key is coin|card). */
 export const DEFAULT_RULES=Object.freeze([
  {rule_id:'sign_in',event:'sign_in',points:5,per_day_cap:1,lifetime_cap:null,title:'Sign in'},
  {rule_id:'first_yeet',event:'first_yeet',points:50,per_day_cap:null,lifetime_cap:1,title:'First YEET'},
  {rule_id:'yeet_settled',event:'yeet_settled',points:20,per_day_cap:5,lifetime_cap:null,title:'YEET settled'},
  {rule_id:'skeet_settled',event:'skeet_settled',points:10,per_day_cap:5,lifetime_cap:null,title:'SKEET settled'},
  {rule_id:'daily_spin',event:'daily_spin',points:5,per_day_cap:1,lifetime_cap:null,title:'Daily spin'},
+ {rule_id:'set_completed',event:'set_completed',points:SET_COMPLETE_XP,per_day_cap:null,lifetime_cap:null,title:'Stamp set completed'},
 ].map(r=>Object.freeze(r)));
 
 const SCHEMA=`CREATE TABLE IF NOT EXISTS xp_rule(
