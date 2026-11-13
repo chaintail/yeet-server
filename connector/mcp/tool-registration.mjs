@@ -13,6 +13,7 @@ const ROUTES={
  yeet_propose:args=>['/proposals',args],
  yeet_quote:({proposal_id,...rest})=>[`/proposals/${proposal_id}/quote`,rest],
  execute_trade:args=>['/trades',args],
+ submit_trade_signature:({trade_id,...rest})=>[`/trades/${trade_id}/signature`,rest],
  trade_status:({trade_id})=>[`/trades/${trade_id}`],
  yeet_portfolio:()=>['/portfolio'],
  skeet_propose:args=>['/proposals/skeet',args],

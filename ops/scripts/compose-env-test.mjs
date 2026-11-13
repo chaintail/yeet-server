@@ -75,7 +75,8 @@ for (const [role, dirs] of Object.entries(roles)) {
   assert.deepEqual(real, [], `${role} reads names compose does not pass: ${real.join(", ")}`);
   for (const s of SECRETS[role]) assert.ok(!passed.has(s), `${role}: secret ${s} must come from env_file, not compose`);
 }
-// The sign-in page's signer step needs YEET_SIGNER_ID on the sign-in server; core signs with YEET_PRIVY_KEY_QUORUM_ID.
-assert.ok(env.as.has("YEET_SIGNER_ID"));
+// Decision (b): the sign-in server publishes no signer id (no addSigners step). Core keeps YEET_PRIVY_KEY_QUORUM_ID
+// only to report wallets that still carry the old signer (ops/remove-yeet-signer.mjs removes it).
+assert.ok(!env.as.has("YEET_SIGNER_ID"));
 assert.ok(env.core.has("YEET_PRIVY_KEY_QUORUM_ID"));
 console.log(`PASS compose passes every setting each service reads (${Object.keys(roles).join(", ")})`);
