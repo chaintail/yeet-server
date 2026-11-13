@@ -1094,16 +1094,24 @@ const SIGNING=(function yeetTradeSigning(wr){
 const POLL_MS=5000,PAGE_POLL_MS=3000,POLL_FOR_MS=1800000,PAGE_FOR_MS=900000,SKEW_MS=1500;
 const END={success:'done',partial:'done',refunded:'failed',failed:'failed'};
 const OUT=new Set(['failed','not_sent']);
+const SENT=new Set(['signing','awaiting_gas','sent']);
 const HEX64=/^[0-9a-f]{64}$/;
 const sameAddress=(req,a)=>typeof a==='string'&&typeof req.wallet==='string'&&(req.kind==='evm_tx'?a.toLowerCase()===req.wallet.toLowerCase():a===req.wallet);
-/** The sign requests of one trade that the card can act on. */
+/** Every leg one request pays: `legs` (one Solana transaction for several coins), else just its own leg. */
+const legsOf=r=>Array.isArray(r?.legs)?r.legs:[r?.leg];
+const legOk=l=>Number.isInteger(l)&&l>=0&&l<=4;
+const coverOk=r=>r.legs===undefined||(Array.isArray(r.legs)&&r.legs.length>=1&&r.legs.length<=5&&r.legs[0]===r.leg
+ &&r.legs.every((l,i)=>legOk(l)&&(i===0||l>r.legs[i-1]))&&Array.isArray(r.leg_summaries)&&r.leg_summaries.length===r.legs.length);
+/** The sign requests of one trade that the card can act on. A request paying a leg an earlier one already pays is dropped. */
 function requestsOf(list,trade_id){
- return (Array.isArray(list)?list:[]).filter(r=>r&&r.trade_id===trade_id&&Number.isInteger(r.leg)&&r.leg>=0&&r.leg<=4&&HEX64.test(r.attempt_id??'')
-  &&(r.kind==='solana_tx'||r.kind==='evm_tx')&&typeof r.wallet==='string'&&Number.isFinite(Date.parse(r.expires_at))).slice(0,5);
+ const seen=new Set();
+ return (Array.isArray(list)?list:[]).filter(r=>r&&r.trade_id===trade_id&&legOk(r.leg)&&HEX64.test(r.attempt_id??'')
+  &&(r.kind==='solana_tx'||r.kind==='evm_tx')&&typeof r.wallet==='string'&&Number.isFinite(Date.parse(r.expires_at))&&coverOk(r))
+  .filter(r=>{const ls=legsOf(r);if(ls.some(l=>seen.has(l)))return false;for(const l of ls)seen.add(l);return true}).slice(0,5);
 }
 const tagged=(code,e)=>Object.assign(e instanceof Error?e:Error(String(e?.message??e??code)),{code:e?.code??code});
 function createTradeRun(d){
- const st={phase:'preparing',step:'session',trade_id:null,first:null,leg:null,symbol:null,done_legs:0,total_legs:0,send:{},t0:d.now(),settle_t0:null,status:null,answer:null,page:null,reason:null,error:null,ended:null};
+ const st={phase:'preparing',step:'session',trade_id:null,first:null,leg:null,legs:null,symbol:null,done_legs:0,total_legs:0,send:{},t0:d.now(),settle_t0:null,status:null,answer:null,page:null,reason:null,error:null,ended:null};
  const up=p=>{Object.assign(st,p);try{d.update({...st,send:{...st.send}})}catch{/* the card repaints on the next update */}};
  const stop=(phase,reason,extra={})=>{up({phase,reason,ended:d.now(),...extra});return {kind:phase,reason,data:st.answer}};
  async function status(id){
@@ -1151,18 +1159,27 @@ function createTradeRun(d){
   let reqs=id?requestsOf(a.sign_requests,id):[];
   if(a?.error||!id||!reqs.length)return {kind:'answer',result:first};
   const symbols=Array.isArray(a.legs)?a.legs.map(l=>l?.symbol??null):[];
-  const legs=[...new Set(reqs.map(r=>r.leg))];
+  const legs=[...new Set(reqs.flatMap(legsOf))];
   up({trade_id:id,first:a,total_legs:legs.length,send:Object.fromEntries(legs.map(l=>[l,'awaiting_signature']))});
   if(!s)return viaPage(id,inline);
   const again=new Set();let replayed=false;
-  const fresh=async leg=>{
-   if(replayed)return null;replayed=true;
-   try{const r=await d.call('execute_trade',args,30000);return requestsOf(r?.data?.sign_requests,id).find(x=>x.leg===leg)??null}catch{return null}
+  const mark=(ls,v,extra={})=>{const send={...st.send};for(const l of ls)if(!SENT.has(send[l]))send[l]=v;up({send,...extra})};
+  const covering=(list,ls)=>requestsOf(list,id).filter(x=>legsOf(x).some(l=>ls.includes(l)));
+  const supersede=(i,n)=>{const ls=new Set(n.flatMap(legsOf));reqs=[...reqs.slice(0,i+1),...reqs.slice(i+1).filter(x=>!legsOf(x).some(l=>ls.has(l)))]};
+  const fresh=async ls=>{
+   if(replayed)return [];replayed=true;
+   try{const r=await d.call('execute_trade',args,30000);return covering(r?.data?.sign_requests,ls)}catch{return []}
   };
   for(let i=0;i<reqs.length;i++){
    let req=reqs[i];
-   if(d.now()>Date.parse(req.expires_at)-SKEW_MS){req=await fresh(req.leg);if(!req){up({send:{...st.send,[reqs[i].leg]:'expired'}});continue}}
-   up({phase:'signing',step:'wallet',leg:req.leg,symbol:symbols[req.leg]??null});
+   if(legsOf(req).every(l=>SENT.has(st.send[l])))continue;
+   if(d.now()>Date.parse(req.expires_at)-SKEW_MS){
+    const n=(await fresh(legsOf(req))).filter(x=>!legsOf(x).every(l=>SENT.has(st.send[l])));
+    if(!n.length){mark(legsOf(req),'expired');continue}
+    supersede(i,n);req=n[0];reqs.push(...n.slice(1));
+   }
+   const ls=legsOf(req);
+   up({phase:'signing',step:'wallet',leg:req.leg,legs:ls,symbol:symbols[req.leg]??null});
    let signed;
    try{signed=await sign(s,req)}
    catch(e){
@@ -1175,15 +1192,18 @@ function createTradeRun(d){
    catch{return settle(id,null)}
    const b=r?.data;
    if(b?.error){
-    if(b.error==='SIGN_EXPIRED'&&!again.has(req.leg)){again.add(req.leg);const n=await fresh(req.leg);if(n){reqs.push(n);continue}}
-    up({send:{...st.send,[req.leg]:b.error==='SIGN_EXPIRED'?'expired':'not_sent'},error:b.error});continue;
+    if(b.error==='SIGN_EXPIRED'&&!again.has(req.leg)){
+     again.add(req.leg);const n=await fresh(ls);
+     if(n.length){for(const x of n)again.add(x.leg);supersede(i,n);reqs.push(...n);continue}
+    }
+    mark(ls,b.error==='SIGN_EXPIRED'?'expired':'not_sent',{error:b.error});continue;
    }
    const send={...st.send};for(const l of Array.isArray(b?.legs)?b.legs:[])if(Number.isInteger(l?.leg)&&typeof l.send_status==='string')send[l.leg]=l.send_status;
    up({send,done_legs:Object.values(send).filter(v=>v!=='awaiting_signature'&&v!=='expired').length});
-   const next=requestsOf(b?.sign_requests,id).find(x=>x.leg===req.leg);
-   if(next){
-    if(!again.has(req.leg)){again.add(req.leg);reqs.push(next)}
-    else up({send:{...st.send,[req.leg]:'expired'}});
+   const next=covering(b?.sign_requests,ls);
+   if(next.length){
+    if(!again.has(req.leg)){again.add(req.leg);for(const x of next)again.add(x.leg);supersede(i,next);reqs.push(...next)}
+    else mark(next.flatMap(legsOf).filter(l=>ls.includes(l)),'expired');
    }
   }
   const left=Object.values(st.send);
@@ -1192,7 +1212,7 @@ function createTradeRun(d){
  }
  return {run,state:()=>({...st})};
 }
-return {createTradeRun,requestsOf,sameAddress};
+return {createTradeRun,requestsOf,legsOf,sameAddress};
 })((()=>{
 const hex=v=>'0x'+BigInt(v).toString(16);
 const B64=/^[A-Za-z0-9+/]+={0,2}$/;
@@ -1958,7 +1978,7 @@ function legState(t,l,i){
   case 'INCOMPLETE_DEPOSIT':return ['Deposit short','wait','swap'];
  }
  if(s==='expired'||s==='not_sent'||s==='failed')return ['Not sent','bad','failed'];
- if(s==='awaiting_signature')return [trading.step==='wallet'&&trading.leg===i?'Signing…':'Waiting for signature','wait','sign'];
+ if(s==='awaiting_signature')return [trading.step==='wallet'&&(trading.legs?.includes(i)??trading.leg===i)?'Signing…':'Waiting for signature','wait','sign'];
  if(s==='awaiting_gas')return ['Network fee on its way','wait','send'];
  if(s==='signing')return ['Sending','wait','send'];
  if(s===undefined&&!l.origin_tx&&t.status==='signing')return ['Waiting for signature','wait','sign'];
