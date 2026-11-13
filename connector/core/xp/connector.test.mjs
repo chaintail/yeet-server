@@ -76,7 +76,10 @@ async function signIn(did){
   const result=(await (await rpc({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}},token.access_token)).json()).result;
   if(PASS_THROUGH.has(name)&&result&&!result.isError){
    const {confirm:_c,...sent}=lastCore??{};
-   assert.deepEqual(result.structuredContent,sent,`${name}: the tool result is every field core sent`);
+   // The connector adds one field for the model, the agent guidance (mcp/guidance.mjs); everything else is core's.
+   const {guidance,...rest}=result.structuredContent??{};
+   assert.equal(typeof guidance,'string',`${name}: guidance for the model`);
+   assert.deepEqual(rest,sent,`${name}: the tool result is every field core sent`);
    checked.add(name);
   }
   return result;
@@ -119,7 +122,11 @@ test('YEET_P2=1 end to end: home -> spin -> leaderboard, then a settled trade sh
  const s=spin.structuredContent;
  // daily_spin carries every field the server sends (wheel, slice, stamp, stamps, spin counts and reasons): the tool
  // result equals the server's own repeat of the spin.
- assert.deepEqual(s,xpRuntime().spin.spin(alice.sub),'daily_spin is the server result, every field');
+ const {guidance:spinGuidance,...spinRest}=s;
+ assert.deepEqual(spinRest,xpRuntime().spin.spin(alice.sub),'daily_spin is the server result, every field');
+ // The model reads the stamp and its count in the guidance too (second text block).
+ assert.match(spinGuidance,new RegExp(`^Name the ${s.stamp.coin} stamp: 1 of 7 on their ${s.stamp.coin} card, plus ${s.xp_won} XP\\.`));
+ assert.equal(spin.content[1].text,spinGuidance);
  for(const k of ['wheel','slice','stamp','set_bonus_xp','stamps','sets_completed','spin_kind','spin_reason','spins_available','extra_spin_reason'])assert.ok(k in s,k);
  assert.deepEqual(s.wheel,wheel,'xp.wheel before the spin is the wheel the spin used');
  assert.deepEqual(s.wheel[s.slice],{coin:s.stamp.coin,xp:s.draw_xp});

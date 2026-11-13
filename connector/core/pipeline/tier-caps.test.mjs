@@ -101,8 +101,10 @@ test('the product sentence reaches the tool result: core failure -> MCP toolErro
  const body=withUserMessage(failure(e.code),e);
  assert.equal(body.message,e.userMessage);
  const r=JSON.parse(toolError(body).content[0].text);
- assert.deepEqual(Object.keys(r),['error','message','retryable']);
+ assert.deepEqual(Object.keys(r),['error','message','retryable','guidance']);
  assert.equal(r.error,'LIMIT_EXCEEDED');assert.match(r.message,/25 USDC per-trade limit as a Noob \(0 XP\)/);
+ // The guidance for the model names the tier from that sentence and what unlocks the next one (mcp/guidance.mjs).
+ assert.match(r.guidance,/YEET/);
  // Any other code keeps the catalogue text.
  const other=JSON.parse(toolError({error:'BALANCE_LOW',message:'made up'}).content[0].text);
  assert.notEqual(other.message,'made up');

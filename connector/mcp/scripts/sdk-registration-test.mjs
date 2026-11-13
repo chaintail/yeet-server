@@ -6,6 +6,7 @@ import {createMcpServer,TOOLS} from '../tool-registration.mjs';
 import {HOME_UI_URI,BASKET_UI_URI,RECEIPT_UI_URI,PORTFOLIO_UI_URI,LEADERBOARD_UI_URI,CONFIRM_META_KEY,TEMPLATE_MIME} from '../widgets.mjs';
 import {allScopes} from '#scope-catalog';
 import {instructions} from '../instructions.mjs';
+import {COPY} from '../guidance.mjs';
 
 const LISTED=['execute_trade','skeet_propose','submit_trade_signature','trade_status','yeet_coins','yeet_home','yeet_portfolio','yeet_propose','yeet_quote'];
 const P2=['daily_spin','yeet_leaderboard','yeet_set_username','lucky_wheel','lucky_spin'];
@@ -69,6 +70,7 @@ test('server info and instructions are YEET (plan 2.4)',async()=>{
   assert.equal(client.getInstructions(),instructions);
   assert.match(instructions,/YEET/);
   assert.match(instructions,/YEET/);
+  assert.doesNotMatch(instructions,/\btap/i,'no stress on pressing a button');
  }finally{await close()}
 });
 
@@ -92,12 +94,12 @@ test('yeet_coins returns the core catalogue; core failures return a typed TEMPOR
  const routes=[];
  const {client,close}=await connect({scope:allScopes.join(' ')},async(route,body)=>{routes.push([route,body]);if(route==='/coins')return coins;throw {error:'TEMPORARILY_UNAVAILABLE'}});
  try{
-  const ok=await client.callTool({name:'yeet_coins',arguments:{}});assert.equal(ok.isError,undefined);assert.deepEqual(ok.structuredContent,coins);
+  const ok=await client.callTool({name:'yeet_coins',arguments:{}});assert.equal(ok.isError,undefined);assert.deepEqual(ok.structuredContent,{...coins,guidance:COPY.yeet_coins.list});
   const calls={yeet_home:{},yeet_propose:{request_id:'r1',amount_usdc:'20',legs:[{symbol:'WIF',parts:10}]},yeet_quote:{proposal_id:proposal.proposal_id},execute_trade:{proposal_id:proposal.proposal_id,revision:1,confirm:'a'.repeat(43)},trade_status:{trade_id:'t_abcdefghij0123456789'},yeet_portfolio:{},skeet_propose:{request_id:'r2',legs:[{symbol:'WIF',percent:100}]}};
   for(const [name,args] of Object.entries(calls)){
    const r=await client.callTool({name,arguments:args});
    assert.equal(r.isError,true,name);
-   assert.deepEqual(JSON.parse(r.content[0].text),{error:'TEMPORARILY_UNAVAILABLE',message:"YEET message.",retryable:true},name);
+   assert.deepEqual(JSON.parse(r.content[0].text),{error:'TEMPORARILY_UNAVAILABLE',message:"YEET message.",retryable:true,guidance:COPY.errors.TEMPORARILY_UNAVAILABLE},name);
   }
   assert.deepEqual(routes.map(([r])=>r),['/coins','/home','/proposals',`/proposals/${proposal.proposal_id}/quote`,'/trades','/trades/t_abcdefghij0123456789','/portfolio','/proposals/skeet']);
   assert.deepEqual(routes[3][1],{});assert.equal(routes[1][1],undefined);assert.equal(routes[5][1],undefined);
@@ -109,7 +111,7 @@ test('the confirm code reaches only the card _meta, never structuredContent or c
  const {client,close}=await connect({scope:allScopes.join(' ')},async()=>({...proposal,confirm}));
  try{
   const r=await client.callTool({name:'yeet_propose',arguments:{request_id:'r1',amount_usdc:'20',legs:[{symbol:'WIF',parts:10}]}});
-  assert.equal(r.isError,undefined);assert.deepEqual(r.structuredContent,proposal);
+  assert.equal(r.isError,undefined);assert.deepEqual(r.structuredContent,{...proposal,guidance:`${COPY.propose_yeet.base} ${COPY.propose_yeet.risk}`});
   assert.deepEqual(r._meta[CONFIRM_META_KEY],confirm);
   assert.doesNotMatch(JSON.stringify(r.content)+JSON.stringify(r.structuredContent),/CCCC/);
  }finally{await close()}

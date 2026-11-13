@@ -1,0 +1,206 @@
+// Agent guidance: one short field on every tool result, for the model (the card does not show it), keyed by tool or
+// refusal code and state. This repository carries neutral text in every string; the wording YEET deploys is not part
+// of it.
+export const COPY=Object.freeze({
+ yeet_home:{
+  paused:"YEET yeet_home.paused.",
+  paused_no_wheel:"YEET yeet_home.paused_no_wheel.",
+  needs_signer:"YEET yeet_home.needs_signer.",
+  needs_funds_spin:"YEET yeet_home.needs_funds_spin.",
+  needs_funds:"YEET yeet_home.needs_funds.",
+  needs_funds_no_wheel:"YEET yeet_home.needs_funds_no_wheel.",
+  ready_spin:"YEET yeet_home.ready_spin.",
+  ready_usdc:"YEET yeet_home.ready_usdc: {usdc}.",
+  ready:"YEET yeet_home.ready.",
+ },
+ yeet_coins:{
+  list:"YEET yeet_coins.list.",
+ },
+
+ propose_yeet:{
+  base:"YEET propose_yeet.base.",
+  signer_missing:"YEET propose_yeet.signer_missing.",
+  balance_low:"YEET propose_yeet.balance_low.",
+  cost_high:"YEET propose_yeet.cost_high: {cost_pct}.",
+  risk:"YEET propose_yeet.risk.",
+ },
+
+ propose_skeet:{
+  base:"YEET propose_skeet.base.",
+  cost_high:"YEET propose_skeet.cost_high: {cost_pct}.",
+ },
+ execute_trade:{
+  awaiting_signature:"YEET execute_trade.awaiting_signature.",
+  submitted:"YEET execute_trade.submitted.",
+  requote_required:"YEET execute_trade.requote_required.",
+ },
+
+ trade:{
+  signing_more:"YEET trade.signing_more: {left} {s}.",
+  settling_yeet:"YEET execute_trade.submitted.",
+  settling_skeet:"YEET trade.settling_skeet.",
+  success_yeet_xp:"YEET trade.success_yeet_xp: {points}.",
+  success_yeet:"YEET trade.success_yeet.",
+  success_yeet_no_wheel:"YEET trade.success_yeet_no_wheel.",
+  success_skeet_xp:"YEET trade.success_skeet_xp: {points}.",
+  success_skeet:"YEET trade.success_skeet.",
+  partial:"YEET trade.partial.",
+  refunded_yeet:"YEET trade.refunded_yeet.",
+  refunded_skeet:"YEET trade.refunded_skeet.",
+  failed:"YEET trade.failed.",
+ },
+ yeet_portfolio:{
+  empty:"YEET yeet_portfolio.empty.",
+  usdc_unread:"YEET yeet_portfolio.usdc_unread.",
+  usdc_only:"YEET yeet_portfolio.usdc_only: {usdc}.",
+  holdings_total:"YEET yeet_portfolio.holdings_total: {total}.",
+  holdings:"YEET yeet_portfolio.holdings.",
+ },
+ yeet_leaderboard:{
+  ranked:"YEET yeet_leaderboard.ranked: {rank} {xp}.",
+  unranked:"YEET yeet_leaderboard.unranked.",
+ },
+ daily_spin:{
+  set:"YEET daily_spin.set: {xp_won} {coin} {bonus}.",
+  stamp:"YEET daily_spin.stamp: {coin} {filled} {slots} {xp_won}.",
+  xp_only:"YEET daily_spin.xp_only: {xp_won}.",
+  more_spins:"YEET daily_spin.more_spins: {left} {s}.",
+  lucky:"YEET daily_spin.lucky.",
+  done:"YEET daily_spin.done.",
+ },
+ yeet_set_username:{
+  set:"YEET yeet_set_username.set: {username}.",
+ },
+
+ lucky:{
+  none:"YEET lucky.none.",
+  ready:"YEET lucky.ready.",
+  landed:"YEET lucky.landed: {coin} {amount} {lucky_id}.",
+  claimed:"YEET lucky.claimed.",
+ },
+
+ errors:{
+  LIMIT_EXCEEDED_Noob:"YEET errors.LIMIT_EXCEEDED_Noob: {winner_xp} {vip_over_xp}.",
+  LIMIT_EXCEEDED_Winner:"YEET errors.LIMIT_EXCEEDED_Winner: {vip_over_xp}.",
+  LIMIT_EXCEEDED_VIP:"YEET errors.LIMIT_EXCEEDED_VIP.",
+  LIMIT_EXCEEDED:"YEET errors.LIMIT_EXCEEDED.",
+  TRADING_PAUSED:"YEET errors.TRADING_PAUSED.",
+  TRADING_PAUSED_no_wheel:"YEET errors.TRADING_PAUSED_no_wheel.",
+  BALANCE_LOW:"YEET errors.BALANCE_LOW.",
+  TEMPORARILY_UNAVAILABLE:"YEET errors.TEMPORARILY_UNAVAILABLE_no_send.",
+  COST_TOO_HIGH:"YEET errors.COST_TOO_HIGH.",
+  AMOUNT_TOO_SMALL:"YEET errors.AMOUNT_TOO_SMALL.",
+  CONFIRMATION_REQUIRED:"YEET errors.CONFIRMATION_REQUIRED.",
+  REQUOTE_REQUIRED:"YEET errors.REQUOTE_REQUIRED.",
+  COIN_NOT_SUPPORTED:"YEET errors.COIN_NOT_SUPPORTED.",
+  INVALID_ARGUMENT:"YEET errors.INVALID_ARGUMENT.",
+  PARTS_EMPTY:"YEET errors.PARTS_EMPTY.",
+  WALLET_NOT_READY:"YEET errors.WALLET_NOT_READY.",
+  REAUTH_REQUIRED:"YEET errors.REAUTH_REQUIRED.",
+  USERNAME_TAKEN:"YEET errors.USERNAME_TAKEN.",
+  USERNAME_NOT_ALLOWED:"YEET errors.USERNAME_NOT_ALLOWED.",
+ },
+});
+
+export const TIER_XP=Object.freeze({winner_xp:'69',vip_over_xp:'1,000'});
+
+export function fill(template,vars={}){
+ return template.replace(/\{([a-z_]+)\}/g,(_m,k)=>{if(vars[k]===undefined||vars[k]===null)throw Error(`guidance slot ${k}`);return String(vars[k])});
+}
+const plural=n=>n===1?'':'s';
+const join=(...parts)=>parts.filter(Boolean).join(' ');
+const hasWheel=ctx=>!ctx||!ctx.tools||ctx.tools.has('daily_spin');
+const hasLucky=ctx=>!ctx||!ctx.tools||ctx.tools.has('lucky_wheel');
+const positive=v=>typeof v==='string'&&Number(v)>0;
+
+function home(r,ctx){
+ const c=COPY.yeet_home,spin=r.xp?.spin_available===true||(r.xp?.spins_available??0)>0;
+ if(r.ready==='paused')return hasWheel(ctx)?c.paused:c.paused_no_wheel;
+ if(r.ready==='needs_signer')return c.needs_signer;
+ if(r.ready==='needs_funds')return !hasWheel(ctx)||!r.xp?c.needs_funds_no_wheel:spin?c.needs_funds_spin:c.needs_funds;
+ if(spin&&hasWheel(ctx))return c.ready_spin;
+ const usdc=r.wallets?.base?.usdc;
+ return positive(usdc)?fill(c.ready_usdc,{usdc}):c.ready;
+}
+function proposal(r){
+ const w=new Set(r.warnings??[]);
+ if(r.direction==='skeet'){
+  const c=COPY.propose_skeet;
+  return join(c.base,w.has('COST_HIGH')?fill(c.cost_high,{cost_pct:r.totals?.cost_pct}):'');
+ }
+ const c=COPY.propose_yeet;
+ const note=w.has('SIGNER_MISSING')?c.signer_missing:w.has('BALANCE_LOW')?c.balance_low:w.has('COST_HIGH')?fill(c.cost_high,{cost_pct:r.totals?.cost_pct}):'';
+ return join(c.base,note,c.risk);
+}
+function trade(r,ctx){
+ const c=COPY.trade,skeet=r.direction==='skeet',left=(r.sign_requests??[]).length;
+ const points=r.xp_award?.points>0?r.xp_award.points:null;
+ switch(r.status){
+  case 'signing':return left>0?fill(c.signing_more,{left,s:plural(left)}):skeet?c.settling_skeet:c.settling_yeet;
+  case 'submitted':case 'settling':return skeet?c.settling_skeet:c.settling_yeet;
+  case 'success':
+   if(skeet)return points?fill(c.success_skeet_xp,{points}):c.success_skeet;
+   if(!hasWheel(ctx))return c.success_yeet_no_wheel;
+   return points?fill(c.success_yeet_xp,{points}):c.success_yeet;
+  case 'partial':return c.partial;
+  case 'refunded':return skeet?c.refunded_skeet:c.refunded_yeet;
+  default:return c.failed;
+ }
+}
+function execute(r,ctx){
+ const c=COPY.execute_trade;
+ if(r.status==='requote_required')return c.requote_required;
+ if(r.status==='submitted')return c.submitted;
+ return c.awaiting_signature;
+}
+function portfolio(r){
+ const c=COPY.yeet_portfolio,held=(r.solana?.holdings??[]).filter(h=>positive(h.amount));
+ if(held.length)return positive(r.total_usd)?fill(c.holdings_total,{total:r.total_usd}):c.holdings;
+ if(r.base?.usdc===null)return c.usdc_unread;
+ return positive(r.base?.usdc)?fill(c.usdc_only,{usdc:r.base.usdc}):c.empty;
+}
+function spin(r,ctx){
+ const c=COPY.daily_spin,s=r.stamp;
+ const head=!s?fill(c.xp_only,r)
+  :s.set_completed?fill(c.set,{xp_won:r.xp_won,coin:s.coin,bonus:r.set_bonus_xp>0?` YEET spin.head.bonus: ${r.set_bonus_xp}.`:''})
+  :fill(c.stamp,{coin:s.coin,filled:s.filled,slots:s.slots,xp_won:r.xp_won});
+ const left=r.spins_available??0;
+
+ return join(head,left>0?fill(c.more_spins,{left,s:plural(left)}):hasLucky(ctx)&&r.spin_reason!=='trade_bonus'?c.lucky:c.done);
+}
+function lucky(r){
+ const c=COPY.lucky,l=r?.lucky;
+ if(!l)return c.none;
+ if(l.claimed)return c.claimed;
+ if(l.slice===null||l.slice===undefined||!l.wheel?.[l.slice])return c.ready;
+ return fill(c.landed,{coin:l.wheel[l.slice].coin,amount:l.amount_usdc,lucky_id:l.lucky_id});
+}
+const BY_TOOL={
+ yeet_home:home,
+ yeet_coins:()=>COPY.yeet_coins.list,
+ yeet_propose:proposal,yeet_quote:proposal,skeet_propose:proposal,
+ execute_trade:execute,
+ submit_trade_signature:trade,trade_status:trade,
+ yeet_portfolio:portfolio,
+ yeet_leaderboard:r=>Number.isInteger(r.me?.rank)?fill(COPY.yeet_leaderboard.ranked,{rank:r.me.rank,xp:r.me.xp}):COPY.yeet_leaderboard.unranked,
+ daily_spin:spin,
+ yeet_set_username:r=>fill(COPY.yeet_set_username.set,{username:r.username}),
+ lucky_wheel:lucky,lucky_spin:lucky,
+};
+export const GUIDED_TOOLS=Object.freeze(Object.keys(BY_TOOL));
+
+export function guidanceFor(name,result,ctx){
+ const f=BY_TOOL[name];
+ if(!f||!result||typeof result!=='object')return undefined;
+ try{return f(result,ctx)}catch{return undefined}
+}
+
+export function refusalGuidance(code,message,ctx){
+ const e=COPY.errors;
+ if(code==='LIMIT_EXCEEDED'){
+  const tier=typeof message==='string'?message.match(/\bas a (Noob|Winner|VIP)\b/)?.[1]:undefined;
+  return fill(tier?e[`LIMIT_EXCEEDED_${tier}`]:e.LIMIT_EXCEEDED,TIER_XP);
+ }
+ if(code==='TRADING_PAUSED'&&!hasWheel(ctx))return e.TRADING_PAUSED_no_wheel;
+ return e[code];
+}

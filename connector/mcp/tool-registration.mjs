@@ -4,6 +4,7 @@ import {toolError} from './errors.mjs';
 import {toolSchemas,toolSpecs,zodSchema} from './tool-contract.mjs';
 import {registerWidgets,toolMeta,CONFIRM_META_KEY} from './widgets.mjs';
 import {instructions} from './instructions.mjs';
+import {guidanceFor} from './guidance.mjs';
 import {SIGNER_META_KEY,signerMetaFromEnv} from '#shared/signing.mjs';
 
 /** Core route per tool: route(args) -> [core route, body or undefined for GET]. Everything else about a tool (title,
@@ -62,13 +63,15 @@ export function createMcpServer({token,callCore,env=process.env}) {
  const signer=signerMetaFromEnv(env);
  registerWidgets(server,{signOrigin:signer?new URL(signer.sign_page_url).origin:null});
  const meta=scope=>({securitySchemes:[{type:'oauth2',scopes:[scope]}]});
+ // Guidance offers the wheel and the leaderboard only when they are registered (P2).
+ const ctx={tools:new Set(registeredTools(env).map(t=>t.name))};
  for(const tool of registeredTools(env)){
   const {name,scope}=tool,schemas=toolSchemas[name],route=ROUTES[name];
   const output=zodSchema(z,schemas.output);
   server.registerTool(name,{title:tool.title,description:tool.description,inputSchema:zodSchema(z,schemas.input),outputSchema:output,
    annotations:tool.annotations,_meta:{...meta(scope),...toolMeta(name)}},async args=>{
    const granted=token.scope?.split(' ')??[];
-   if(!granted.includes(scope))return toolError({error:'REAUTH_REQUIRED'});
+   if(!granted.includes(scope))return toolError({error:'REAUTH_REQUIRED'},ctx);
    try{
     const [path,body]=route(args);
     const result=await callCore(path,body);
@@ -76,13 +79,17 @@ export function createMcpServer({token,callCore,env=process.env}) {
     const isObject=result&&typeof result==='object'&&!Array.isArray(result);
     const confirm=tool.confirm&&isObject?result.confirm:undefined;
     const listed=CUT_TO_CONTRACT.has(name)&&schemas.output.properties?new Set(Object.keys(schemas.output.properties)):null;
-    const data=isObject?Object.fromEntries(Object.entries(result).filter(([k])=>k!=='confirm'&&(!listed||listed.has(k)))):result;
-    const parsed=output.safeParse(data);
-    if(!parsed.success)return toolError({error:'TEMPORARILY_UNAVAILABLE'});
+    const data=isObject?Object.fromEntries(Object.entries(result).filter(([k])=>k!=='confirm'&&k!=='guidance'&&(!listed||listed.has(k)))):result;
+    // Agent guidance (guidance.mjs): for the model, in structuredContent (the card ignores it) and in the text it reads.
+    const guidance=isObject?guidanceFor(name,data,ctx):undefined;
+    const parsed=output.safeParse(guidance?{...data,guidance}:data);
+    if(!parsed.success)return toolError({error:'TEMPORARILY_UNAVAILABLE'},ctx);
     const text=TEXT[name]?TEXT[name](result):JSON.stringify(parsed.data);
     const cardMeta={...(confirm?{[CONFIRM_META_KEY]:confirm}:{}),...(signer&&SIGNER_TOOLS.has(name)?{[SIGNER_META_KEY]:signer}:{})};
-    return {structuredContent:parsed.data,...(Object.keys(cardMeta).length?{_meta:cardMeta}:{}),content:[{type:'text',text}]};
-   }catch(e){return toolError(e)}
+    // The one-sentence tools (spin, lucky wheel) carry the guidance as a second text block; JSON text already has it.
+    const content=[{type:'text',text},...(TEXT[name]&&parsed.data.guidance?[{type:'text',text:parsed.data.guidance}]:[])];
+    return {structuredContent:parsed.data,...(Object.keys(cardMeta).length?{_meta:cardMeta}:{}),content};
+   }catch(e){return toolError(e,ctx)}
   });
  }
  return server;
