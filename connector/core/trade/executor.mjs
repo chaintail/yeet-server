@@ -19,7 +19,7 @@ import {receiptLeg} from './tracker.mjs';
 import {legIdempotencyKey,USDC_BASE} from './signer.mjs';
 import {refuse,newId,iso,TradeError} from './util.mjs';
 import {tx} from './db.mjs';
-import {transitionLeg,appendEvent,recordLegEvent,recordLegHash} from './audit.mjs';
+import {transitionLeg,appendEvent,recordLegEvent,recordLegHash,PENDING_FAILURE} from './audit.mjs';
 import {USDC_KEY} from './accounting.mjs';
 
 export const PREVIEW_STALE_MS=60_000;
@@ -172,7 +172,29 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
   catch(e){note(t.id,`leg ${l.idx}: Privy transaction: ${e?.detail??e?.message}`);return}
   if(r?.state==='confirmed'&&TX_HASH.test(r.txHash??''))
    recordLegHash(db,{tradeId:t.id,idx:l.idx,txHash:r.txHash,evidence:{privy_transaction_id:l.privy_tx_id,privy_status:r.status,source:'privy_transaction'},at:now()});
+  else if(r?.state==='failed'&&PENDING_FAILURE.includes(r.status)&&(r.transactionId??l.privy_tx_id)===l.privy_tx_id)failPending(t,l,r.status);
   else if(r?.state==='failed')note(t.id,`leg ${l.idx}: Privy reports transaction ${l.privy_tx_id} ${r.status}`);
+ }
+ /**
+  * sent (hash pending) -> failed: Privy reports the transaction it accepted as failed or execution_reverted, so no
+  * funds moved. The state change, its audit row and the amount back to the daily cap are one transaction; the
+  * receipt then shows the leg as not sent. A leg with a chain hash or a deposit 1Click has seen never takes this edge.
+  */
+ function failPending(t,l,privyStatus){
+  const done=tx(db,()=>{
+   if(!transitionLeg(db,{tradeId:t.id,idx:l.idx,from:'sent',to:'failed',evidence:{reason:'Privy reports the transfer failed after accepting it',
+    privy_transaction_id:l.privy_tx_id,privy_status:privyStatus,hash_pending:true,source:'privy_transaction',released_raw:String(l.amount_in_raw)},
+    set:{updated_at:now()},at:now()}))return false;
+   if(t.direction==='yeet')recordSpend(db,t.account_id,t.created_at,-BigInt(l.amount_in_raw));
+   return true;
+  });
+  if(done){
+   note(t.id,`leg ${l.idx}: not sent, Privy reports transaction ${l.privy_tx_id} ${privyStatus}`);
+   // Nothing of this trade moved: the proposal did not execute.
+   if(!legsOf(t.id).some(x=>['queued','sending','sent'].includes(x.send_status)))
+    db.prepare("UPDATE proposals SET status='failed',updated_at=? WHERE id=? AND status IN('executing','executed')").run(now(),t.proposal_id);
+  }
+  return done;
  }
  /** A new idempotency key for a leg whose key holds a cached 5xx, after a lookup found no transaction under its
   * reference_id; the stored request is sent again unchanged. False when the leg or its wallet changed meanwhile. */
@@ -290,6 +312,7 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
    for(const l of open){
     if(l.send_status==='sent'){
      // Sent, hash pending: Privy accepted it (transaction id stored); the hash is looked up, the transfer never re-sent.
+     // A Privy failure for that transaction makes the leg failed (see failPending); it is never sent again either.
      if(!l.tx_hash&&l.privy_tx_id)await resolveHash(t,l);
      await submit(t,l.idx);continue;
     }

@@ -37,7 +37,9 @@ test('transitions: the table allows the forward edges only and nothing leaves a 
   assert.ok(legalTransition(from,to,'trade_legs'),`leg ${from} -> ${to}`);
  for(const [from,to] of [['sent','sending'],['sending','queued'],['sending','not_sent'],['failed','sent'],['not_sent','queued'],['queued','sent']])
   assert.ok(!legalTransition(from,to,'trade_legs'),`leg ${from} -> ${to}`);
- for(const s of ['sent','failed','not_sent'])assert.deepEqual(LEG_EDGES[s],[]);
+ for(const s of ['failed','not_sent'])assert.deepEqual(LEG_EDGES[s],[]);
+ // The one edge back from sent: a hash-pending leg Privy reports failed (guarded further in transitionLeg).
+ assert.deepEqual(LEG_EDGES.sent,['failed']);
 });
 
 test('transitions: guarded UPDATE refuses an illegal edge, a terminal state without evidence, and a stale `from` (0 rows)',()=>{

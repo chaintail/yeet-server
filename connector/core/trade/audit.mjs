@@ -19,13 +19,19 @@ export const TRADE_EDGES=Object.freeze({
 });
 /** trade_legs.send_status (migration 2): queued -> sending -> sent, with failed/not_sent only before funds can move.
  * `sent` needs a transfer hash, a 1Click status, or a Privy transaction id (a sponsored Base send accepted by Privy
- * whose chain hash is not known yet: "sent, hash pending", never re-sent; recordLegHash adds the hash later). */
+ * whose chain hash is not known yet: "sent, hash pending", never re-sent; recordLegHash adds the hash later).
+ * sent -> failed is the one way back: a hash-pending leg that Privy later reports `failed` or `execution_reverted`
+ * (PENDING_FAILURE). It needs that Privy status and transaction id as evidence, and the guarded UPDATE also needs the
+ * row to have no chain hash, that same Privy transaction id, and no deposit seen by 1Click, so a leg with a confirmed
+ * chain hash never takes it. */
 export const LEG_EDGES=Object.freeze({
  [null]:['queued'],
  queued:['sending','failed','not_sent'],
  sending:['sent','failed'],
- sent:[],failed:[],not_sent:[],
+ sent:['failed'],failed:[],not_sent:[],
 });
+/** Privy transaction statuses that mean a hash-pending transfer never moved funds. */
+export const PENDING_FAILURE=Object.freeze(['failed','execution_reverted']);
 export const TRADE_TERMINAL=Object.freeze(['requote_required','success','partial','refunded','failed']);
 export const LEG_TERMINAL=Object.freeze(['sent','failed','not_sent']);
 
@@ -79,8 +85,17 @@ export function transitionTrade(db,{tradeId,from,to,evidence,set={},at}){
 export function transitionLeg(db,{tradeId,idx,from,to,evidence,set={},at}){
  if(!legalTransition(from,to,'trade_legs'))throw new TransitionRefused(`leg ${from} -> ${to}`);
  checkEvidence('trade_legs',to,evidence);
+ let key='trade_id=? AND idx=?';const keyArgs=[tradeId,idx];
+ if(from==='sent'){
+  // Only a hash-pending leg whose own Privy transaction failed (see LEG_EDGES).
+  const id=evidence.privy_transaction_id;
+  if(typeof id!=='string'||!id||!PENDING_FAILURE.includes(evidence.privy_status))
+   throw new TransitionRefused('sent -> failed needs the Privy transaction id and a failed or execution_reverted status');
+  if(evidence.tx_hash)throw new TransitionRefused('a leg with a chain hash cannot fail');
+  key+=" AND tx_hash IS NULL AND privy_tx_id=? AND (oneclick_status IS NULL OR oneclick_status='PENDING_DEPOSIT')";keyArgs.push(id);
+ }
  return atomic(db,()=>{
-  if(guarded(db,{table:'trade_legs',status:'send_status',key:'trade_id=? AND idx=?',keyArgs:[tradeId,idx],from,to,set,at})!==1)return false;
+  if(guarded(db,{table:'trade_legs',status:'send_status',key,keyArgs,from,to,set,at})!==1)return false;
   appendEvent(db,{tradeId,legIdx:idx,kind:'leg',from,to,evidence,at});
   return true;
  });
