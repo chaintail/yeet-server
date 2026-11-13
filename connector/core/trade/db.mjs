@@ -299,6 +299,14 @@ export const MIGRATIONS=Object.freeze([
    created_at INTEGER NOT NULL, resolved_at INTEGER,
    PRIMARY KEY(trade_id,idx)) STRICT;
   CREATE INDEX spend_hold_due ON spend_hold(state,release_after);`,
+ // 8: a Solana basket in ONE transaction (one signature for every leg). client_trade.batch_json =
+ // {"legs":[..],"creates":[..],"cu":n,"price":"n"} for an attempt paying several legs (NULL = a single-leg attempt of
+ // leg_idx; leg_idx stays the anchor = legs[0], so client_trade_open still protects it); sponsor_send.rent_accounts =
+ // the deposit token accounts the send creates (refunds give back exactly that many). Existing rows are not rewritten,
+ // only rent_accounts is backfilled 0/1, which is what refund assumed until now.
+ `ALTER TABLE client_trade ADD COLUMN batch_json TEXT;
+  ALTER TABLE sponsor_send ADD COLUMN rent_accounts INTEGER NOT NULL DEFAULT 0;
+  UPDATE sponsor_send SET rent_accounts=CASE WHEN rent_lamports>0 THEN 1 ELSE 0 END;`,
 ]);
 
 /** Opens (and migrates) the trade database. `file` defaults to $STATE_DIR/trade.sqlite; ':memory:' for tests. */

@@ -1,7 +1,8 @@
 // The person signs, YEET's fee payer co-signs. Lifted from Folio (stock-app origin/main 70848f097)
 // apps/server/src/trade/client-signing.ts `createClientSigning`:
-//   issue    = Folio execute():  fresh blockhash, guards on the unsigned bytes, both slots empty, fee reserved and the
-//              pending send written in one transaction, {transaction_base64, transaction_hash} answered
+//   issueBasket = Folio execute(): fresh blockhash, guards on the unsigned bytes, both slots empty, fee reserved and the
+//              pending send written in one transaction, {transaction_base64, transaction_hash} answered; one
+//              transaction (one attempt) pays every leg it covers, so the person signs once per basket
 //   signed   = Folio signed():   in-process join on identical bytes; canonical base64 of at most 1644 characters; the
 //              person's slot verified over the unchanged message; already-signed attempts recover (same signature,
 //              no second co-sign); guards and fee again; admission again; blockhash still valid else SIGN_EXPIRED;
@@ -15,10 +16,11 @@
 // rebroadcasts), analytics and founder pages (alerts go to trade_alerts). A dry run stops after validation and a
 // signature-free simulateTransaction: nothing is co-signed or sent.
 import {TradeError} from '../../trade/util.mjs';
-import {assertSponsorable,sponsoredSendKey,SponsorshipRefusal} from './sponsorship.mjs';
+import {assertSponsorableBasket,sponsoredSendKey,SponsorshipRefusal} from './sponsorship.mjs';
 import {verifySolanaPartialTransaction,verifySolanaSignedTransaction} from './verify.mjs';
 import {decodeTransaction,associatedTokenAddress,MAX_TRANSACTION_BASE64} from './message.mjs';
-import {buildLegTransaction} from './transfer-leg.mjs';
+import {buildBasketTransaction,DEFAULT_COMPUTE_UNIT_LIMIT,DEFAULT_PRIORITY_MICRO_LAMPORTS} from './transfer-leg.mjs';
+import {legsOfAttempt} from '../ledger.mjs';
 import {definiteRefusal} from './fee-payer.mjs';
 
 /** A Solana sign request lives about as long as its blockhash (~60-90 s); the server window is 60 s. */
@@ -50,7 +52,7 @@ export function createClientSigning({ledger,rpc,signatureStatus,historySignature
  async function recoverAttempt(id){
   const a=ledger.attempt(id);
   if(!a||['confirmed','failed','abandoned'].includes(a.status))return {state:a?.status??'unknown',attempt:a};
-  const leg={tradeId:a.trade_id,legIdx:a.leg_idx};
+  const leg={tradeId:a.trade_id,legIdx:a.leg_idx,legs:legsOfAttempt(a)};
   if(a.status==='pending'){
    if(now()>a.expires_at||!await valid(a)){ledger.endAttempt(id,'pending','SIGN_EXPIRED');return {...leg,state:'expired'}}
    return {...leg,state:'awaiting_signature'};
@@ -87,28 +89,39 @@ export function createClientSigning({ledger,rpc,signatureStatus,historySignature
  return {
   recoverAttempt,
   activeClaims:()=>activeClaims.size,
-  /** Folio execute(): the unsigned leg transaction for the person to sign, both slots empty. */
-  async issue({trade,leg,accountId,pin,exit,expiresCap}){
+  /**
+   * Folio execute(): ONE unsigned transaction paying every leg of `legs` (stored rows, ascending idx; `pins` in the
+   * same order) for the person to sign once, both slots empty. One blockhash, one fee, rent per created deposit
+   * account. Throws BatchRefusal (BATCH_TOO_LARGE / BATCH_UNSUPPORTED) before anything is reserved.
+   */
+  async issueBasket({trade,legs,accountId,pins,exit,expiresCap}){
    gate(accountId);
+   if(!legs?.length||legs.length!==pins?.length)throw refusal('TEMPORARILY_UNAVAILABLE','CLIENT_ATTEMPT_FORBIDDEN');
    const {blockhash,lastValidBlockHeight}=await rpc.latestBlockhash();
-   const exists=!!(await rpc.accountInfo(associatedTokenAddress(pin.depositOwner,pin.mint,pin.tokenProgram)));
-   const bytes=buildLegTransaction(pin,{blockhash,createDestination:!exists,computeUnitLimit,priorityMicroLamports});
-   let g;try{g=assertSponsorable(bytes,{...pin,maxFeeLamports})}catch(e){throw asTrade(e)}
+   const creates=[];
+   for(const p of pins)creates.push(!(await rpc.accountInfo(associatedTokenAddress(p.depositOwner,p.mint,p.tokenProgram))));
+   const cu=(computeUnitLimit??DEFAULT_COMPUTE_UNIT_LIMIT)*pins.length,price=BigInt(priorityMicroLamports??DEFAULT_PRIORITY_MICRO_LAMPORTS);
+   const bytes=buildBasketTransaction(pins,{blockhash,creates,computeUnitLimit:cu,priorityMicroLamports:price});
+   let g;try{g=assertSponsorableBasket(bytes,pins,{maxFeeLamports})}catch(e){throw asTrade(e)}
    const tx=decodeTransaction(bytes);
    if(tx.signatures.some(s=>s.some(x=>x!==0)))throw refusal('TEMPORARILY_UNAVAILABLE','CLIENT_ATTEMPT_FORBIDDEN');
    const payload={transaction_base64:b64(bytes),last_valid_block_height:lastValidBlockHeight};
    const payloadSha256=sponsoredSendKey(bytes),expiresAt=Math.min(now()+SOLANA_SIGN_WINDOW_MS,expiresCap??Infinity);
+   const idxs=legs.map(l=>l.idx);
    let row;
-   try{row=ledger.issue({tradeId:trade.id,idx:leg.idx,accountId,wallet:pin.wallet,chain:'sol',kind:'solana_tx',payload,payloadSha256,unsignedBase64:payload.transaction_base64,
-    lastValidBlockHeight,expiresAt,sponsor:{lamports:g.feeLamports,rentLamports:g.rentLamports,idempotencyKey:payloadSha256,exit:!!exit}})}
+   try{row=ledger.issue({tradeId:trade.id,idxs,accountId,wallet:pins[0].wallet,chain:'sol',kind:'solana_tx',payload,payloadSha256,unsignedBase64:payload.transaction_base64,
+    lastValidBlockHeight,expiresAt,batch:{legs:idxs,creates:g.creates,cu,price:String(price)},
+    sponsor:{lamports:g.feeLamports,rentLamports:g.rentLamports,rentAccounts:g.rentAccounts,idempotencyKey:payloadSha256,exit:!!exit}})}
    catch(e){throw asTrade(e)}
-   event({event:'execute_issued',attempt:ref(row.attempt_id),trade:trade.id,leg:leg.idx,fee_lamports:g.feeLamports,rent_lamports:g.rentLamports,last_valid_height:lastValidBlockHeight,
-    fee_payer6:pin.feePayer.slice(0,6),wallet6:pin.wallet.slice(0,6)});
-   return {attemptId:row.attempt_id,payload,payloadSha256,expiresAt,feeLamports:g.feeLamports,rentLamports:g.rentLamports};
+   event({event:'execute_issued',attempt:ref(row.attempt_id),trade:trade.id,leg:idxs[0],legs:idxs,bytes:bytes.length,fee_lamports:g.feeLamports,rent_lamports:g.rentLamports,last_valid_height:lastValidBlockHeight,
+    fee_payer6:pins[0].feePayer.slice(0,6),wallet6:pins[0].wallet.slice(0,6)});
+   return {attemptId:row.attempt_id,legs:idxs,payload,payloadSha256,expiresAt,feeLamports:g.feeLamports,rentLamports:g.rentLamports,bytes:bytes.length};
   },
+  /** The basket of one (today's per-leg request). */
+  issue({trade,leg,accountId,pin,exit,expiresCap}){return this.issueBasket({trade,legs:[leg],accountId,pins:[pin],exit,expiresCap})},
 
-  /** Folio signed(). Returns {state, txHash?, simulation?}. */
-  signed(id,encoded,{accountId,wallet,pin,dryRun=false}){
+  /** Folio signed(). `pins` are the attempt's legs in its order. Returns {state, txHash?, simulation?}. */
+  signed(id,encoded,{accountId,wallet,pins,dryRun=false}){
    const key=JSON.stringify([id,accountId,wallet,encoded,dryRun]);
    const active=joins.get(key);if(active)return active;
    const run=(async()=>{
@@ -124,7 +137,20 @@ export function createClientSigning({ledger,rpc,signatureStatus,historySignature
     if(a.signed_base64)return recoverAttempt(id);
     if(a.status==='signing')throw refusal('TEMPORARILY_UNAVAILABLE','CLIENT_SIGNING_IN_PROGRESS');
     if(a.status!=='pending')return {state:a.status==='abandoned'?'expired':'not_sent'};
-    let g;try{g=assertSponsorable(partial,{...pin,maxFeeLamports})}catch(e){throw asTrade(e)}
+    // Exact-bytes pin: the stored unsigned transaction must be what the builder makes from the stored legs, the
+    // stored blockhash and the stored batch (creates, compute limit, price). The partial was already verified to sign
+    // exactly that message. Legacy attempts (no batch_json) keep the guard below alone.
+    if(a.batch_json){
+     let same=false;
+     try{
+      const b=JSON.parse(a.batch_json);
+      if(JSON.stringify(b.legs)!==JSON.stringify(legsOfAttempt(a))||pins.length!==b.legs.length)throw Error('legs');
+      const again=buildBasketTransaction(pins,{blockhash:decodeTransaction(original).message.blockhash,creates:b.creates,computeUnitLimit:b.cu,priorityMicroLamports:BigInt(b.price)});
+      same=Buffer.from(again).equals(original);
+     }catch{same=false}
+     if(!same){event({event:'unsigned_bytes_mismatch',attempt:ref(id)});throw asTrade(new SponsorshipRefusal('SPONSOR_TRANSFER_MISMATCH'))}
+    }
+    let g;try{g=assertSponsorableBasket(partial,pins,{maxFeeLamports})}catch(e){throw asTrade(e)}
     if(decodeTransaction(partial).message.accounts[0]!==feePayer.address)throw refusal('INVALID_ARGUMENT','CLIENT_ATTEMPT_FORBIDDEN');
     gate(accountId);
     if(now()>a.expires_at||!await valid(a)){

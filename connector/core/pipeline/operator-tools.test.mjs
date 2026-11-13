@@ -46,7 +46,7 @@ test('user-signed-trade arguments: --local-fee-payer is dry only; a buy needs --
  assert.throws(()=>parseArgs(['--coin','$WIF','--usdc','5','--broadcast','--local-fee-payer']),/dry runs only/);
  assert.throws(()=>parseArgs(['--coin','$WIF']),/--usdc is required/);
  assert.throws(()=>parseArgs(['--coin','WIF','--usdc','5','--chain','eth']),/--chain/);
- assert.deepEqual(parseArgs(['--coin','$WIF','--usdc','5']),{chain:'sol',side:'buy',coin:'$WIF',usdc:'5',percent:100,broadcast:false,localFeePayer:false,account:OPERATOR_ACCOUNT,wallet:null,db:null,followS:600});
+ assert.deepEqual(parseArgs(['--coin','$WIF','--usdc','5']),{chain:'sol',side:'buy',coin:'$WIF',usdc:'5',percent:100,broadcast:false,localFeePayer:false,feePayerAddress:null,account:OPERATOR_ACCOUNT,wallet:null,db:null,followS:600});
  assert.equal(coinSymbol('$WIF'),'WIF');assert.equal(coinSymbol('wif'),'WIF');
  assert.throws(()=>coinSymbol('USDC'),/unknown coin/);
 });
@@ -81,6 +81,32 @@ for(const side of ['buy','sell'])test(`dry operator run, Solana ${side.toUpperCa
  const x=lines.find(l=>l.step==='executed');
  assert.equal(x.sign_requests[0].wallet,aliceWallet.address);assert.equal(x.sign_requests[0].asset,side==='buy'?'USDC':'WIF');
  for(const l of lines)assert.doesNotMatch(JSON.stringify(l),/seed|private|secret/i);
+});
+
+test('dry operator run of a 2-coin basket: one sign request for both legs, one simulation; --fee-payer-address is dry only',async()=>{
+ const f=fakes(),lines=[];
+ const opts=parseArgs(['--coin','$WIF, bome','--usdc','6']);
+ const r=await runUserSignedTrade({opts,wallet:testWallet,env:{},emit:l=>lines.push(l),overrides:f.overrides});
+ const x=lines.find(l=>l.step==='executed');
+ assert.equal(x.sign_requests.length,1);assert.deepEqual(x.sign_requests[0].legs,[0,1]);assert.ok(x.sign_requests[0].unsigned_bytes<=1232);
+ assert.deepEqual(r.results.map(q=>q.legs),[[0,1]]);
+ const s=lines.find(l=>l.step==='submitted');
+ assert.equal(s.dry_run_state,'not_sent');assert.equal(s.simulation_err,null);assert.deepEqual(s.legs,[0,1]);
+ assert.equal(f.feePayer.calls,0);assert.equal(f.rpc.sent.length,0);assert.equal(f.rpc.simulated.length,1);
+ // The address-only fee payer: refused with --broadcast and with --local-fee-payer; a dry run never asks it to sign.
+ assert.throws(()=>parseArgs(['--coin','WIF','--usdc','5','--broadcast','--fee-payer-address',aliceWallet.address]),/dry runs only/);
+ assert.throws(()=>parseArgs(['--coin','WIF','--usdc','5','--local-fee-payer','--fee-payer-address',aliceWallet.address]),/exclude/);
+ assert.throws(()=>parseArgs(['--coin','WIF','--usdc','5','--fee-payer-address','nope']),/Solana address/);
+ const g=fakes(),out=[];
+ const {feePayer:_,...driverOverrides}=g.overrides.driverOverrides;
+ const fpAddr=g.feePayer.address;
+ await runUserSignedTrade({opts:parseArgs(['--coin','WIF,BOME,TRUMP','--usdc','9','--fee-payer-address',fpAddr]),wallet:testWallet,env:{},emit:l=>out.push(l),overrides:{...g.overrides,driverOverrides}});
+ assert.equal(out.find(l=>l.step==='fee_payer').address_only,true);
+ assert.deepEqual(out.find(l=>l.step==='executed').sign_requests.map(q=>q.legs),[[0,1,2]]);
+ assert.equal(out.find(l=>l.step==='submitted').simulation_err,null);
+ // --coin lists: 1 to 5 distinct coins.
+ await assert.rejects(runUserSignedTrade({opts:parseArgs(['--coin','WIF,WIF','--usdc','6']),wallet:testWallet,env:{},overrides:fakes().overrides}),/twice/);
+ await assert.rejects(runUserSignedTrade({opts:parseArgs(['--coin','WIF,BOME,TRUMP,PENGU,SPX,TURBO','--usdc','18']),wallet:testWallet,env:{},overrides:fakes().overrides}),/1 to 5 coins/);
 });
 
 test('broadcast run is refused before anything is built when the operator env has trading off',async()=>{

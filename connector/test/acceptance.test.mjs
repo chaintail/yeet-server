@@ -213,21 +213,28 @@ test('B-1 end to end through the connector with a real token: propose, quote, ex
   assert.equal(x.isError,undefined,JSON.stringify(x.content));
   assert.equal(x.structuredContent.status,'awaiting_signature');assert.equal(x._meta,undefined);assert.ok(!modelSees(x).includes(c2.code));
   const reqs=x.structuredContent.sign_requests;
-  assert.deepEqual(reqs.map(r=>[r.kind,r.wallet,r.summary.amount_raw]),[['solana_tx',wallet.address,'10000000'],['solana_tx',wallet.address,'10000000']]);
+  // The Solana basket is ONE transaction: one sign request naming both legs (the contract's legs / leg_summaries
+  // pass the vendored output schema).
+  assert.deepEqual(reqs.map(r=>[r.kind,r.wallet,r.summary.amount_raw,r.legs]),[['solana_tx',wallet.address,'10000000',[0,1]]]);
+  assert.deepEqual(reqs[0].leg_summaries.map(s=>[s.leg,s.amount_raw]),[[0,'10000000'],[1,'10000000']]);
   assert.equal(feePayer.calls,0,'nothing is co-signed before the person signs');
-  // The card hands each leg's signed bytes to submit_trade_signature; the fee payer co-signs only then.
+  // The card hands the signed bytes to submit_trade_signature once per request; the fee payer co-signs only then.
   const hashes=[];
   for(const r of reqs){
    const s=await call('submit_trade_signature',{trade_id:r.trade_id,leg:r.leg,attempt_id:r.attempt_id,signed:signAs(wallet,r)});
    assert.equal(s.isError,undefined,JSON.stringify(s.content));
-   assert.equal(s.structuredContent.legs[r.leg].send_status,'signing');hashes.push(s.structuredContent.legs[r.leg].tx_hash);
+   assert.deepEqual(s.structuredContent.legs.map(l=>l.send_status),['signing','signing']);hashes.push(s.structuredContent.legs[r.leg].tx_hash);
+   assert.equal(s.structuredContent.legs[1].tx_hash,s.structuredContent.legs[0].tx_hash);
   }
-  assert.equal(feePayer.calls,2);assert.equal(chain.sent.length,2);
+  assert.equal(feePayer.calls,1);assert.equal(chain.sent.length,1);
+  // A leg inside `legs` that is not the anchor is refused (submit names the request's leg).
+  const notAnchor=await call('submit_trade_signature',{trade_id:reqs[0].trade_id,leg:1,attempt_id:reqs[0].attempt_id,signed:signAs(wallet,reqs[0])});
+  assert.equal(JSON.parse(notAnchor.content[0].text).error,'INVALID_ARGUMENT');
   // A repeated submit with the same bytes answers the stored hash: no second co-sign; at most the same bytes again.
   const again=await call('submit_trade_signature',{trade_id:reqs[0].trade_id,leg:reqs[0].leg,attempt_id:reqs[0].attempt_id,signed:signAs(wallet,reqs[0])});
-  assert.equal(again.isError,undefined,JSON.stringify(again.content));assert.equal(feePayer.calls,2);
+  assert.equal(again.isError,undefined,JSON.stringify(again.content));assert.equal(feePayer.calls,1);
   assert.equal(again.structuredContent.legs[reqs[0].leg].tx_hash,hashes[0]);
-  assert.equal(new Set(chain.sent).size,2,'a replay never sends new bytes');
+  assert.equal(new Set(chain.sent).size,1,'a replay never sends new bytes');
   f.confirmSent();
   // A price move at the tap: the requote's new code also goes to the card only.
   const p2=await call('yeet_propose',{request_id:'e2e-2',amount_usdc:'5',legs:[{symbol:'WIF',parts:10}]});
@@ -284,12 +291,13 @@ test('card signing: signer script and /sign page on the public origin; the page 
   assert.equal(accountCount(),n,'the page never creates an account');
   assert.equal(feePayer.calls,0,'nothing was co-signed for a refused caller');
   assert.equal((await fetch(AS+'/sign/api/requests',{method:'POST',headers:{'content-type':'application/json',origin:'https://evil.example'},body:JSON.stringify(alice)})).status,403);
-  // The page submits each leg through the same engine call as the card.
+  // The page submits each request (here one, paying both legs) through the same engine call as the card.
+  assert.deepEqual(o.sign_requests.map(r=>r.legs),[[0,1]]);
   for(const r of o.sign_requests){
    const s=await page('signature',{...alice,leg:r.leg,attempt_id:r.attempt_id,signed:signAs(wallet,r)});
-   assert.equal(s.status,200);assert.equal((await s.json()).legs[r.leg].send_status,'signing');
+   assert.equal(s.status,200);assert.deepEqual((await s.json()).legs.map(l=>l.send_status),['signing','signing']);
   }
-  assert.equal(feePayer.calls,2);
+  assert.equal(feePayer.calls,1);
   // Nothing left to sign; the card reads the same trade through trade_status.
   assert.deepEqual((await (await page('requests',alice)).json()).sign_requests,[]);
   const st=await call('trade_status',{trade_id:id});assert.equal(st.isError,undefined,JSON.stringify(st.content));assert.equal(st.structuredContent.trade_id,id);

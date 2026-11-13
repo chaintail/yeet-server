@@ -309,7 +309,7 @@
     "attempt_id": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$",
-      "description": "One sign attempt of one trade leg."
+      "description": "One sign attempt of one or more legs of a trade."
     },
     "send_status": {
       "enum": [
@@ -479,6 +479,65 @@
             "to"
           ],
           "additionalProperties": false
+        },
+        "legs": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4
+          },
+          "minItems": 1,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "description": "Every leg this one transaction pays; legs[0] is leg."
+        },
+        "leg_summaries": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "properties": {
+              "leg": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4
+              },
+              "side": {
+                "enum": [
+                  "buy",
+                  "sell"
+                ]
+              },
+              "asset": {
+                "$ref": "#/$defs/symbol"
+              },
+              "amount_raw": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]{0,77})$"
+              },
+              "decimals": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18
+              },
+              "to": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            },
+            "required": [
+              "leg",
+              "side",
+              "asset",
+              "amount_raw",
+              "decimals",
+              "to"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
@@ -494,7 +553,7 @@
         "summary"
       ],
       "additionalProperties": false,
-      "description": "What the person's own wallet signs for one trade leg. Sign it with the wallet named in `wallet`, sign only, never broadcast."
+      "description": "What the person's own wallet signs for one or more legs of a trade (one signature). Sign it with the wallet named in `wallet`, sign only, never broadcast."
     },
     "sign_requests": {
       "type": "array",
@@ -1272,7 +1331,8 @@
           "leg": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 4
+            "maximum": 4,
+            "description": "The sign request's leg (legs[0])."
           },
           "attempt_id": {
             "$ref": "#/$defs/attempt_id"

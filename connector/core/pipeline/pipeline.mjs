@@ -11,9 +11,11 @@
 //   3. caps (min leg, max trade, daily) and the person's balance on the origin chain
 //   4. live 1Click plan, checked leg by leg (assertLivePlan); requote rule as before; cost cap
 //   5. commit: code, proposal, trade (origin_chain), legs `awaiting_signature`, today's spend, in one transaction
-//   6. one sign request per leg from the driver (`status: awaiting_signature`, `sign_requests`)
+//   6. sign requests from the driver (`status: awaiting_signature`, `sign_requests`): on Solana ONE request (one
+//      transaction, one signature) pays every leg of the basket when it fits (`legs`, `leg_summaries`), else one per
+//      leg; on Base one per leg
 // submit_trade_signature: the person's signed bytes for one attempt -> driver.submit (guards, sponsorship, persist,
-// send). An expired attempt answers fresh sign requests instead of an error.
+// send); every leg the attempt pays moves together. An expired attempt answers fresh sign requests instead of an error.
 // Recovery (tracker tick): attempts are resolved by the driver; legs left unsigned past SIGN_WINDOW_MS, past the
 // deposit deadline margin or while trading is paused become not_sent with the amount back to the daily cap; landed
 // legs are reported to 1Click (/deposit/submit) and tracked.
@@ -96,25 +98,47 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
  const walletOf=async(t,chain)=>(await wallets.require(t.account_id))[WALLET_CHAIN[chain]].address;
  const owned=(ctx,tradeId)=>{const t=trade(tradeId);if(!t||t.account_id!==ctx.accountId||t.status==='requote_required')refuse('INVALID_ARGUMENT','unknown trade');return t};
 
- /** The sign request for an open attempt (contract shape). */
- function signRequest(t,l,a){
-  const q=JSON.parse(l.live_quote_json);
+ /** The sign request for an open attempt (contract shape). A Solana request names every leg its one transaction pays
+  * (`legs`, `leg_summaries`); `leg` and `summary` are the anchor (legs[0]). Base requests carry neither. */
+ function signRequest(t,a){
+  const side=t.direction==='yeet'?'buy':'sell';
+  const summaryOf=l=>{const q=JSON.parse(l.live_quote_json);return {side,asset:q.origin.symbol,amount_raw:l.amount_in_raw,decimals:q.origin.decimals,to:l.deposit_address}};
+  const legs=ledger.legsOfAttempt(a),rows=legs.map(i=>legOf(t.id,i));
   return {trade_id:t.id,leg:a.leg_idx,attempt_id:a.attempt_id,kind:a.kind,chain:a.chain,wallet:a.wallet,payload:JSON.parse(a.payload_json),payload_sha256:a.payload_sha256,
-   expires_at:iso(a.expires_at),summary:{side:t.direction==='yeet'?'buy':'sell',asset:q.origin.symbol,amount_raw:l.amount_in_raw,decimals:q.origin.decimals,to:l.deposit_address}};
+   expires_at:iso(a.expires_at),summary:summaryOf(rows[0]),
+   ...(a.chain==='sol'?{legs,leg_summaries:rows.map(l=>({leg:l.idx,...summaryOf(l)}))}:{})};
  }
- /** Sign requests for every leg awaiting a signature: the open attempt while it is valid, else a new one (attempt n+1). */
+ /** Prepares requests for `legs` (rows awaiting a signature, none covered by an open attempt): one driver call for
+  * all of them when the driver can put several legs in one transaction, else one per leg. Returns
+  * [{attemptId, legs} | {legs, error}]. */
+ async function prepareAll(t,d,legs,wallet){
+  if(d.prepareLegs)return d.prepareLegs({trade:t,legs,wallet,now:now()});
+  const out=[];
+  for(const l of legs){try{const p=await d.prepare({trade:t,leg:l,wallet,now:now()});out.push({...p,legs:[l.idx]})}catch(e){out.push({legs:[l.idx],error:e})}}
+  return out;
+ }
+ /** Sign requests for every leg awaiting a signature: the open attempt while it is valid (one request per attempt,
+  * however many legs it pays), else new ones (attempt n+1) for the uncovered legs. */
  async function signRequests(t){
-  const out=[],chain=t.origin_chain;
+  const out=[],chain=t.origin_chain,seen=new Set(),uncovered=[];
   if(!chain)return out;
   for(const l of legsOf(t.id).filter(l=>l.send_status==='awaiting_signature')){
    let a=ledger.openAttempt(t.id,l.idx);
+   if(a&&seen.has(a.attempt_id))continue;
    if(a&&a.status==='pending'&&now()>a.expires_at){ledger.endAttempt(a.attempt_id,'pending','SIGN_EXPIRED');a=null}
-   if(a){if(a.status==='pending')out.push(signRequest(t,l,a));continue}
+   if(a){seen.add(a.attempt_id);if(a.status==='pending')out.push(signRequest(t,a));continue}
    if(now()>t.created_at+SIGN_WINDOW_MS||!(now()+SEND_MARGIN_MS<legDeadline(l)))continue;
-   try{const p=await driverOf(chain).prepare({trade:t,leg:l,wallet:await walletOf(t,chain),now:now()});out.push(signRequest(t,l,ledger.attempt(p.attemptId)))}
-   catch(e){ledger.note(t.id,`leg ${l.idx}: prepare: ${e?.detail??e?.message}`);event({event:'prepare_failed',trade:t.id,leg:l.idx,code:e?.code??null})}
+   uncovered.push(l);
   }
-  return out;
+  if(!uncovered.length)return out;
+  let made;
+  try{made=await prepareAll(t,driverOf(chain),uncovered,await walletOf(t,chain))}
+  catch(e){made=uncovered.map(l=>({legs:[l.idx],error:e}))}
+  for(const p of made){
+   if(p.error){for(const i of p.legs){ledger.note(t.id,`leg ${i}: prepare: ${p.error?.detail??p.error?.message}`);event({event:'prepare_failed',trade:t.id,leg:i,code:p.error?.code??null})}continue}
+   out.push(signRequest(t,ledger.attempt(p.attemptId)));
+  }
+  return out.sort((x,y)=>x.leg-y.leg);
  }
  const legView=(t,l)=>({symbol:l.symbol,deposit_address:l.deposit_address,tx_hash:l.send_status==='sent'||l.send_status==='signing'?l.tx_hash??null:null,
   explorer_url:explorer(t.origin_chain,l.send_status==='sent'?l.tx_hash:null),status:l.send_status});
@@ -152,22 +176,23 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   * One watch per attempt (a resubmitted signature joins the open one) and at most landingWatchMax at once; beyond the
   * cap the tracker pass sends the notice (review int-v2 finding 2). */
  const watches=new Map();
- function watchLanding(t,idx,attemptId,d){
+ function watchLanding(t,legs,attemptId,d){
   if(!(landingWatchMs>0)||watches.has(attemptId))return;
-  if(watches.size>=landingWatchMax){event({event:'landing_watch_capped',trade:t.id,leg:idx,open:watches.size});return}
+  if(watches.size>=landingWatchMax){event({event:'landing_watch_capped',trade:t.id,leg:legs[0],legs,open:watches.size});return}
   const run=(async()=>{
    for(let i=0,n=Math.ceil(landingWatchMs/Math.max(1,landingPollMs));i<n;i++){
     await sleep(landingPollMs);
     let r;try{r=await d.recoverAttempt(attemptId)}catch{continue}
     if(r?.state==='sent'){
-     // Under the trade's lock, like recovery: the notice and the tracker's recovery pass never overlap.
-     const sent=await exclusive(t.id,()=>depositSubmit(t,idx));
-     if(sent)event({event:'deposit_submitted_on_landing',trade:t.id,leg:idx});
+     // Under the trade's lock, like recovery: the notice and the tracker's recovery pass never overlap. One landed
+     // transaction pays every leg of the attempt: one notice per leg (each single flight in depositSubmit).
+     const sent=await exclusive(t.id,async()=>{const done=[];for(const idx of legs)if(await depositSubmit(t,idx))done.push(idx);return done});
+     for(const idx of sent)event({event:'deposit_submitted_on_landing',trade:t.id,leg:idx});
      return;
     }
     if(!['pending','confirming'].includes(r?.state))return;
    }
-  })().catch(e=>ledger.note(t.id,`leg ${idx}: landing watch: ${e?.message}`)).finally(()=>watches.delete(attemptId));
+  })().catch(e=>ledger.note(t.id,`leg ${legs[0]}: landing watch: ${e?.message}`)).finally(()=>watches.delete(attemptId));
   watches.set(attemptId,run);
  }
  const pausedReason=(t)=>{try{gateFor(t.origin_chain??'sol')(t.account_id);return null}catch(e){return e?.detail??'paused'}};
@@ -180,13 +205,15 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   if(!open.length)return false;
   inFlight.add(tradeId);
   try{
-   const d=drivers[t.origin_chain],paused=pausedReason(t);
+   const d=drivers[t.origin_chain],paused=pausedReason(t),recovered=new Set();
    for(const l of open){
     if(l.send_status==='sent'){await depositSubmit(t,l.idx);continue}
     const a=ledger.openAttempt(t.id,l.idx);
-    if(a&&d){
-     try{const r=d.recoverAttempt?await d.recoverAttempt(a.attempt_id):(await d.recover({now:now()})).find(x=>x.tradeId===t.id&&x.legIdx===l.idx);
-      if(r?.state==='sent')await depositSubmit(t,l.idx)}
+    // One recovery per attempt per pass, however many legs it pays; a landed attempt notifies 1Click for each.
+    if(a&&d&&!recovered.has(a.attempt_id)){
+     recovered.add(a.attempt_id);
+     try{const r=d.recoverAttempt?await d.recoverAttempt(a.attempt_id):(await d.recover({now:now()})).find(x=>x.tradeId===t.id&&x.legIdx===a.leg_idx);
+      if(r?.state==='sent')for(const i of ledger.legsOfAttempt(a))await depositSubmit(t,i)}
      catch(e){ledger.note(t.id,`leg ${l.idx}: recover: ${e?.message}`)}
     }
     const cur=legOf(t.id,l.idx);
@@ -277,13 +304,17 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   });
   if(!committed)return replay(codes.check({code:confirm,accountId:ctx.accountId,clientId:ctx.clientId,proposalId:proposal_id,revision}).trade_id);
   event({event:'trade_committed',trade:tradeId,direction:p.direction,chain,legs:live.legs.length});
-  // One sign request per leg. A leg whose request cannot be built never moved funds: not_sent, amount back to the cap.
+  // Sign requests: on Solana one transaction for the whole basket when it fits (one signature), else one per leg; on
+  // Base one per leg. A leg whose request cannot be built never moved funds: not_sent, amount back to the cap.
   const tRow=trade(tradeId);let lastError;
   inFlight.add(tradeId);
   try{
-   for(const l of legsOf(tradeId)){
-    try{await driver.prepare({trade:tRow,leg:l,wallet:w[WALLET_CHAIN[chain]].address,now:now()})}
-    catch(e){lastError=e?.code??'TEMPORARILY_UNAVAILABLE';ledger.note(tradeId,`leg ${l.idx}: prepare: ${e?.detail??e?.message}`);ledger.legNotSent(tradeId,l.idx,{reason:lastError,detail:String(e?.detail??e?.message??'').slice(0,160),stage:'prepare'})}
+   let made;
+   try{made=await prepareAll(tRow,driver,legsOf(tradeId),w[WALLET_CHAIN[chain]].address)}
+   catch(e){made=legsOf(tradeId).map(l=>({legs:[l.idx],error:e}))}
+   for(const p of made)if(p.error){
+    const e=p.error;lastError=e?.code??'TEMPORARILY_UNAVAILABLE';
+    for(const i of p.legs){ledger.note(tradeId,`leg ${i}: prepare: ${e?.detail??e?.message}`);ledger.legNotSent(tradeId,i,{reason:lastError,detail:String(e?.detail??e?.message??'').slice(0,160),stage:'prepare'})}
    }
   }finally{inFlight.delete(tradeId)}
   settle(tradeId,lastError);
@@ -300,14 +331,15 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   const l=legOf(t.id,leg),d=driverOf(a.chain);
   const wallet=await walletOf(t,a.chain);
   if(wallet!==a.wallet)refuse('INVALID_ARGUMENT','the attempt is for another wallet');
+  const covered=ledger.legsOfAttempt(a);
   let r;
   inFlight.add(t.id);
   try{r=await d.submit({trade:t,leg:l,wallet,attemptId:attempt_id,signed,dryRun,now:now()});
-   if(r.state==='sent')await depositSubmit(t,leg)}
+   if(r.state==='sent')for(const i of covered)await depositSubmit(t,i)}
   finally{inFlight.delete(t.id)}
   // Sent but not yet landed (Solana answers `pending` after the broadcast): watch this attempt and tell 1Click the
   // moment it lands, instead of on the next tracker pass.
-  if(!dryRun&&r.state==='pending'&&r.txHash&&d.recoverAttempt)watchLanding(t,leg,attempt_id,d);
+  if(!dryRun&&r.state==='pending'&&r.txHash&&d.recoverAttempt)watchLanding(t,covered,attempt_id,d);
   if(!dryRun){settle(t.id);try{tracker.refresh(t.id)}catch(e){ledger.note(t.id,`refresh: ${e?.message}`)}}
   event({event:'signature_submitted',trade:t.id,leg,attempt:attempt_id.slice(0,12),state:r.state,dry_run:dryRun});
   const fresh=r.state==='expired'?await signRequests(trade(t.id)):[];

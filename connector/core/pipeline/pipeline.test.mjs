@@ -31,9 +31,11 @@ test('BUY all-Solana: sign requests, person signs, fee payer co-signs, persisted
  const prop=await p.propose(ALICE,basket);
  const x=await exec(p,ALICE,prop);
  assert.equal(x.status,'awaiting_signature');
- assert.equal(x.sign_requests.length,2);
+ assert.equal(x.sign_requests.length,1,'the basket is one transaction: one signature');
+ assert.deepEqual(x.sign_requests[0].legs,[0,1]);
+ assert.deepEqual(x.sign_requests[0].leg_summaries.map(s=>[s.leg,s.side,s.asset]),[[0,'buy','USDC'],[1,'buy','USDC']]);
  for(const r of x.sign_requests){
-  assert.equal(r.kind,'solana_tx');assert.equal(r.chain,'sol');assert.equal(r.wallet,aliceWallet.address);
+  assert.equal(r.kind,'solana_tx');assert.equal(r.chain,'sol');assert.equal(r.wallet,aliceWallet.address);assert.equal(r.leg,0);
   assert.equal(r.summary.side,'buy');assert.equal(r.summary.asset,'USDC');
   const t=decodeTransaction(Buffer.from(r.payload.transaction_base64,'base64'));
   assert.deepEqual(t.message.accounts.slice(0,2),[feePayer.address,aliceWallet.address]);
@@ -49,10 +51,10 @@ test('BUY all-Solana: sign requests, person signs, fee payer co-signs, persisted
  rpc.onBroadcast=bytes=>{const b64=Buffer.from(bytes).toString('base64');assert.ok(db.prepare('SELECT 1 FROM client_trade WHERE signed_base64=?').get(b64),'signed bytes committed before the send')};
  for(const r of x.sign_requests){
   const s=await sub(p,ALICE,r,signAs(aliceWallet,r));
-  assert.equal(s.legs[r.leg].send_status,'signing');
-  assert.ok(s.legs[r.leg].tx_hash);
+  assert.deepEqual(s.legs.map(l=>l.send_status),['signing','signing'],'every leg of the transaction moves together');
+  assert.ok(s.legs[r.leg].tx_hash);assert.equal(s.legs[1].tx_hash,s.legs[0].tx_hash);
  }
- assert.equal(feePayer.calls,2);assert.equal(rpc.sent.length,2);
+ assert.equal(feePayer.calls,1);assert.equal(rpc.sent.length,1);
  // Fee payer is account 0 and signed; the person's signature is preserved.
  const sent=decodeTransaction(Buffer.from(rpc.sent[0],'base64'));
  assert.ok(sent.signatures.every(s=>s.some(b=>b!==0)));
@@ -307,8 +309,8 @@ test('dry run: validated and simulated, never co-signed or sent; the leg keeps w
  assert.equal(leg(db,x.trade_id,0).send_status,'awaiting_signature');
 });
 
-test('quotas: per-account daily sponsored transactions refuse a BUY leg (not_sent, cap back); rent counted per deposit account',async()=>{
- const f=fakePipeline({env:{YEET_SPONSOR_DAILY_TX:'1'}});const {p,db}=f;
+test('quotas (one request per leg): per-account daily sponsored transactions refuse a BUY leg (not_sent, cap back); rent counted per deposit account',async()=>{
+ const f=fakePipeline({env:{YEET_SPONSOR_DAILY_TX:'1',YEET_SOL_BATCH_MAX_LEGS:'1'}});const {p,db}=f;
  const x=await exec(p,ALICE,await p.propose(ALICE,basket));
  assert.equal(x.sign_requests.length,1);
  assert.equal(leg(db,x.trade_id,1).send_status,'not_sent');
@@ -353,7 +355,8 @@ test('a used confirm code replays the trade with fresh sign requests for legs st
  assert.deepEqual(again.sign_requests.map(r=>r.attempt_id),x.sign_requests.map(r=>r.attempt_id));
  now.advance(70_000);
  const later=await exec(p,ALICE,prop);
- assert.equal(later.sign_requests.length,2);
+ assert.equal(later.sign_requests.length,1);
+ assert.deepEqual(later.sign_requests[0].legs,[0,1],'one fresh request re-covers both legs');
  assert.ok(later.sign_requests.every((r,i)=>r.attempt_id!==x.sign_requests[i].attempt_id));
 });
 
@@ -413,8 +416,8 @@ test('pipeline refusal details: another account, another trade of the same accou
  await assert.rejects(p.submit(ALICE,{trade_id:y.trade_id,leg:0,attempt_id:r.attempt_id,signed}),e=>e.code==='INVALID_ARGUMENT'&&e.detail==='unknown attempt');
 });
 
-test('signing page (pageRequests): the account\'s own trade only; the open requests; a paused system issues none',async()=>{
- const f=fakePipeline();const {p,db,env,now}=f;
+test('signing page (pageRequests, one request per leg): the account\'s own trade only; the open requests; a paused system issues none',async()=>{
+ const f=fakePipeline({env:{YEET_SOL_BATCH_MAX_LEGS:'1'}});const {p,db,env,now}=f;
  const x=await exec(p,ALICE,await p.propose(ALICE,basket));
  const page=await p.pageRequests(ALICE,x.trade_id);
  assert.equal(page.trade_id,x.trade_id);assert.equal(page.status,'signing');

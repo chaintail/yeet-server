@@ -78,7 +78,8 @@ test('finding 2: 10 identical submissions start 1 watcher and send 1 deposit not
 test('finding 2: concurrent watchers are capped; beyond the cap the tracker pass sends the notice',async()=>{
  const gate=deferred();let rpcRef;
  const sleep=async()=>{await gate.promise;confirmSent(rpcRef)};
- const f=fakePipeline({landing:{landingPollMs:1,landingWatchMs:10,landingWatchMax:1,sleep}});rpcRef=f.rpc;
+ // One request per leg (two attempts, two watchers wanted): the cap admits one.
+ const f=fakePipeline({env:{YEET_SOL_BATCH_MAX_LEGS:'1'},landing:{landingPollMs:1,landingWatchMs:10,landingWatchMax:1,sleep}});rpcRef=f.rpc;
  const {p,db,oneclick}=f;
  const x=await exec(p,ALICE,await p.propose(ALICE,{...one,amount_usdc:'10',legs:[{symbol:'WIF',parts:1},{symbol:'BOME',parts:1}]}));
  for(const r of x.sign_requests)await sub(p,ALICE,r,signAs(aliceWallet,r));

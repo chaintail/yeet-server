@@ -86,6 +86,11 @@ export function transitionLeg(db,{tradeId,idx,from,to,evidence,set={},at}){
 /** Design 1.2: sha256("yeet-attempt:" + trade_id + ":" + leg + ":" + n), hex. */
 export const attemptIdOf=(tradeId,idx,n)=>createHash('sha256').update(`yeet-attempt:${tradeId}:${idx}:${n}`).digest('hex');
 
+/** Every leg one attempt pays (migration 8 batch_json; NULL = a single-leg attempt of leg_idx). Ascending, legs[0] = leg_idx. */
+export const legsOfAttempt=a=>a?.batch_json?JSON.parse(a.batch_json).legs:[a.leg_idx];
+/** Open attempts (pending, signing, confirming) of a trade covering leg `idx`, as the anchor or inside batch_json. */
+const OPEN_COVERING="SELECT * FROM client_trade WHERE trade_id=? AND status IN('pending','signing','confirming') AND (leg_idx=? OR EXISTS(SELECT 1 FROM json_each(batch_json,'$.legs') WHERE value=?))";
+
 /** spend_hold is created by trade/db.mjs migration 7. 1Click statuses that prove nothing was deposited at the address. */
 const NO_DEPOSIT=['PENDING_DEPOSIT'];
 
@@ -107,8 +112,11 @@ export function createLedger({db,now=Date.now,sponsorLimits=DEFAULT_SPONSORSHIP_
  /** Fee and rent back to the day the send was reserved on (Folio abandon/fail). */
  function refund(s){
   db.prepare('UPDATE sponsor_day SET transactions=transactions-1,lamports=lamports-? WHERE day=? AND account_id=? AND chain=?').run(s.lamports,s.day,s.account_id,'sol');
-  if(s.rent_lamports>0)db.prepare('UPDATE sponsor_rent_day SET accounts=accounts-1,lamports=lamports-? WHERE day=? AND account_id=?').run(s.rent_lamports,s.day,s.account_id);
+  if(s.rent_lamports>0||s.rent_accounts>0)db.prepare('UPDATE sponsor_rent_day SET accounts=accounts-?,lamports=lamports-? WHERE day=? AND account_id=?').run(s.rent_accounts??(s.rent_lamports>0?1:0),s.rent_lamports,s.day,s.account_id);
  }
+ const openCovering=(tradeId,idx)=>db.prepare(OPEN_COVERING).get(tradeId,idx,idx);
+ /** The attempt's legs (rows), in its order. */
+ const legRows=a=>legsOfAttempt(a).map(i=>leg(a.trade_id,i));
  /**
   * A BUY leg that never moved funds through the pipeline goes back to the daily USDC cap, but not yet (review finding
   * 2): the 1Click deposit address stays live until the quote deadline, and the wallet can pay it directly. The amount
@@ -125,7 +133,9 @@ export function createLedger({db,now=Date.now,sponsorLimits=DEFAULT_SPONSORSHIP_
 
  return {
   attempt,send,trade,leg,
-  openAttempt:(tradeId,idx)=>db.prepare("SELECT * FROM client_trade WHERE trade_id=? AND leg_idx=? AND status IN('pending','signing','confirming')").get(tradeId,idx),
+  /** The open attempt covering leg idx (its anchor or one of its batch legs). */
+  openAttempt:(tradeId,idx)=>openCovering(tradeId,idx),
+  legsOfAttempt,
   attemptsOf:tradeId=>db.prepare('SELECT * FROM client_trade WHERE trade_id=? ORDER BY leg_idx,attempt_no').all(tradeId),
   lastAttempt:(tradeId,idx)=>db.prepare('SELECT * FROM client_trade WHERE trade_id=? AND leg_idx=? ORDER BY attempt_no DESC LIMIT 1').get(tradeId,idx),
   unresolved:chain=>db.prepare("SELECT * FROM client_trade WHERE chain=? AND status IN('pending','signing','confirming') ORDER BY created_at").all(chain),
@@ -137,12 +147,19 @@ export function createLedger({db,now=Date.now,sponsorLimits=DEFAULT_SPONSORSHIP_
    * Refuses SPONSOR_QUOTA_EXHAUSTED (scoped) when a cap would be passed; an exit (SELL) is never refused by the
    * per-account fee caps but is bound by the exit allowance and the whole global budget (Folio audit R9).
    */
-  issue({tradeId,idx,accountId,wallet,chain,kind,payload,payloadSha256,unsignedBase64=null,lastValidBlockHeight=null,expiresAt,
-   sponsor=null/* {lamports, rentLamports, idempotencyKey, exit} */}){
+  issue({tradeId,idx,idxs,accountId,wallet,chain,kind,payload,payloadSha256,unsignedBase64=null,lastValidBlockHeight=null,expiresAt,
+   batch=null/* {legs, creates, cu, price}: one Solana transaction paying several legs */,
+   sponsor=null/* {lamports, rentLamports, rentAccounts?, idempotencyKey, exit} */}){
+   const covered=idxs??(batch?.legs??[idx]);
+   if(!covered.length||covered.some((v,i)=>!Number.isInteger(v)||(i>0&&v<=covered[i-1]))||(idx!==undefined&&idx!==covered[0]))throw new TransitionRefused('attempt legs must be ascending and unique');
+   if(batch?JSON.stringify(batch.legs)!==JSON.stringify(covered):covered.length!==1)throw new TransitionRefused('batch legs differ');
+   const anchor=covered[0];
    return tx(db,()=>{
-    const l=leg(tradeId,idx);
-    if(!l||l.send_status!=='awaiting_signature')throw new TransitionRefused('leg is not awaiting a signature');
-    if(db.prepare("SELECT 1 FROM client_trade WHERE trade_id=? AND leg_idx=? AND status IN('pending','signing','confirming')").get(tradeId,idx))throw new TransitionRefused('an attempt is already open');
+    for(const i of covered){
+     const l=leg(tradeId,i);
+     if(!l||l.send_status!=='awaiting_signature')throw new TransitionRefused('leg is not awaiting a signature');
+     if(openCovering(tradeId,i))throw new TransitionRefused('an attempt is already open');
+    }
     // Review finding 6: one trade per account holds unsigned reservations at a time. Unsigned attempts of the
     // account's other trades are abandoned with their fee and rent back (their legs keep awaiting a signature and get
     // a fresh request on replay), so replaying execute_trade cannot pin the global rent budget.
@@ -150,12 +167,12 @@ export function createLedger({db,now=Date.now,sponsorLimits=DEFAULT_SPONSORSHIP_
      setAttempt(o.attempt_id,'pending','abandoned',{failure_reason:'SUPERSEDED_BY_NEWER_TRADE'});
      const s=send(o.attempt_id);
      if(s&&s.state==='pending'){db.prepare("UPDATE sponsor_send SET state='not_submitted',updated_at=? WHERE attempt_id=?").run(now(),o.attempt_id);refund(s)}
-     recordLegEvent(db,{tradeId:o.trade_id,idx:o.leg_idx,status:leg(o.trade_id,o.leg_idx).send_status,evidence:{attempt_id:o.attempt_id,abandoned:'SUPERSEDED_BY_NEWER_TRADE'},at:now()});
+     for(const ol of legRows(o))recordLegEvent(db,{tradeId:o.trade_id,idx:ol.idx,status:ol.send_status,evidence:{attempt_id:o.attempt_id,abandoned:'SUPERSEDED_BY_NEWER_TRADE'},at:now()});
     }
-    const n=(db.prepare('SELECT MAX(attempt_no) AS n FROM client_trade WHERE trade_id=? AND leg_idx=?').get(tradeId,idx).n??0)+1;
-    const id=attemptIdOf(tradeId,idx,n),t=now(),day=utcDay(t);
-    db.prepare(`INSERT INTO client_trade(attempt_id,trade_id,leg_idx,attempt_no,account_id,wallet,chain,kind,status,payload_json,payload_sha256,unsigned_base64,last_valid_block_height,expires_at,sponsor_exit,created_at,updated_at)
-     VALUES(?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?)`).run(id,tradeId,idx,n,accountId,wallet,chain,kind,JSON.stringify(payload),payloadSha256,unsignedBase64,lastValidBlockHeight,expiresAt,sponsor?.exit?1:0,t,t);
+    const n=(db.prepare('SELECT MAX(attempt_no) AS n FROM client_trade WHERE trade_id=? AND leg_idx=?').get(tradeId,anchor).n??0)+1;
+    const id=attemptIdOf(tradeId,anchor,n),t=now(),day=utcDay(t);
+    db.prepare(`INSERT INTO client_trade(attempt_id,trade_id,leg_idx,attempt_no,account_id,wallet,chain,kind,status,payload_json,payload_sha256,unsigned_base64,last_valid_block_height,expires_at,sponsor_exit,created_at,updated_at,batch_json)
+     VALUES(?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?)`).run(id,tradeId,anchor,n,accountId,wallet,chain,kind,JSON.stringify(payload),payloadSha256,unsignedBase64,lastValidBlockHeight,expiresAt,sponsor?.exit?1:0,t,t,batch?JSON.stringify(batch):null);
     if(sponsor){
      const exit=!!sponsor.exit,mine=used(day,accountId,'sol'),lam=sponsor.lamports;
      if(!Number.isSafeInteger(lam)||lam<0)throw Error('fee must be whole lamports');
@@ -163,19 +180,24 @@ export function createLedger({db,now=Date.now,sponsorLimits=DEFAULT_SPONSORSHIP_
      if(!exit&&mine.lamports+lam>sponsorLimits.daily_lamports)throw new SponsorshipRefusal('SPONSOR_QUOTA_EXHAUSTED','identity_lamports');
      if(exit&&(mine.transactions+1>ceilings.exit_identity_transactions||mine.lamports+lam>ceilings.exit_identity_lamports))throw new SponsorshipRefusal('SPONSOR_QUOTA_EXHAUSTED','identity_exit');
      if(globalUsed(day,'sol')+lam>(exit?ceilings.exit_global_lamports:ceilings.entry_global_lamports))throw new SponsorshipRefusal('SPONSOR_QUOTA_EXHAUSTED','global_lamports');
-     if(sponsor.rentLamports>0){
+     const rentLamports=sponsor.rentLamports??0,rentAccounts=sponsor.rentAccounts??(rentLamports>0?1:0);
+     if(!Number.isSafeInteger(rentAccounts)||rentAccounts<0||rentAccounts>covered.length)throw Error('rent accounts out of range');
+     if(rentAccounts>0||rentLamports>0){
       const r=rentUsed(day,accountId);
-      if(r.accounts+1>sponsorLimits.daily_rent_accounts)throw new SponsorshipRefusal('SPONSOR_QUOTA_EXHAUSTED','identity_rent');
-      if(rentGlobal(day)+sponsor.rentLamports>sponsorLimits.global_daily_rent_lamports)throw new SponsorshipRefusal('SPONSOR_QUOTA_EXHAUSTED','global_rent');
-      db.prepare('INSERT INTO sponsor_rent_day(day,account_id,accounts,lamports) VALUES(?,?,1,?) ON CONFLICT(day,account_id) DO UPDATE SET accounts=accounts+1,lamports=lamports+excluded.lamports').run(day,accountId,sponsor.rentLamports);
+      if(r.accounts+rentAccounts>sponsorLimits.daily_rent_accounts)throw new SponsorshipRefusal('SPONSOR_QUOTA_EXHAUSTED','identity_rent');
+      if(rentGlobal(day)+rentLamports>sponsorLimits.global_daily_rent_lamports)throw new SponsorshipRefusal('SPONSOR_QUOTA_EXHAUSTED','global_rent');
+      db.prepare('INSERT INTO sponsor_rent_day(day,account_id,accounts,lamports) VALUES(?,?,?,?) ON CONFLICT(day,account_id) DO UPDATE SET accounts=accounts+excluded.accounts,lamports=lamports+excluded.lamports').run(day,accountId,rentAccounts,rentLamports);
      }
+     // One transaction, one sponsored send, however many legs it pays.
      db.prepare('INSERT INTO sponsor_day(day,account_id,chain,transactions,lamports) VALUES(?,?,?,1,?) ON CONFLICT(day,account_id,chain) DO UPDATE SET transactions=transactions+1,lamports=lamports+excluded.lamports').run(day,accountId,'sol',lam);
-     db.prepare("INSERT INTO sponsor_send(attempt_id,account_id,day,lamports,rent_lamports,idempotency_key,state,signature,updated_at) VALUES(?,?,?,?,?,?,'pending',NULL,?)")
-      .run(id,accountId,day,lam,sponsor.rentLamports??0,sponsor.idempotencyKey,t);
+     db.prepare("INSERT INTO sponsor_send(attempt_id,account_id,day,lamports,rent_lamports,rent_accounts,idempotency_key,state,signature,updated_at) VALUES(?,?,?,?,?,?,?,'pending',NULL,?)")
+      .run(id,accountId,day,lam,rentLamports,rentAccounts,sponsor.idempotencyKey,t);
     }
-    db.prepare('UPDATE trade_legs SET attempt_id=?,sign_kind=?,updated_at=? WHERE trade_id=? AND idx=?').run(id,kind,t,tradeId,idx);
-    recordLegEvent(db,{tradeId,idx,status:'awaiting_signature',evidence:{attempt_id:id,attempt_no:n,kind,expires_at:iso(expiresAt),payload_sha256:payloadSha256,
-     ...(sponsor?{fee_lamports:sponsor.lamports,rent_lamports:sponsor.rentLamports??0,exit:!!sponsor.exit}:{})},at:t});
+    for(const i of covered){
+     db.prepare('UPDATE trade_legs SET attempt_id=?,sign_kind=?,updated_at=? WHERE trade_id=? AND idx=?').run(id,kind,t,tradeId,i);
+     recordLegEvent(db,{tradeId,idx:i,status:'awaiting_signature',evidence:{attempt_id:id,attempt_no:n,kind,expires_at:iso(expiresAt),payload_sha256:payloadSha256,
+      ...(covered.length>1?{legs:covered}:{}),...(sponsor?{fee_lamports:sponsor.lamports,rent_lamports:sponsor.rentLamports??0,exit:!!sponsor.exit}:{})},at:t});
+    }
     return attempt(id);
    });
   },
@@ -197,7 +219,8 @@ export function createLedger({db,now=Date.now,sponsorLimits=DEFAULT_SPONSORSHIP_
      db.prepare("UPDATE sponsor_send SET state='signing',updated_at=? WHERE attempt_id=? AND state='pending'").run(now(),id);
     }
     if(!setAttempt(id,'pending','signing'))return false;
-    if(!transitionLeg(db,{tradeId:a.trade_id,idx:a.leg_idx,from:'awaiting_signature',to:'signing',evidence:{attempt_id:id,stage:'claim'},set:{updated_at:now()},at:now()}))
+    // Every leg the transaction pays moves together; one that left awaiting_signature rolls the claim back.
+    for(const i of legsOfAttempt(a))if(!transitionLeg(db,{tradeId:a.trade_id,idx:i,from:'awaiting_signature',to:'signing',evidence:{attempt_id:id,stage:'claim'},set:{updated_at:now()},at:now()}))
      throw new TransitionRefused('leg left awaiting_signature');
     return true;
    });
@@ -209,17 +232,22 @@ export function createLedger({db,now=Date.now,sponsorLimits=DEFAULT_SPONSORSHIP_
     if(!a||a.status!=='signing'||a.signed_base64||!signedBase64||!signature)throw new TransitionRefused('relay signing conflict');
     setAttempt(id,'signing','confirming',{signed_base64:signedBase64,signature});
     db.prepare("UPDATE sponsor_send SET state='submitted',signature=?,updated_at=? WHERE attempt_id=?").run(signature,now(),id);
-    db.prepare('UPDATE trade_legs SET tx_hash=?,updated_at=? WHERE trade_id=? AND idx=?').run(signature,now(),a.trade_id,a.leg_idx);
-    recordLegEvent(db,{tradeId:a.trade_id,idx:a.leg_idx,status:'signing',evidence:{attempt_id:id,signed_bytes_persisted:true,tx_hash:signature},at:now()});
+    for(const i of legsOfAttempt(a)){
+     db.prepare('UPDATE trade_legs SET tx_hash=?,updated_at=? WHERE trade_id=? AND idx=?').run(signature,now(),a.trade_id,i);
+     recordLegEvent(db,{tradeId:a.trade_id,idx:i,status:'signing',evidence:{attempt_id:id,signed_bytes_persisted:true,tx_hash:signature},at:now()});
+    }
    });
   },
   recordSent(id){db.prepare('UPDATE client_trade SET sent_at=COALESCE(sent_at,?),resends=resends+1,updated_at=? WHERE attempt_id=?').run(now(),now(),id)},
-  /** confirming -> confirmed, leg signing -> sent with the chain hash. */
+  /** confirming -> confirmed, every leg of the attempt signing -> sent with the chain hash, in one DB transaction
+   * (one landed transaction pays all of them). */
   confirmed(id,{commitment}){
    return tx(db,()=>{
     const a=attempt(id);if(!a||a.status!=='confirming')return false;
     setAttempt(id,'confirming','confirmed');
-    return transitionLeg(db,{tradeId:a.trade_id,idx:a.leg_idx,from:'signing',to:'sent',evidence:{attempt_id:id,tx_hash:a.signature,commitment,source:'signature_status'},set:{tx_hash:a.signature,updated_at:now()},at:now()});
+    let all=true;
+    for(const i of legsOfAttempt(a))all=transitionLeg(db,{tradeId:a.trade_id,idx:i,from:'signing',to:'sent',evidence:{attempt_id:id,tx_hash:a.signature,commitment,source:'signature_status'},set:{tx_hash:a.signature,updated_at:now()},at:now()})&&all;
+    return all;
    });
   },
   /**
@@ -240,12 +268,14 @@ export function createLedger({db,now=Date.now,sponsorLimits=DEFAULT_SPONSORSHIP_
     setAttempt(id,from,stage==='pending'?'abandoned':'failed',{failure_reason:String(reason).slice(0,200)});
     const s=send(id);
     if(s&&s.state!=='not_submitted'){db.prepare("UPDATE sponsor_send SET state='not_submitted',updated_at=? WHERE attempt_id=?").run(now(),id);if(stage!=='chain')refund(s)}
-    const t=trade(a.trade_id),l=leg(a.trade_id,a.leg_idx);
-    if(stage==='pending'){recordLegEvent(db,{tradeId:a.trade_id,idx:a.leg_idx,status:l.send_status,evidence:{attempt_id:id,abandoned:reason,...extra},at:now()});return true}
+    const t=trade(a.trade_id),rows=legRows(a);
+    if(stage==='pending'){for(const l of rows)recordLegEvent(db,{tradeId:a.trade_id,idx:l.idx,status:l.send_status,evidence:{attempt_id:id,abandoned:reason,...extra},at:now()});return true}
     const to=stage==='expired'?'not_sent':'failed';
-    if(!transitionLeg(db,{tradeId:a.trade_id,idx:a.leg_idx,from:'signing',to,evidence:{attempt_id:id,reason,stage,released_raw:t.direction==='yeet'?l.amount_in_raw:null,...extra},set:{updated_at:now()},at:now()}))
-     throw new TransitionRefused('leg left signing');
-    releaseSpend(t,l);
+    for(const l of rows){
+     if(!transitionLeg(db,{tradeId:a.trade_id,idx:l.idx,from:'signing',to,evidence:{attempt_id:id,reason,stage,released_raw:t.direction==='yeet'?l.amount_in_raw:null,...extra},set:{updated_at:now()},at:now()}))
+      throw new TransitionRefused('leg left signing');
+     releaseSpend(t,l);
+    }
     return true;
    });
   },
@@ -254,10 +284,13 @@ export function createLedger({db,now=Date.now,sponsorLimits=DEFAULT_SPONSORSHIP_
   legNotSent(tradeId,idx,evidence){
    return tx(db,()=>{
     const l=leg(tradeId,idx);if(!l||l.send_status!=='awaiting_signature')return false;
-    const open=db.prepare("SELECT * FROM client_trade WHERE trade_id=? AND leg_idx=? AND status IN('pending','signing','confirming')").get(tradeId,idx);
+    const open=openCovering(tradeId,idx);
     if(open&&open.status!=='pending')return false;
+    // A pending attempt covering idx is abandoned whole (quota back); only idx goes not_sent, the other legs it covered
+    // keep awaiting a signature and get one fresh request on the next signRequests.
     if(open){setAttempt(open.attempt_id,'pending','abandoned',{failure_reason:String(evidence.reason??'not sent').slice(0,200)});const s=send(open.attempt_id);
-     if(s&&s.state==='pending'){db.prepare("UPDATE sponsor_send SET state='not_submitted',updated_at=? WHERE attempt_id=?").run(now(),open.attempt_id);refund(s)}}
+     if(s&&s.state==='pending'){db.prepare("UPDATE sponsor_send SET state='not_submitted',updated_at=? WHERE attempt_id=?").run(now(),open.attempt_id);refund(s)}
+     for(const o of legRows(open))if(o.idx!==idx)recordLegEvent(db,{tradeId,idx:o.idx,status:o.send_status,evidence:{attempt_id:open.attempt_id,abandoned:'LEG_NOT_SENT',not_sent_leg:idx},at:now()});}
     const t=trade(tradeId);
     if(!transitionLeg(db,{tradeId,idx,from:'awaiting_signature',to:'not_sent',evidence:{...evidence,released_raw:t.direction==='yeet'?l.amount_in_raw:null},set:{updated_at:now()},at:now()}))return false;
     releaseSpend(t,l);

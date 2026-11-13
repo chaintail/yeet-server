@@ -1,6 +1,7 @@
 // The one transfer a Solana leg is: the person's tokens (USDC for a BUY, the coin for a SELL) to the 1Click deposit
 // address of this leg's quote. Everything the transaction may contain is pinned from the stored leg (quote, deposit
-// address, amount) and from the chain (the mint's token program), never from the request.
+// address, amount) and from the chain (the mint's token program), never from the request. A basket puts every leg's
+// transfer in ONE transaction (buildBasketTransaction), so the person signs once; a leg alone is the basket of one.
 // Instructions, in order (design 2.1): SetComputeUnitLimit, SetComputeUnitPrice, Associated Token CreateIdempotent
 // (payer = fee payer, owner = deposit address; left out when that token account exists), TransferChecked.
 import {buildMessage,associatedTokenAddress,createAssociatedTokenIdempotent,transferChecked,TOKEN_PROGRAM,TOKEN_2022_PROGRAM,USDC_SOLANA} from './message.mjs';
@@ -28,15 +29,45 @@ export async function legPin({leg,wallet,feePayer,rpc,catalog=CATALOG}){
  const tokenProgram=info?.owner;
  if(![TOKEN_PROGRAM,TOKEN_2022_PROGRAM].includes(tokenProgram))refuse('TEMPORARILY_UNAVAILABLE','mint is not an SPL token');
  if(!Number.isInteger(q.origin.decimals))refuse('TEMPORARILY_UNAVAILABLE','decimals unknown');
- return Object.freeze({feePayer,wallet,depositOwner:leg.deposit_address,mint,tokenProgram,amount:BigInt(leg.amount_in_raw),decimals:q.origin.decimals});
+ return Object.freeze({feePayer,wallet,depositOwner:leg.deposit_address,mint,tokenProgram,amount:BigInt(leg.amount_in_raw),decimals:q.origin.decimals,depositMemo:leg.deposit_memo??null});
 }
 
-/** Unsigned wire bytes for the leg (both signature slots zero). */
+/** At most this many legs share one transaction (the contract's 5-leg basket). */
+export const MAX_BASKET_LEGS=5;
+/** Why a basket cannot be one transaction; the driver falls back to one request per leg. */
+export class BatchRefusal extends Error{constructor(code,detail){super(detail??code);this.name='BatchRefusal';this.code=code;this.reason=code;this.detail=detail??code}}
+
+/**
+ * Unsigned wire bytes for one or more legs in ONE transaction (both signature slots zero). Instructions, in leg order:
+ * SetComputeUnitLimit, SetComputeUnitPrice, then for each pin an optional CreateIdempotent of its deposit token
+ * account (payer = fee payer, `creates[i]`) followed by its TransferChecked (authority = the person).
+ * `computeUnitLimit` is the whole transaction's limit, default DEFAULT_COMPUTE_UNIT_LIMIT x legs.
+ * Throws BatchRefusal BATCH_UNSUPPORTED (two legs share a deposit token account, a leg carries a deposit memo, legs
+ * disagree on fee payer or wallet) or BATCH_TOO_LARGE (over 1232 bytes).
+ */
+export function buildBasketTransaction(pins,{blockhash,creates,computeUnitLimit,priorityMicroLamports=DEFAULT_PRIORITY_MICRO_LAMPORTS,maxLegs=MAX_BASKET_LEGS}){
+ if(!Array.isArray(pins)||!pins.length||pins.length>maxLegs)throw new BatchRefusal('BATCH_UNSUPPORTED',`1 to ${maxLegs} legs per transaction`);
+ if(!Array.isArray(creates)||creates.length!==pins.length)throw new BatchRefusal('BATCH_UNSUPPORTED','one create flag per leg');
+ const [first]=pins;
+ if(pins.some(p=>p.feePayer!==first.feePayer||p.wallet!==first.wallet))throw new BatchRefusal('BATCH_UNSUPPORTED','legs disagree on fee payer or wallet');
+ const atas=pins.map(p=>associatedTokenAddress(p.depositOwner,p.mint,p.tokenProgram));
+ if(pins.length>1){
+  if(new Set(atas).size!==atas.length)throw new BatchRefusal('BATCH_UNSUPPORTED','two legs share a deposit token account');
+  if(pins.some(p=>p.depositMemo))throw new BatchRefusal('BATCH_UNSUPPORTED','a leg carries a deposit memo');
+ }
+ const ixs=pins.flatMap((p,i)=>[
+  ...(creates[i]?[createAssociatedTokenIdempotent({payer:p.feePayer,ata:atas[i],owner:p.depositOwner,mint:p.mint,tokenProgram:p.tokenProgram})]:[]),
+  transferChecked({source:associatedTokenAddress(p.wallet,p.mint,p.tokenProgram),mint:p.mint,destination:atas[i],authority:p.wallet,amount:p.amount,decimals:p.decimals,tokenProgram:p.tokenProgram}),
+ ]);
+ try{
+  return buildMessage({feePayer:first.feePayer,owner:first.wallet,blockhash,computeUnitLimit:computeUnitLimit??DEFAULT_COMPUTE_UNIT_LIMIT*pins.length,priorityMicroLamports,instructions:ixs}).bytes;
+ }catch(e){
+  if(e?.message==='TX_TOO_LARGE')throw new BatchRefusal('BATCH_TOO_LARGE',`${pins.length} legs do not fit in 1232 bytes`);
+  throw e;
+ }
+}
+
+/** Unsigned wire bytes for the leg (both signature slots zero): the basket of one. */
 export function buildLegTransaction(pin,{blockhash,createDestination,computeUnitLimit=DEFAULT_COMPUTE_UNIT_LIMIT,priorityMicroLamports=DEFAULT_PRIORITY_MICRO_LAMPORTS}){
- const ata=associatedTokenAddress(pin.depositOwner,pin.mint,pin.tokenProgram);
- const ixs=[
-  ...(createDestination?[createAssociatedTokenIdempotent({payer:pin.feePayer,ata,owner:pin.depositOwner,mint:pin.mint,tokenProgram:pin.tokenProgram})]:[]),
-  transferChecked({source:associatedTokenAddress(pin.wallet,pin.mint,pin.tokenProgram),mint:pin.mint,destination:ata,authority:pin.wallet,amount:pin.amount,decimals:pin.decimals,tokenProgram:pin.tokenProgram}),
- ];
- return buildMessage({feePayer:pin.feePayer,owner:pin.wallet,blockhash,computeUnitLimit,priorityMicroLamports,instructions:ixs}).bytes;
+ return buildBasketTransaction([pin],{blockhash,creates:[!!createDestination],computeUnitLimit,priorityMicroLamports});
 }

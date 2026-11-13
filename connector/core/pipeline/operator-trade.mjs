@@ -11,6 +11,7 @@ import {CATALOG} from '../trade/router.mjs';
 import {createPipeline} from './pipeline.mjs';
 import {staticWalletDirectory} from './wallet-directory.mjs';
 import {localSigner} from './solana/verify.mjs';
+import {isAddress} from './solana/message.mjs';
 import {privateKeyToAccount} from 'viem/accounts';
 import {txFromPayload} from './base/source-executor.mjs';
 
@@ -19,19 +20,25 @@ export const OPERATOR_CLIENT='yeet-operator-tool';
 const CHAINS=['sol','base'],SIDES=['buy','sell'];
 const TERMINAL=['success','partial','failed','refunded','expired'];
 
-/** `--chain sol --side buy --coin '$WIF' --usdc 5 [--percent 100] [--broadcast] [--local-fee-payer] [--account id]`. */
+/** `--chain sol --side buy --coin '$WIF[,BOME,...]' --usdc 5 [--percent 100] [--broadcast] [--local-fee-payer |
+ * --fee-payer-address <addr>] [--account id]`. Up to 5 distinct coins, comma separated: one basket. */
 export function parseArgs(argv){
- const o={chain:'sol',side:'buy',coin:null,usdc:null,percent:100,broadcast:false,localFeePayer:false,account:OPERATOR_ACCOUNT,wallet:null,db:null,followS:600};
+ const o={chain:'sol',side:'buy',coin:null,usdc:null,percent:100,broadcast:false,localFeePayer:false,feePayerAddress:null,account:OPERATOR_ACCOUNT,wallet:null,db:null,followS:600};
  const take=(i,name)=>{const v=argv[i+1];if(v===undefined||v.startsWith('--'))throw Error(`${name} needs a value`);return v};
  for(let i=0;i<argv.length;i++){
   const a=argv[i];
   if(a==='--broadcast')o.broadcast=true;
   else if(a==='--local-fee-payer')o.localFeePayer=true;
-  else if(['--chain','--side','--coin','--usdc','--percent','--account','--wallet','--db','--follow-s'].includes(a)){
+  else if(['--chain','--side','--coin','--usdc','--percent','--account','--wallet','--db','--follow-s','--fee-payer-address'].includes(a)){
    const v=take(i,a);i++;
-   const k={'--follow-s':'followS'}[a]??a.slice(2);
+   const k={'--follow-s':'followS','--fee-payer-address':'feePayerAddress'}[a]??a.slice(2);
    o[k]=['--percent','--follow-s'].includes(a)?Number(v):v;
   }else throw Error(`unknown argument ${a}`);
+ }
+ if(o.feePayerAddress!==null){
+  if(o.broadcast)throw Error('--fee-payer-address is for dry runs only');
+  if(o.localFeePayer)throw Error('--fee-payer-address and --local-fee-payer exclude each other');
+  if(!isAddress(o.feePayerAddress))throw Error('--fee-payer-address is a Solana address');
  }
  if(!CHAINS.includes(o.chain))throw Error('--chain is sol or base');
  if(!SIDES.includes(o.side))throw Error('--side is buy or sell');
@@ -50,6 +57,15 @@ export function coinSymbol(input,catalog=CATALOG){
  const e=catalog.find(c=>c.chain==='solana'&&c.kind!=='funding'&&(c.symbol.toUpperCase()===s||c.listedSymbol?.toUpperCase()===s));
  if(!e||e.symbol==='USDC')throw Error(`unknown coin ${input}`);
  return e.symbol;
+}
+
+/** `--coin 'WIF,BOME'`: 1 to 5 distinct catalogue symbols, in the order given. */
+export function coinSymbols(input,catalog=CATALOG){
+ const parts=String(input??'').split(',').map(s=>s.trim()).filter(Boolean);
+ if(!parts.length||parts.length>5)throw Error('--coin takes 1 to 5 coins, comma separated');
+ const out=parts.map(p=>coinSymbol(p,catalog));
+ if(new Set(out).size!==out.length)throw Error('--coin lists a coin twice');
+ return out;
 }
 
 /** Refuses a broadcast unless the operator's environment has trading on for this account (design section 4). */
@@ -78,6 +94,12 @@ export async function runUserSignedTrade({opts,wallet,env=process.env,emit=()=>{
   const fp=localSigner();driverOverrides.feePayer={address:fp.address,signTransaction:async b=>fp.signTransaction(b)};
   emit({step:'fee_payer',local:true,address:fp.address});
  }
+ // Dry only: the real (funded) fee payer's address and no key, so the simulation runs against the real account.
+ if(opts.feePayerAddress&&driverOverrides.feePayer===undefined){
+  if(opts.broadcast)throw Error('--fee-payer-address is for dry runs only');
+  driverOverrides.feePayer={address:opts.feePayerAddress,signTransaction:async()=>{throw Error('address-only fee payer: dry runs never co-sign')}};
+  emit({step:'fee_payer',local:false,address_only:true,address:opts.feePayerAddress});
+ }
  const db=overrides.db??openTradeDb(opts.broadcast?opts.db:':memory:');
  const directory=staticWalletDirectory({[accountId]:{base:{address:wallet.base.address},solana:{address:wallet.solana.address}}});
  const events=[];
@@ -88,12 +110,15 @@ export async function runUserSignedTrade({opts,wallet,env=process.env,emit=()=>{
  emit({step:'start',mode:opts.broadcast?'broadcast':'dry_run',chain:opts.chain,side:opts.side,account:accountId,solana_wallet:wallet.solana.address,base_wallet:wallet.base.address,
   drivers:Object.fromEntries(Object.entries(p.drivers).map(([c,d])=>[c,d.readiness()]))});
 
- const symbol=coinSymbol(opts.coin),request_id=`ust-${now()}`;
- const prop=opts.side==='buy'?await p.propose(ctx,{request_id,amount_usdc:opts.usdc,legs:[{symbol,parts:1}]}):await p.skeet(ctx,{request_id,legs:[{symbol,percent:opts.percent}]});
+ const symbols=coinSymbols(opts.coin),request_id=`ust-${now()}`;
+ const prop=opts.side==='buy'?await p.propose(ctx,{request_id,amount_usdc:opts.usdc,legs:symbols.map(symbol=>({symbol,parts:1}))}):await p.skeet(ctx,{request_id,legs:symbols.map(symbol=>({symbol,percent:opts.percent}))});
  const l0=prop.legs?.[0];
- emit({step:'proposed',proposal_id:prop.proposal_id,revision:prop.revision,symbol,amount_in:l0?.amount_in??null,est_out:l0?.est_out??null,cost_pct:prop.totals?.cost_pct??null});
+ emit({step:'proposed',proposal_id:prop.proposal_id,revision:prop.revision,symbol:symbols.join(','),amount_in:l0?.amount_in??null,est_out:l0?.est_out??null,cost_pct:prop.totals?.cost_pct??null,
+  legs:(prop.legs??[]).map(l=>({symbol:l.symbol,amount_in:l.amount_in??null,est_out:l.est_out??null}))});
  const x=await p.execute(ctx,{proposal_id:prop.proposal_id,revision:prop.revision,confirm:prop.confirm.code});
- emit({step:'executed',trade_id:x.trade_id,status:x.status,sign_requests:(x.sign_requests??[]).map(r=>({leg:r.leg,kind:r.kind,wallet:r.wallet,to:r.summary.to,amount_raw:r.summary.amount_raw,asset:r.summary.asset,expires_at:r.expires_at}))});
+ emit({step:'executed',trade_id:x.trade_id,status:x.status,sign_requests:(x.sign_requests??[]).map(r=>({leg:r.leg,legs:r.legs??[r.leg],kind:r.kind,wallet:r.wallet,to:r.summary.to,amount_raw:r.summary.amount_raw,asset:r.summary.asset,expires_at:r.expires_at,
+  ...(r.kind==='solana_tx'?{unsigned_bytes:Buffer.from(r.payload.transaction_base64,'base64').length}:{}),
+  ...(r.leg_summaries?{leg_summaries:r.leg_summaries.map(s=>({leg:s.leg,asset:s.asset,amount_raw:s.amount_raw,to:s.to}))}:{})}))});
  const results=[];
  for(const r of x.sign_requests??[]){
   const fn=sign[r.kind];
@@ -101,9 +126,11 @@ export async function runUserSignedTrade({opts,wallet,env=process.env,emit=()=>{
   const signed=await fn(wallet,r);
   const s=await p.submit(ctx,{trade_id:r.trade_id,leg:r.leg,attempt_id:r.attempt_id,signed},{dryRun:!opts.broadcast});
   const leg=s.legs.find(l=>l.leg===r.leg);
-  emit({step:'submitted',leg:r.leg,send_status:leg?.send_status??null,tx_hash:leg?.tx_hash??null,
-   ...(s.dry_run?{dry_run_state:s.dry_run.state,simulation_err:s.dry_run.simulation?.err??null,simulation_units:s.dry_run.simulation?.unitsConsumed??null,fee_lamports:s.dry_run.fee_lamports,rent_lamports:s.dry_run.rent_lamports}:{})});
-  results.push({leg:r.leg,state:leg?.send_status??null,tx_hash:leg?.tx_hash??null});
+  const covered=r.legs??[r.leg];
+  emit({step:'submitted',leg:r.leg,legs:covered,send_status:leg?.send_status??null,tx_hash:leg?.tx_hash??null,
+   ...(s.dry_run?{dry_run_state:s.dry_run.state,simulation_err:s.dry_run.simulation?.err??null,simulation_units:s.dry_run.simulation?.unitsConsumed??null,fee_lamports:s.dry_run.fee_lamports,rent_lamports:s.dry_run.rent_lamports,
+    simulation_logs:(s.dry_run.simulation?.logs??[]).filter(l=>/invoke|success|failed|error|consumed/i.test(l)).slice(0,60).map(l=>String(l).slice(0,160))}:{})});
+  results.push({leg:r.leg,legs:covered,state:leg?.send_status??null,tx_hash:leg?.tx_hash??null});
  }
  let status=null;
  if(opts.broadcast&&x.trade_id){

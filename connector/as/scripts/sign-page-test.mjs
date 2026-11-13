@@ -149,3 +149,26 @@ test('API: signature goes to core as submit_trade_signature for the token accoun
   assert.equal((await post('/sign/api/signature', {...sig, privy_access_token: 'tok-new'})).status, 404);
   assert.equal((await post('/sign/api/signature', sig, 'https://evil.example')).status, 403);
 });
+
+test('a 3-leg Solana request (one transaction, one signature): legs and leg_summaries reach the page intact; one submit with the anchor leg', async () => {
+  const summary = (leg, to) => ({leg, side: 'buy', asset: 'USDC', amount_raw: '3000000', decimals: 6, to});
+  const req = {trade_id: TRADE, leg: 0, attempt_id: 'c'.repeat(64), kind: 'solana_tx', chain: 'sol', legs: [0, 1, 2],
+    summary: {side: 'buy', asset: 'USDC', amount_raw: '3000000', decimals: 6, to: 'dep0'}, leg_summaries: [summary(0, 'dep0'), summary(1, 'dep1'), summary(2, 'dep2')]};
+  const legs = ['WIF', 'BOME', 'TRUMP'].map((symbol, leg) => ({leg, symbol, send_status: 'awaiting_signature'}));
+  coreAnswer = () => ({status: 200, body: {trade_id: TRADE, direction: 'yeet', status: 'signing', legs, sign_requests: [req]}});
+  const ok = {trade_id: TRADE, privy_access_token: 'tok-alice'};
+  const page = await (await post('/sign/api/requests', ok)).json();
+  assert.equal(page.sign_requests.length, 1);
+  assert.deepEqual(page.sign_requests[0].legs, [0, 1, 2]);
+  assert.deepEqual(page.sign_requests[0].leg_summaries.map((s) => s.to), ['dep0', 'dep1', 'dep2']);
+  calls.length = 0;
+  coreAnswer = () => ({status: 200, body: {trade_id: TRADE, status: 'submitted', legs: legs.map((l) => ({...l, send_status: 'signing', tx_hash: 'h'}))}});
+  const out = await (await post('/sign/api/signature', {...ok, leg: 0, attempt_id: req.attempt_id, signed: 'AQID'})).json();
+  assert.deepEqual(out.legs.map((l) => l.send_status), ['signing', 'signing', 'signing'], 'every covered row advances from one submit');
+  assert.deepEqual(calls.map((c) => c.body), [{leg: 0, attempt_id: req.attempt_id, signed: 'AQID'}]);
+  // The page script signs per request (legs ?? [leg]) and finds a row's request by its covered legs.
+  const js = await (await fetch(BASE + '/sign/sign.js')).text();
+  assert.match(js, /const legsOf = \(r\) => Array\.isArray\(r\?\.legs\) \? r\.legs : \[r\?\.leg\]/);
+  assert.match(js, /legsOf\(r\)\.includes\(leg\)/);
+  assert.match(js, /api\('signature', \{leg: req\.leg, attempt_id: req\.attempt_id, signed\}\)/);
+});

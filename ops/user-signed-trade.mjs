@@ -2,10 +2,14 @@
 // A user-signed YEET trade from the box, without the ChatGPT widget (design section 4). The pipeline the server runs is
 // built in this process with the local test wallet (ops/test-wallet-init.mjs) as the person's wallet.
 //   node ops/user-signed-trade.mjs --chain sol --side buy --coin '$WIF' --usdc 5 [--local-fee-payer]
+//   node ops/user-signed-trade.mjs --chain sol --side buy --coin 'WIF,BOME,TRUMP' --usdc 9 [--fee-payer-address <addr>]
 //   node ops/user-signed-trade.mjs --chain sol --side sell --coin '$WIF' [--percent 100]
 //      DRY (default): live 1Click quote, sign request, the test wallet signs, the server checks every guard and runs a
 //      signature-free simulateTransaction. Nothing is co-signed, nothing is sent. --local-fee-payer uses a throwaway
-//      fee payer key in process (dry only) when the Privy fee payer is not configured here.
+//      fee payer key in process (dry only) when the Privy fee payer is not configured here; --fee-payer-address uses
+//      the real fee payer's ADDRESS only (no key, dry only), so the simulation runs against the funded account.
+//      --coin takes 1 to 5 coins, comma separated: on Solana the basket is one transaction (one signature) when it
+//      fits; YEET_SOL_BATCH_MAX_LEGS=1 forces one request per leg.
 //   --broadcast   the real thing: refused unless YEET_LIVE=1, YEET_KILL_SWITCH off and --account (default
 //      yeet-privy-operator-test-wallet) is in YEET_LIVE_ACCOUNTS in this shell; the fee payer is the Privy wallet from
 //      YEET_SOL_FEE_PAYER_ID / _ADDRESS; follows the trade up to --follow-s seconds. Records in --db (default

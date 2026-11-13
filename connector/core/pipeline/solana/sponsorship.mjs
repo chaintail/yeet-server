@@ -6,9 +6,10 @@
 // (RequestHeapFrame, KLend, swap programs) are dropped: a YEET leg is one transfer.
 //
 // Tightened for the YEET leg (design section 2.2): the program allowlist is ComputeBudget, Associated Token, Token and
-// Token-2022 only; no System instruction; no lookup table; at most one CreateIdempotent and it must create the
-// deposit address's token account (rent-reference.mjs, a new rule); exactly one TransferChecked pinned to source,
-// destination, authority, mint, amount and decimals; no other token instruction.
+// Token-2022 only; no System instruction; no lookup table; per leg at most one CreateIdempotent and it must create the
+// deposit address's token account (rent-reference.mjs, a new rule); per leg exactly one TransferChecked pinned to
+// source, destination, authority, mint, amount and decimals; no other token instruction. A basket (several legs, one
+// transaction, one signature by the person) is the same rules leg after leg, positionally (assertSponsorableBasket).
 import {createHash} from 'node:crypto';
 import {decodeTransaction,resolvedInstructions,associatedTokenAddress,COMPUTE_BUDGET_PROGRAM,ATA_PROGRAM,TOKEN_PROGRAM,TOKEN_2022_PROGRAM,
  SYSTEM_PROGRAM,MAX_TRANSACTION_BYTES,TOKEN_ACCOUNT_RENT_LAMPORTS} from './message.mjs';
@@ -71,38 +72,72 @@ export function sponsoredFee(message,{maxFeeLamports=SPONSORED_MAX_FEE_LAMPORTS}
  * Returns {feeLamports, createsDepositAccount, rentLamports, source, destination}.
  */
 export function assertSponsorable(bytes,pin){
+ const r=assertSponsorableBasket(bytes,[pin],{maxFeeLamports:pin.maxFeeLamports});
+ return {feeLamports:r.feeLamports,createsDepositAccount:r.creates[0],rentLamports:r.rentLamports,source:r.legs[0].source,destination:r.legs[0].destination};
+}
+
+/**
+ * The basket form (one transaction paying several legs, the person signs once). `pins` are the stored legs in the
+ * attempt's order, all with the same fee payer and wallet. The instruction list must be EXACTLY: SetComputeUnitLimit,
+ * SetComputeUnitPrice, then for each pin in order an optional CreateIdempotent of that pin's deposit token account and
+ * exactly one TransferChecked of that pin. The walk is positional: a reordered leg, a missing transfer, a second
+ * create, a create without its transfer or any extra instruction is refused. Destinations are pairwise distinct; every
+ * account of the message is referenced by an instruction (no stray account); account 0 only at a create's payer slot.
+ * Returns {feeLamports, creates:[bool], rentAccounts, rentLamports, legs:[{source, destination}]}.
+ */
+export function assertSponsorableBasket(bytes,pins,{maxFeeLamports}={}){
+ if(!Array.isArray(pins)||!pins.length)refuse('SPONSOR_TRANSFER_MISMATCH');
  let tx;
  try{tx=decodeTransaction(bytes)}catch{refuse('SPONSOR_TRANSACTION_UNREADABLE')}
  if(bytes.length>MAX_TRANSACTION_BYTES)refuse('SPONSOR_TRANSACTION_UNREADABLE');
- const m=tx.message;
+ const m=tx.message,[first]=pins;
  if(m.lookups.length)refuse('SPONSOR_INSTRUCTION_REFUSED');
- if(m.header.signers!==2||m.accounts[0]!==pin.feePayer||m.accounts[1]!==pin.wallet||pin.feePayer===pin.wallet)refuse('SPONSOR_SIGNERS_MISMATCH');
- const fee=sponsoredFee(m,{maxFeeLamports:pin.maxFeeLamports});
- const destination=associatedTokenAddress(pin.depositOwner,pin.mint,pin.tokenProgram);
- const source=associatedTokenAddress(pin.wallet,pin.mint,pin.tokenProgram);
- let creates=0,transfers=0;
- for(const ix of resolvedInstructions(m)){
+ if(m.header.signers!==2||m.accounts[0]!==first.feePayer||m.accounts[1]!==first.wallet||first.feePayer===first.wallet
+  ||pins.some(p=>p.feePayer!==first.feePayer||p.wallet!==first.wallet))refuse('SPONSOR_SIGNERS_MISMATCH');
+ const fee=sponsoredFee(m,{maxFeeLamports});
+ const legs=pins.map(p=>({source:associatedTokenAddress(p.wallet,p.mint,p.tokenProgram),destination:associatedTokenAddress(p.depositOwner,p.mint,p.tokenProgram)}));
+ if(new Set(legs.map(l=>l.destination)).size!==legs.length)refuse('SPONSOR_TRANSFER_MISMATCH');
+ const ixs=resolvedInstructions(m);
+ // Pass 1, per instruction (today's rules): allowlisted static programs, no System instruction, account 0 only at a
+ // verified rent position of one of the pins, CreateIdempotent only, TransferChecked as the only token instruction.
+ for(const ix of ixs){
   if(ix.program===null||!ALLOWED_PROGRAMS.has(ix.program)||ix.program===SYSTEM_PROGRAM)refuse('SPONSOR_INSTRUCTION_REFUSED');
   if(ix.program===COMPUTE_BUDGET_PROGRAM)continue;
   // Folio: no instruction may name account 0 as its program or reference it outside a verified rent position.
-  if(ix.indices.includes(0)&&!depositRentAllowed(ix.program,ix.data,ix.accounts,{feePayer:pin.feePayer,depositOwner:pin.depositOwner,mint:pin.mint}))refuse('SPONSOR_INSTRUCTION_REFUSED');
+  if(ix.indices.includes(0)&&!pins.some(p=>depositRentAllowed(ix.program,ix.data,ix.accounts,{feePayer:p.feePayer,depositOwner:p.depositOwner,mint:p.mint})))refuse('SPONSOR_INSTRUCTION_REFUSED');
   if(ix.program===ATA_PROGRAM){
    if(!isCreateIdempotent(ix.program,ix.data)||!ix.indices.includes(0))refuse('SPONSOR_INSTRUCTION_REFUSED');
-   const P=ATA_CREATE_POSITIONS;
-   if(ix.accounts[P.ata]!==destination||ix.accounts[P.tokenProgram]!==pin.tokenProgram)refuse('SPONSOR_TRANSFER_MISMATCH');
-   creates++;continue;
+   continue;
   }
-  // Token programs.
   const tag=ix.data[0];
   if(tag===CLOSE_ACCOUNT)refuse('SPONSOR_CLOSE_ACCOUNT_REFUSED');
   if(REFUSED_TOKEN_TAGS.has(tag)||tag!==TRANSFER_CHECKED)refuse('SPONSOR_INSTRUCTION_REFUSED');
-  if(ix.program!==pin.tokenProgram||ix.data.length!==10||ix.accounts.length!==4)refuse('SPONSOR_TRANSFER_MISMATCH');
-  const [src,mint,dst,authority]=ix.accounts;
-  if(src!==source||mint!==pin.mint||dst!==destination||authority!==pin.wallet||u64le(ix.data)!==BigInt(pin.amount)||ix.data[9]!==pin.decimals)refuse('SPONSOR_TRANSFER_MISMATCH');
-  transfers++;
  }
- if(transfers!==1||creates>1)refuse('SPONSOR_TRANSFER_MISMATCH');
- return {feeLamports:fee.lamports,createsDepositAccount:creates===1,rentLamports:creates?TOKEN_ACCOUNT_RENT_LAMPORTS:0,source,destination};
+ // Pass 2, positional: [limit, price] then, per pin in order, create? + transfer.
+ const P=ATA_CREATE_POSITIONS,creates=[];
+ let i=2;
+ for(const [k,p] of pins.entries()){
+  const {source,destination}=legs[k];
+  let ix=ixs[i];
+  creates[k]=false;
+  if(ix?.program===ATA_PROGRAM){
+   // Pass 1 proved it is a rent position of SOME pin; here it must be this leg's (else the legs are out of order).
+   if(!depositRentAllowed(ix.program,ix.data,ix.accounts,{feePayer:p.feePayer,depositOwner:p.depositOwner,mint:p.mint}))refuse('SPONSOR_TRANSFER_MISMATCH');
+   if(ix.accounts[P.ata]!==destination||ix.accounts[P.tokenProgram]!==p.tokenProgram)refuse('SPONSOR_TRANSFER_MISMATCH');
+   creates[k]=true;ix=ixs[++i];
+  }
+  if(!ix||!TOKEN_PROGRAMS.has(ix.program))refuse('SPONSOR_TRANSFER_MISMATCH');
+  if(ix.program!==p.tokenProgram||ix.data.length!==10||ix.accounts.length!==4)refuse('SPONSOR_TRANSFER_MISMATCH');
+  const [src,mint,dst,authority]=ix.accounts;
+  if(src!==source||mint!==p.mint||dst!==destination||authority!==p.wallet||u64le(ix.data)!==BigInt(p.amount)||ix.data[9]!==p.decimals)refuse('SPONSOR_TRANSFER_MISMATCH');
+  i++;
+ }
+ if(i!==ixs.length)refuse('SPONSOR_TRANSFER_MISMATCH');
+ // No stray account: every account but the fee payer is named by an instruction (as an account or its program).
+ const named=new Set(m.instructions.flatMap(ix=>[ix.programIndex,...ix.accounts]));
+ if(m.accounts.some((_,idx)=>idx!==0&&!named.has(idx)))refuse('SPONSOR_INSTRUCTION_REFUSED');
+ const rentAccounts=creates.filter(Boolean).length;
+ return {feeLamports:fee.lamports,creates,rentAccounts,rentLamports:rentAccounts*TOKEN_ACCOUNT_RENT_LAMPORTS,legs};
 }
 
 // ---- limits (Folio sponsorship.ts readSponsorshipLimits, YEET_ names) ----

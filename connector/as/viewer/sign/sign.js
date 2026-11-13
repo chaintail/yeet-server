@@ -29,7 +29,13 @@ function units(raw, decimals, places) {
   const shown = places == null ? frac.replace(/0+$/, '').slice(0, 6) : frac.slice(0, places).padEnd(places, '0');
   return shown ? `${whole}.${shown}` : `${whole}`;
 }
-const amountOf = (req) => { const s = req?.summary; if (!s) return ''; const usdc = s.asset === 'USDC'; return `${units(s.amount_raw, s.decimals, usdc ? 2 : null)} ${s.asset}`; };
+const amountOf = (s) => { if (!s) return ''; const usdc = s.asset === 'USDC'; return `${units(s.amount_raw, s.decimals, usdc ? 2 : null)} ${s.asset}`; };
+// One Solana request may pay several legs (one transaction, one signature): `legs` / `leg_summaries`; older and Base
+// requests name one leg.
+const legsOf = (r) => Array.isArray(r?.legs) ? r.legs : [r?.leg];
+const summariesOf = (r) => Array.isArray(r?.leg_summaries) ? r.leg_summaries : [{leg: r?.leg, ...(r?.summary ?? {})}];
+const requestFor = (reqs, leg) => reqs.find((r) => legsOf(r).includes(leg));
+const summaryFor = (reqs, leg) => summariesOf(requestFor(reqs, leg)).find((s) => s.leg === leg);
 
 async function api(path, extra) {
   const token = await signer.accessToken();
@@ -76,17 +82,16 @@ function render(note) {
   const reqs = trade.sign_requests ?? [];
   const side = trade.direction === 'skeet' ? 'skeet' : 'yeet';
   const nodes = [];
-  const usdc = reqs.filter((r) => r.summary?.asset === 'USDC');
+  const all = reqs.flatMap(summariesOf), usdc = all.filter((s) => s.asset === 'USDC');
   const total = el('div', 'total');
   total.append(el('span', `side ${side}`, side === 'skeet' ? 'SKEET' : 'YEET'),
-    el('span', 'amt', usdc.length === reqs.length && reqs.length ? `${units(usdc.reduce((a, r) => a + BigInt(r.summary.amount_raw), 0n), usdc[0].summary.decimals, 2)} USDC` : `${trade.legs.length} coin${trade.legs.length === 1 ? '' : 's'}`));
+    el('span', 'amt', usdc.length === all.length && all.length ? `${units(usdc.reduce((a, s) => a + BigInt(s.amount_raw), 0n), usdc[0].decimals, 2)} USDC` : `${trade.legs.length} coin${trade.legs.length === 1 ? '' : 's'}`));
   nodes.push(total);
   const ul = el('ul', 'rows');
   for (const l of trade.legs) {
-    const req = reqs.find((r) => r.leg === l.leg);
     const st = STATE[local.get(l.leg) ?? l.send_status] ?? ['', ''];
     const li = el('li'); li.dataset.leg = String(l.leg);
-    const left = el('span'); left.append(el('span', 'sym', l.symbol), document.createTextNode(' '), el('span', 'amt', amountOf(req)));
+    const left = el('span'); left.append(el('span', 'sym', l.symbol), document.createTextNode(' '), el('span', 'amt', amountOf(summaryFor(reqs, l.leg))));
     li.append(left, el('span', `state ${st[1]}`.trim(), st[0]));
     ul.append(li);
   }
@@ -127,27 +132,34 @@ async function signAll(btn, status) {
     const wallets = await signer.wallets();
     let queue = [...(trade.sign_requests ?? [])];
     const retried = new Set();
+    // One wallet signature and one submit per REQUEST; every leg it pays moves together.
     while (queue.length) {
-      const req = queue.shift();
-      if (SENT.has(local.get(req.leg))) continue; // signed on an earlier tap
+      const req = queue.shift(), covered = legsOf(req);
+      if (covered.every((leg) => SENT.has(local.get(leg)))) continue; // signed on an earlier tap
       const w = wallets.find((x) => sameWallet(req, x));
       if (!w) { set('This sign-in has a different wallet than your YEET account. Nothing was sent.', 'bad'); body.append(signOutButton()); return; }
-      local.set(req.leg, 'signing_now'); refresh();
+      const mark = (s) => { for (const leg of covered) local.set(leg, s); refresh(); };
+      mark('signing_now');
       let signed;
       try { signed = signedFromWallet(req, await signer.rpc(w.id, privyRpcBody(req))); }
-      catch { local.set(req.leg, 'awaiting_signature'); refresh(); set('Your wallet didn’t answer. Tap to try again.', 'bad'); btn.disabled = false; return; }
+      catch { mark('awaiting_signature'); set('Your wallet didn’t answer. Tap to try again.', 'bad'); btn.disabled = false; return; }
       let out;
       try { out = await api('signature', {leg: req.leg, attempt_id: req.attempt_id, signed}); }
       catch (e) {
-        local.set(req.leg, 'awaiting_signature'); refresh();
+        mark('awaiting_signature');
         set(e.code === 'SIGN_EXPIRED' ? 'The signing window closed. Nothing was sent. Ask in ChatGPT for a new quote.' : e.message || 'Your signature didn’t go through. Tap to try again.', 'bad');
         btn.disabled = e.code === 'SIGN_EXPIRED'; return;
       }
       for (const l of out.legs ?? []) local.set(l.leg, l.send_status);
-      const again = (out.sign_requests ?? []).find((r) => r.leg === req.leg);
+      // Expired: the fresh request covering this request's anchor leg (it may cover fewer legs, or come per leg).
+      const fresh = out.sign_requests ?? [];
+      const again = requestFor(fresh, req.leg) ?? fresh.find((r) => legsOf(r).some((leg) => covered.includes(leg)));
       if (again) {
         if (retried.has(req.leg)) { set('The signing window closed. Nothing was sent. Ask in ChatGPT for a new quote.', 'bad'); refresh(); return; }
-        retried.add(req.leg); trade.sign_requests = trade.sign_requests.map((r) => r.leg === req.leg ? again : r); queue.unshift(again);
+        retried.add(req.leg);
+        const others = fresh.filter((r) => r !== again && legsOf(r).some((leg) => covered.includes(leg)));
+        trade.sign_requests = [...trade.sign_requests.filter((r) => r !== req), again, ...others];
+        queue.unshift(again, ...others);
       }
       refresh();
     }

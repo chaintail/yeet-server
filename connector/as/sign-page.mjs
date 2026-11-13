@@ -8,6 +8,8 @@
 //                                      when it cannot sign inline. It runs the same signer at top level.
 //   POST /sign/api/requests            {trade_id, privy_access_token} -> the trade's open sign requests
 //   POST /sign/api/signature           {trade_id, leg, attempt_id, signed, privy_access_token} -> submit_trade_signature
+//                                      (once per sign request; a Solana request may pay several legs, `legs` /
+//                                      `leg_summaries`, with one signature: `leg` is its anchor, legs[0])
 //
 // Who may sign what. The page holds no YEET session of its own; every API call carries the Privy access token of the
 // person signed in on the page, and nothing else identifies them:
