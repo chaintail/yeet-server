@@ -12,9 +12,9 @@ import {xpRuntime,p2On,homeXp,homeXpKeys,checkSpinTable} from './xp/xp.mjs';
 import {createAvailability,quoteProbe} from './xp/availability.mjs';
 import {z} from 'zod';
 import {toolSchemas,zodSchema,contract} from '../mcp/tool-contract.mjs';
-import {homeWithFundUrl,failureWithFundUrl} from './fund-link.mjs';
+import {homeWithFundUrl,failureWithFundUrl,fundAnswer} from './fund-link.mjs';
 import {versionInfo} from './version.mjs';
-import {overview} from './overview.mjs';
+import {overview,totalUsdc} from './overview.mjs';
 import {winnerOf} from './trade/pnl.mjs';
 import {boardAnswer} from './xp/boards.mjs';
 // Accounts are created on the first verified sign-in (identity-store.mjs). The identity app is Privy in
@@ -132,6 +132,7 @@ export const ROUTE_SCOPES=Object.freeze([
  ['POST',/^\/trades\/t_[a-z0-9]{20}\/signature$/,'yeet:trade'],
  ['GET',/^\/trades\/t_[a-z0-9]{20}$/,'yeet:read'],
  ['GET',/^\/portfolio$/,'yeet:read'],
+ ['GET',/^\/fund$/,'yeet:read'],
  ['GET',/^\/leaderboard\/(xp|week|winners|best_trade|losers|coins)(\/(today|7d|all))?$/,'yeet:read'],
  ['GET',/^\/checkin$/,'yeet:read'],
  ['POST',/^\/spin$/,'yeet:write'],
@@ -182,6 +183,11 @@ app.get('/overview',trade('yeet_overview',async(e,ctx)=>{
  const xp=p2On()?xpSafe('overview',()=>xpRuntime().summary(ctx.accountId),null):null;
  const winner=bag?xpSafe('winner',()=>winnerOf(bag.solana.holdings,e.averageCost(ctx.accountId)),null):null;
  return overview({home,bag,xp,winner,username:boardName(ctx.accountId),wheel:p2On(),board:p2On()});
+}));
+// yeet_fund: the funding card. All USDC as one number (read fresh: the card asks again after the funding page).
+app.get('/fund',trade('yeet_fund',async(e,ctx)=>{
+ const home=await e.home(ctx),f=home.funding;
+ return fundAnswer(f?totalUsdc(f.base_usdc,f.solana_usdc):totalUsdc(home.wallets?.base?.usdc));
 }));
 // lucky_id (optional): the caller's own lucky wheel, spun today, else INVALID_ARGUMENT. The proposal is linked to it;
 // the bonus is decided when the trade settles (lucky.settle), since yeet_quote can still change coins and amount.

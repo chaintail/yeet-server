@@ -2,12 +2,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {z} from 'zod';
-import {fundUrlFor,homeWithFundUrl,failureWithFundUrl} from '../fund-link.mjs';
+import {fundUrlFor,homeWithFundUrl,failureWithFundUrl,fundAnswer,FUND_PRESETS} from '../fund-link.mjs';
+import {AMOUNT_CHIPS,chipFromSearch} from '../../login/fund-links.js';
 import {failure} from '../failure.mjs';
 import {toolError} from '../../mcp/errors.mjs';
 import {toolSchemas,zodSchema,contract} from '../../mcp/tool-contract.mjs';
 
 const URL_='https://chatgpt.yeet.win/fund';
+
+test('yeet_fund: one USDC number, the presets the funding page offers, the page only when it is https; ?amount= starts the page on a preset',()=>{
+ const out=zodSchema(z,toolSchemas.yeet_fund.output);
+ assert.deepEqual([...FUND_PRESETS],[...AMOUNT_CHIPS],'the card offers the amounts the page has chips for');
+ const v=fundAnswer('3.2',URL_);
+ assert.deepEqual(v,{usdc:'3.2',presets:['10','25','50','100'],fund_url:URL_});assert.doesNotThrow(()=>out.parse(v));
+ assert.deepEqual(fundAnswer(null,null),{usdc:null,presets:['10','25','50','100']});assert.doesNotThrow(()=>out.parse(fundAnswer(null,null)));
+ for(const p of FUND_PRESETS)assert.equal(chipFromSearch(`?amount=${p}`),p);
+ for(const bad of ['?amount=7','?amount=','?x=25','',undefined,'?amount=25abc'])assert.equal(chipFromSearch(bad),null,String(bad));
+});
 
 test('fundUrlFor: https origins only, path /fund, no credentials',()=>{
  assert.equal(fundUrlFor('https://chatgpt.yeet.win'),URL_);

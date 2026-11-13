@@ -8,7 +8,7 @@ import { createRoot } from "react-dom/client";
 import { PrivyProvider, usePrivy, useFundWallet } from "@privy-io/react-auth";
 import { embeddedWallets, privyConfig } from "./privy-app.jsx";
 import { DEFAULT_AMOUNT, baseUsdcReader, solanaUsdcReader, formatUsdc, fundOptions, validAmount } from "./fund-balance.js";
-import { AMOUNT_CHIPS, NETWORKS, sendAmount, validAddress, walletLinks } from "./fund-links.js";
+import { AMOUNT_CHIPS, NETWORKS, chipFromSearch, sendAmount, validAddress, walletLinks } from "./fund-links.js";
 import { watchBalance } from "./fund-watch.js";
 import { qrCode, qrPath } from "./qr.js";
 import { Swap } from "./screen.jsx";
@@ -92,7 +92,8 @@ function FundWallet({ readers, addresses }) {
   const net = NETWORKS[network];
   const [balance, arrived, refreshBalance] = useWatchedBalance(readers[network], address, network);
   const [copied, setCopied] = useState(false);
-  const [chip, setChip] = useState(null);
+  // The funding card in the chat opens this page with ?amount=<preset>: the page starts on that chip.
+  const [chip, setChip] = useState(() => chipFromSearch(globalThis.location?.search));
   const [custom, setCustom] = useState("");
   const [linkNote, setLinkNote] = useState("");
 

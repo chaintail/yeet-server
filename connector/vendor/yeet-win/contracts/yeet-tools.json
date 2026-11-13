@@ -2489,6 +2489,68 @@
         "TEMPORARILY_UNAVAILABLE"
       ]
     },
+    "yeet_fund": {
+      "priority": "P0",
+      "title": "Fund your YEET account",
+      "description": "Shows the Add funds card, on the crypto or card view when method is given, otherwise with both choices.",
+      "inputSchema": {
+        "$ref": "#/$defs/empty"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "usdc": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/usdc"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "All the USDC the person can YEET with, as one number. null: it could not be read just now."
+          },
+          "presets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/usdc"
+            },
+            "minItems": 1,
+            "maxItems": 6,
+            "uniqueItems": true,
+            "description": "Amounts the funding page offers, in USDC."
+          },
+          "fund_url": {
+            "$ref": "#/$defs/https_url",
+            "description": "The YEET funding page. The card opens it; with ?amount= it starts on that preset."
+          },
+          "guidance": {
+            "$ref": "#/$defs/guidance"
+          }
+        },
+        "required": [
+          "usdc",
+          "presets"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "scope": "yeet:read",
+      "card": "fund",
+      "visible": true,
+      "widgetAccessible": true,
+      "errors": [
+        "INVALID_ARGUMENT",
+        "REAUTH_REQUIRED",
+        "TEMPORARILY_UNAVAILABLE",
+        "WALLET_NOT_READY"
+      ]
+    },
     "skeet_propose": {
       "priority": "P1",
       "title": "Quote a SKEET",
@@ -3122,6 +3184,11 @@
       "uri": "ui://yeet/lucky-v1.html",
       "title": "Lucky wheel",
       "description": "A trading offer: five hot coins, the wheel picks one, and a YEET of the offered amount into it."
+    },
+    "fund": {
+      "uri": "ui://yeet/fund-v1.html",
+      "title": "Add funds",
+      "description": "The person’s USDC as one number, amount presets and one button that opens the YEET funding page."
     }
   },
   "x-yeet-meta": {

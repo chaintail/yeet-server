@@ -9,6 +9,13 @@ import { BASE_CHAIN_ID, BASE_USDC } from "./fund-balance.js";
 export const SOLANA_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 export const USDC_DECIMALS = 6;
 export const AMOUNT_CHIPS = Object.freeze(["10", "25", "50", "100"]);
+/** The chip the page starts on when its address carries ?amount= (the funding card in the chat sends its preset): one
+ * of AMOUNT_CHIPS, or null. */
+export function chipFromSearch(search) {
+  let v = null;
+  try { v = new URLSearchParams(typeof search === "string" ? search : "").get("amount"); } catch { v = null; }
+  return AMOUNT_CHIPS.includes(v) ? v : null;
+}
 export const NETWORKS = Object.freeze({
   base: Object.freeze({ id: "base", name: "Base", asset: "USDC on Base" }),
   solana: Object.freeze({ id: "solana", name: "Solana", asset: "USDC on Solana" }),

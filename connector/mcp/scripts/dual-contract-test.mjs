@@ -5,7 +5,7 @@ import {toolSchemas,zodSchema,contract} from '../tool-contract.mjs';
 import {toolError} from '../errors.mjs';
 import {instructions,descriptions,titles} from '../instructions.mjs';
 import {allScopes} from '#scope-catalog';
-const ALL=['yeet_overview','yeet_home','yeet_coins','yeet_propose','yeet_quote','execute_trade','submit_trade_signature','trade_status','yeet_portfolio','skeet_propose','yeet_leaderboard','yeet_checkin','daily_spin','yeet_set_username','lucky_wheel','lucky_spin'];
+const ALL=['yeet_overview','yeet_home','yeet_coins','yeet_propose','yeet_quote','execute_trade','submit_trade_signature','trade_status','yeet_portfolio','yeet_fund','skeet_propose','yeet_leaderboard','yeet_checkin','daily_spin','yeet_set_username','lucky_wheel','lucky_spin'];
 test('every published schema has a top-level object, resolved references, strict input; the contract tools',()=>{
  assert.deepEqual(Object.keys(toolSchemas),ALL);
  for(const schema of Object.values(toolSchemas)){

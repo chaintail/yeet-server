@@ -200,12 +200,19 @@ test('YEET_P2=1 end to end: home -> spin -> leaderboard, then a settled trade sh
  for(const b of ['xp','week','winners','best_trade','losers','coins']){assert.equal(core.routeScope('GET',`/leaderboard/${b}`),'yeet:read',b);for(const win of ['today','7d','all'])assert.equal(core.routeScope('GET',`/leaderboard/${b}/${win}`),'yeet:read')}
  for(const bad of ['/leaderboard','/leaderboard/whales','/leaderboard/xp/month','/leaderboard/xp/today/x'])assert.equal(core.routeScope('GET',bad),null,bad);
 
+ // yeet_fund: the funding card's answer is the same one USDC number the overview gives, the presets, no wallet.
+ const fund=await alice.call('yeet_fund');
+ assert.equal(fund.isError,undefined,JSON.stringify(fund.content));
+ assert.deepEqual(fund.structuredContent.presets,['10','25','50','100']);assert.match(fund.structuredContent.usdc,/^[0-9]+(\.[0-9]+)?$/);
+ assert.match(fund.content[0].text,/^They have [0-9.]+ USDC\. The funding card is up\.$/);
+ assert.ok(!JSON.stringify(fund.structuredContent).match(/0x|Base|Solana|wallet/));
+
  // yeet_overview, the entry tool: the person in one answer, USDC as one number, no wallet or network, the follow-ups.
  const o=await alice.call('yeet_overview');
  assert.equal(o.isError,undefined,JSON.stringify(o.content));
  const ov=o.structuredContent;
  assert.equal(ov.username,handle(alice.sub));assert.equal(ov.xp,total);assert.equal(ov.streak_days,1);assert.equal(ov.checkin_open,false);
- assert.match(ov.usdc,/^[0-9]+(\.[0-9]+)?$/);assert.equal(ov.needs_card_sign_in,'unknown');assert.equal(ov.trading,'live');
+ assert.match(ov.usdc,/^[0-9]+(\.[0-9]+)?$/);assert.equal(ov.usdc,fund.structuredContent.usdc,'one number, the same on both cards');assert.equal(ov.needs_card_sign_in,'unknown');assert.equal(ov.trading,'live');
  assert.equal(ov.tier,total>=69?'Winner':'Noob');
  assert.ok(ov.suggestions.length>=3&&ov.suggestions.every(s=>s.label&&s.say));assert.ok(!ov.suggestions.some(s=>s.id==='checkin'),'the check-in was done today');
  assert.equal(ov.suggestions.at(-1).id,'others');

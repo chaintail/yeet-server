@@ -98,6 +98,13 @@ test('yeet_overview: offer the suggestions in order, never a coin; the lead foll
  for(const k of Object.keys(COPY.yeet_overview))assert.doesNotMatch(COPY.yeet_overview[k],/wallet|Base|Solana|chain/i,k);
 });
 
+test('yeet_fund: no USDC yet, some USDC, unread; the card reports back',()=>{
+ const f=usdc=>g('yeet_fund',{usdc,presets:['10','25'],fund_url:'https://chatgpt.yeet.win/fund'});
+ assert.equal(f('0'),COPY.yeet_fund.zero);assert.equal(f(null),COPY.yeet_fund.unread);
+ assert.equal(f('3.2'),"YEET text.");
+ for(const k of Object.keys(COPY.yeet_fund))assert.doesNotMatch(COPY.yeet_fund[k],/wallet|Base|Solana|address/i,k);
+});
+
 test('yeet_checkin: a spin waiting, or done for today with the streak',()=>{
  assert.equal(g('yeet_checkin',{checkin:{total:5,streak_days:1,spin_available:true,spins_available:1}}),COPY.yeet_checkin.open);
  assert.equal(g('yeet_checkin',{checkin:{total:9,streak_days:4,spin_available:false,spins_available:0}}),"YEET text.");

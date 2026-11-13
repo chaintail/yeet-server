@@ -19,6 +19,7 @@ const ROUTES={
  submit_trade_signature:({trade_id,...rest})=>[`/trades/${trade_id}/signature`,rest],
  trade_status:({trade_id})=>[`/trades/${trade_id}`],
  yeet_portfolio:()=>['/portfolio'],
+ yeet_fund:()=>['/fund'],
  skeet_propose:args=>['/proposals/skeet',args],
  yeet_leaderboard:({board='xp',window})=>[`/leaderboard/${board}${window?`/${window}`:''}`],
  yeet_checkin:()=>['/checkin'],
@@ -65,7 +66,9 @@ export function checkinText(r){
  const left=Number.isInteger(c.spins_available)?c.spins_available:c.spin_available?1:0;
  return `Daily check-in: ${c.streak_days}-day streak, ${c.total} XP. ${left>0?`${left} spin${left===1?' is':'s are'} waiting in the card.`:'Today\'s spin is done.'}`;
 }
-const TEXT={yeet_overview:overviewText,yeet_checkin:checkinText,daily_spin:spinText,lucky_wheel:luckyText,lucky_spin:luckyText};
+/** yeet_fund's text for the model: the one USDC number. */
+export const fundText=r=>`${r.usdc===null?"YEET fundText.":`They have ${r.usdc} USDC`}. The funding card is up.`;
+const TEXT={yeet_overview:overviewText,yeet_fund:fundText,yeet_checkin:checkinText,daily_spin:spinText,lucky_wheel:luckyText,lucky_spin:luckyText};
 /** P0 and P1 are always registered; P2 (leaderboard, spin) only with YEET_P2=1. */
 export const registeredTools=(env=process.env)=>Object.values(toolSpecs).filter(t=>t.priority!=='P2'||env.YEET_P2==='1');
 export const TOOLS=Object.freeze(Object.values(toolSpecs).map(t=>Object.freeze({...t,route:ROUTES[t.name]})));
