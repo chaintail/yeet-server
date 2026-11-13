@@ -3,7 +3,7 @@
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
-import { fundRoutes, fundCsp, privyPageCsp, afterSignIn, nextField, FUND_TITLE, BASE_RPC_ORIGIN, SOLANA_RPC_ORIGIN } from "../fund-page.mjs";
+import { fundRoutes, fundCsp, privyPageCsp, afterSignIn, nextField, FUND_TITLE, BASE_RPC_ORIGIN, SOLANA_RPC_ORIGIN, STRIPE_CSP } from "../fund-page.mjs";
 import { BASE_RPC, SOLANA_RPC } from "../../login/fund-balance.js";
 
 let enabled = true;
@@ -54,12 +54,21 @@ test("signed in: page with nonce CSP for Privy and the Base and Solana RPCs, pop
   assert.equal(csp, fundCsp(nonce));
   const d = directives(csp);
   assert.deepEqual(d["default-src"], ["'self'"]);
-  assert.deepEqual(d["script-src"], ["'self'", `'nonce-${nonce}'`, "https://challenges.cloudflare.com"]);
-  assert.deepEqual(d["connect-src"], ["'self'", "https://auth.privy.io", "https://*.rpc.privy.systems", BASE_RPC_ORIGIN, SOLANA_RPC_ORIGIN]);
+  // Stripe's embedded onramp (card, Apple Pay, Google Pay in Privy's deposit modal): Stripe.js, Link and Crypto
+  // directives from https://docs.stripe.com/security/guide.md#content-security-policy .
+  assert.deepEqual(d["script-src"], ["'self'", `'nonce-${nonce}'`, "https://challenges.cloudflare.com", "https://js.stripe.com", "https://*.js.stripe.com", "https://crypto-js.stripe.com"]);
+  assert.deepEqual(d["connect-src"], ["'self'", "https://auth.privy.io", "https://*.rpc.privy.systems", BASE_RPC_ORIGIN, SOLANA_RPC_ORIGIN, "https://api.stripe.com", "https://link.com", "https://*.link.com"]);
   assert.deepEqual([BASE_RPC_ORIGIN, SOLANA_RPC_ORIGIN], ["https://mainnet.base.org", "https://api.mainnet-beta.solana.com"]);
-  // The QR code is inline SVG and wallet links are navigations: no image host, no wallet origin in the policy.
-  assert.deepEqual(d["img-src"], ["'self'", "data:", "blob:"]);
-  assert.deepEqual(d["frame-src"], ["https://auth.privy.io", "https://challenges.cloudflare.com"]);
+  // The QR code is inline SVG and wallet links are navigations: the only image hosts are Stripe's, no wallet origin.
+  assert.deepEqual(d["img-src"], ["'self'", "data:", "blob:", "https://*.stripe.com", "https://*.link.com"]);
+  const frames = ["https://auth.privy.io", "https://challenges.cloudflare.com", "https://js.stripe.com", "https://*.js.stripe.com", "https://hooks.stripe.com", "https://link.com", "https://*.link.com"];
+  assert.deepEqual(d["frame-src"], frames);
+  assert.deepEqual(d["child-src"], frames);
+  // The three scripts @stripe/crypto 1.1.3 adds on import are allowed by script-src.
+  for (const url of ["https://js.stripe.com/v3", "https://js.stripe.com/crypto-onramp/v1/crypto-onramp.js", "https://crypto-js.stripe.com/crypto-onramp-outer.js"])
+    assert.ok(d["script-src"].includes(new URL(url).origin), url);
+  assert.deepEqual(d["style-src"], ["'self'", `'nonce-${nonce}'`]);
+  for (const source of Object.values(STRIPE_CSP).flat()) assert.match(source, /^https:\/\/(\*\.)?([a-z-]+\.)*(stripe|link)\.com$/, source);
   assert.deepEqual(d["frame-ancestors"], ["'none'"]);
   assert.deepEqual(d["form-action"], ["'self'"]);
   assert.deepEqual(d["object-src"], ["'none'"]);
@@ -102,4 +111,10 @@ test("sign-in CSP: Telegram adds only Privy's widget script and oauth.telegram.o
   assert.deepEqual(d["connect-src"], ["'self'", "https://auth.privy.io", "https://*.rpc.privy.systems", "https://oauth.telegram.org"]);
   assert.deepEqual(d["form-action"], ["'self'", "https://chatgpt.com"]);
   assert.ok(!fundCsp("n").includes("telegram"));
+});
+
+test("Stripe sources are on the fund page only: the sign-in and signing policies carry none", () => {
+  for (const csp of [privyPageCsp("n"), privyPageCsp("n", { formAction: "'self' https://chatgpt.com", telegram: true }), privyPageCsp("n", { connect: ["https://auth.privy.io"] })])
+    assert.ok(!/stripe|link\.com/.test(csp), csp);
+  assert.match(fundCsp("n"), /stripe/);
 });

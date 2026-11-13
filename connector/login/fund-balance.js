@@ -16,9 +16,39 @@ export function validAmount(value) {
   return n >= 1 && n <= 10000 ? String(n) : null;
 }
 
+/** CAIP-2 ids of the two networks a card payment can deliver USDC to (the mainnet table in Privy's deposit docs). */
+export const CARD_CHAINS = Object.freeze({ base: "eip155:8453", solana: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" });
+
 /**
- * Options for Privy useFundWallet().fundWallet({address, options}) in @privy-io/react-auth 3.47.0 (FundWalletConfig,
- * the branch with `asset`, which requires `amount`): Base by chain id, USDC, card first with Coinbase as provider.
+ * Options for Privy useDepositFunds().depositFunds() in @privy-io/react-auth 3.51.4 (DepositFundsOptions), fiat only:
+ * USDC on the chosen network to the person's own YEET wallet, the dollar amount prefilled, Stripe preferred.
+ * https://docs.privy.io/wallets/funding/use-deposit-funds.md : `fiat.preferredProvider` picks the first quote Privy
+ * shows ('meld' | 'moonpay' | 'coinbase' | 'stripe'; ignored when that provider has no quote). Stripe's embedded
+ * onramp is the provider with Apple Pay, Google Pay, cards and ACH, in the US (not New York) and the EU; it delivers
+ * USDC on Base and on Solana. `fiat.preferredProvider` is not in 3.47.0's types; it is in 3.51.4.
+ */
+export function cardDeposit(network, address, amount) {
+  const value = validAmount(amount);
+  if (!value) throw Error("invalid-amount");
+  const chain = Object.hasOwn(CARD_CHAINS, network) ? CARD_CHAINS[network] : null;
+  if (!chain) throw Error("invalid-network");
+  if (!(network === "base" ? ADDRESS : SOLANA_ADDRESS).test(address)) throw Error("invalid-address");
+  return {
+    destination: { asset: "usdc", chain, wallet: address },
+    fiat: {
+      source: { assets: ["usd", "eur"], defaultAsset: "usd" },
+      environment: "production",
+      defaultAmount: value,
+      preferredProvider: "stripe",
+    },
+  };
+}
+
+/**
+ * Options for Privy useFundWallet().fundWallet({address, options}) (FundWalletConfig, the branch with `asset`, which
+ * requires `amount`): Base by chain id, USDC, card first with Coinbase as provider. This older flow opens Coinbase
+ * Onramp in a popup window; 3.51.4 marks the hook deprecated and says it never shows the Stripe onramp, so the page
+ * keeps it only as the second, Coinbase, card button.
  */
 export function fundOptions(amount) {
   const value = validAmount(amount);

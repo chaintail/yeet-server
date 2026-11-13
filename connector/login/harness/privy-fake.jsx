@@ -40,6 +40,9 @@ export function useSigners() {
 export function useUser() {
   return { refreshUser: async () => H().user };
 }
+export function useDepositFunds() {
+  return { depositFunds: async () => Promise.reject(Error("User exited flow")) };
+}
 export function useFundWallet() {
   return { fundWallet: async () => ({ status: "cancelled" }) };
 }
