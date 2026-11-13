@@ -7,6 +7,7 @@ import {
   refreshFamilyTTL,
   operatorClient,
   chatgptRedirect,
+  registrationRedirectProblem,
   bindInteraction,
   rateLimiter,
 } from "../security-policy.mjs";
@@ -115,3 +116,24 @@ assert.equal(
 console.log(
   "PASS explicit bounded Privy operator client, fixture gate, native mock default",
 );
+{
+  // Registration: every redirect URI must be on https://chatgpt.com.
+  const ok = { redirect_uris: ["https://chatgpt.com/connector_platform_oauth_redirect"] };
+  assert.equal(registrationRedirectProblem(ok), null);
+  assert.equal(registrationRedirectProblem({ redirect_uris: ["https://chatgpt.com/a", "https://chatgpt.com/b"] }), null);
+  for (const uris of [
+    ["https://evil.example/cb"],
+    ["https://chatgpt.com.evil.example/cb"],
+    ["http://localhost:3000/cb"],
+    ["http://chatgpt.com/cb"],
+    ["https://user:pw@chatgpt.com/cb"],
+    ["https://chatgpt.com/ok", "https://evil.example/cb"],
+    [42],
+    [],
+    "https://chatgpt.com/cb",
+    undefined,
+  ])
+    assert.equal(registrationRedirectProblem({ redirect_uris: uris })?.error, "invalid_redirect_uri", JSON.stringify(uris));
+  assert.equal(registrationRedirectProblem(undefined)?.error, "invalid_redirect_uri");
+  console.log("PASS registration accepts only https://chatgpt.com redirect URIs");
+}

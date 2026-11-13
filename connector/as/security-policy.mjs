@@ -30,6 +30,17 @@ export function chatgptRedirect(uri) {
     return false;
   }
 }
+// Dynamic registration (POST /reg) stores a client only when every redirect_uris entry passes chatgptRedirect, so
+// nobody can fill the sign-in server's state with clients that the authorization step would refuse anyway.
+// Returns null when the registration may go on, otherwise the OAuth error answer.
+export function registrationRedirectProblem(body) {
+  const uris = body?.redirect_uris;
+  if (!Array.isArray(uris) || uris.length === 0 || uris.length > 10)
+    return { error: "invalid_redirect_uri", error_description: "redirect_uris must list ChatGPT redirect URIs" };
+  if (!uris.every((u) => typeof u === "string" && chatgptRedirect(u)))
+    return { error: "invalid_redirect_uri", error_description: "only https://chatgpt.com redirect URIs can be registered" };
+  return null;
+}
 export function sameOwner(existing, id) {
   return !existing || existing.id === id;
 }

@@ -32,6 +32,7 @@ import {
   requireFreshBinding,
   bindInteraction,
   chatgptRedirect,
+  registrationRedirectProblem,
   rateLimiter,
 } from "./security-policy.mjs";
 import { SQLiteAdapter as Adapter } from "./adapter.mjs";
@@ -292,6 +293,13 @@ if (PUBLIC) {
 }
 app.use(express.urlencoded({ extended: false, limit: "32kb" }));
 app.use(express.json({ limit: "32kb" }));
+// Registration accepts only ChatGPT redirect URIs (same allowlist as the interaction check). Client id metadata
+// documents (https://chatgpt.com/oauth/client.json) never come through here and keep working.
+app.post("/reg", (q, r, next) => {
+  const problem = registrationRedirectProblem(q.body);
+  if (problem) return r.status(400).set("Cache-Control", "no-store").json(problem);
+  next();
+});
 // Resource-bound access tokens (aud=RESOURCE) cannot pass oidc-provider's userinfo; see userinfo.mjs.
 app.all("/me", resourceUserinfo({
   resource: RESOURCE,

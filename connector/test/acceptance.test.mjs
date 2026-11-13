@@ -62,6 +62,17 @@ test('A-4: authorization-server metadata has the issuer, S256 only and client id
  }
 });
 
+test('registration stores only ChatGPT clients; other redirect hosts get 400 and nothing is stored',async()=>{
+ const reg=(redirect_uris)=>fetch(AS+'/reg',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({redirect_uris,token_endpoint_auth_method:'none',grant_types:['authorization_code','refresh_token'],response_types:['code'],application_type:'web'})});
+ const good=await reg(['https://chatgpt.com/connector_platform_oauth_redirect']);
+ assert.equal(good.status,201);const c=await good.json();assert.ok(c.client_id);
+ for(const uris of [['https://evil.example/cb'],['https://chatgpt.com.evil.example/cb'],['http://localhost:3000/cb'],['https://chatgpt.com/ok','https://evil.example/cb']]){
+  const r=await reg(uris);assert.equal(r.status,400,JSON.stringify(uris));assert.equal((await r.json()).error,'invalid_redirect_uri');
+ }
+ const r=await fetch(AS+'/reg',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:'redirect_uris=https%3A%2F%2Fevil.example%2Fcb'});
+ assert.equal(r.status,400);
+});
+
 test('A-4: POST /mcp is 404 on the connector and on the sign-in server; GET /health is 200',async()=>{
  assert.equal((await fetch(CONNECTOR+'/mcp',{method:'POST',headers:{'content-type':'application/json'},body:'{}'})).status,404);
  assert.equal((await fetch(AS+'/mcp',{method:'POST',headers:{'content-type':'application/json'},body:'{}'})).status,404);
