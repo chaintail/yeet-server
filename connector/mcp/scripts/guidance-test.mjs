@@ -83,6 +83,20 @@ test('yeet_home: paused, wallet set-up, no USDC (with and without a spin), ready
  assert.equal(g('yeet_home',{wallets:wallets(null),ready:'ready',xp:null,recent_wins:[]},P01),COPY.yeet_home.ready);
 });
 
+test('funding is described for both networks: no string says USDC can only be added or held on Base',()=>{
+ for(const [label,text] of entries)assert.doesNotMatch(text,/adds USDC on Base|Add USDC on Base|USDC on Base\.$/,label);
+ for(const k of ['needs_funds_spin','needs_funds','needs_funds_no_wheel'])assert.match(COPY.yeet_home[k],/YEET/,k);
+ assert.match(COPY.yeet_portfolio.empty,/YEET/);
+ // yeet_home with funding: both balances and the network that pays; a zero on Base is not "needs funds" when Solana holds USDC.
+ const home={wallets:wallets('0'),funding:{base_usdc:'0',solana_usdc:'40',chosen:'solana'},ready:'ready',xp:null,recent_wins:[]};
+ assert.equal(g('yeet_home',home,P01),"YEET text.");
+ // The contract says the same: funding on yeet_home and on a proposal, and fund_url no longer names one network.
+ assert.ok(contract.tools.yeet_home.outputSchema.properties.funding);assert.ok(contract.$defs.proposal.properties.funding);
+ assert.doesNotMatch(contract.tools.yeet_home.outputSchema.properties.fund_url.description,/adds USDC on Base\b/);
+ assert.match(contract.tools.yeet_home.outputSchema.properties.fund_url.description,/YEET/);
+ assert.doesNotMatch(contract['x-yeet-scopes']['yeet:trade'],/tap/i);
+});
+
 test('yeet_coins: pick a few, do not read the list out',()=>{
  assert.equal(g('yeet_coins',{coins:[],limits:{}}),COPY.yeet_coins.list);
 });

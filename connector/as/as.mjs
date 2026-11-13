@@ -593,7 +593,8 @@ app.post(USERNAME_PATH, formBody, async (q, r) => {
   if (status === 200) return r.redirect(303, "/account/?username=saved");
   await sendAccountPage(r, s, { value, error: usernameMessage(body?.error) }, status === 409 ? 409 : 400);
 });
-// Add funds: USDC on Base through Privy funding (Coinbase Onramp). Needs a YEET sign-in session and the Privy sign-in.
+// Add funds: a direct USDC transfer on Base or on Solana (address, QR code, wallet links), or USDC on Base by card
+// through Privy funding (Coinbase Onramp). Needs a YEET sign-in session and the Privy sign-in.
 fundRoutes(app, { enabled: () => process.env.PRIVY_LOGIN === "1", session });
 // Card signing (sign-page.mjs): the signer script the trade card loads, and the first-party signing page with its two
 // routes. The page's caller is the Privy user signed in on the page, matched to the account already linked to it.
