@@ -17,13 +17,13 @@ export function dailyAllowance(value=process.env.YEET_DAILY_CAP_USDC){
 export const SCOPE_WORDS=Object.freeze({
  'yeet:read':'See your YEET wallets, coins, trades and XP.',
  'yeet:write':'Get prices for trades and spin the daily wheel for you.',
- 'yeet:trade':'Buy and sell coins with your YEET wallet, only after you tap ⚡ YEET in the chat.',
+ 'yeet:trade':'Buy and sell coins with your YEET wallet, only after you tap YEET in the chat.',
 });
 /** Production consent fields: a plain list of what ChatGPT may do, the daily money line when trading is requested,
  *  and the raw scope names inside the collapsed Details element (consentForm). */
 export function consentFields(requested,priorGranted=[]){
  const items=grantedSubset(requested).filter(s=>SCOPE_WORDS[s]).map(s=>`<li>${SCOPE_WORDS[s]}</li>`).join('');
- const trade=requested.includes('yeet:trade')?`<p class="limit">YEET can send up to ${html(dailyAllowance())} USDC a day from your YEET wallet, only when you tap ⚡ YEET.</p>`:'';
+ const trade=requested.includes('yeet:trade')?`<p class="limit">YEET can send up to ${html(dailyAllowance())} USDC a day from your YEET wallet, only when you tap YEET.</p>`:'';
  return `${items?`<p>ChatGPT will be able to:</p><ul class="can">${items}</ul>`:''}${trade}`;
 }
 /** The technical record behind the consent, collapsed by default. grantedSubset keeps only catalog scope names,

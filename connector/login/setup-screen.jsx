@@ -3,6 +3,7 @@
 // No Privy here, so it renders anywhere.
 import React from "react";
 import { STEPS } from "./wallet-setup.js";
+import { words } from "./brand-words.jsx";
 
 /** How far the bar is along at each step, in percent. */
 const FILL = { check: 8, base: 30, solana: 58, link: 84 };
@@ -24,7 +25,7 @@ export function SetupProgress({ step, done = [], slow = false, failed = false, m
           <img src="/account/brand/mark.svg" alt="" width="30" height="30" />
         </span>
         <p className="setup-step lead" role="status" aria-live="polite">
-          {headline}
+          {words(headline)}
         </p>
       </div>
       <div className={failed ? "setup-bar stopped" : "setup-bar"} aria-hidden="true">
@@ -36,7 +37,7 @@ export function SetupProgress({ step, done = [], slow = false, failed = false, m
           return (
             <li key={s.id} className={state}>
               <span className="dot" aria-hidden="true" />
-              {s.text}
+              {words(s.text)}
               {state === "done" ? <span className="visually-hidden"> (done)</span> : null}
             </li>
           );
@@ -45,9 +46,11 @@ export function SetupProgress({ step, done = [], slow = false, failed = false, m
       {slow || failed ? (
         <>
           <p role="alert" className="notice">
-            {failed
-              ? message || "YEET could not finish setting up your wallets. Nothing was charged. Tap Try again."
-              : "Setting up your wallets is taking longer than usual."}
+            {words(
+              failed
+                ? message || "YEET could not finish setting up your wallets. Nothing was charged. Tap Try again."
+                : "Setting up your wallets is taking longer than usual.",
+            )}
           </p>
           <button type="button" onClick={onRetry}>
             Try again

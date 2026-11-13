@@ -26,6 +26,40 @@
     }
     return { d: d, w: x + 34 };
   }
+  // ---------- the bolt after every YEET (the brand's rule); hidden from screen readers ----------
+  var BOLT = "M14.2 1.5 4.5 13.6h6.1L9 22.5l10.5-12.7h-6.4z";
+  function bolt() {
+    var s = doc.createElementNS(NS, "svg");
+    s.setAttribute("class", "wm");
+    s.setAttribute("viewBox", "0 0 24 24");
+    s.setAttribute("aria-hidden", "true");
+    s.setAttribute("focusable", "false");
+    var p = doc.createElementNS(NS, "path");
+    p.setAttribute("d", BOLT);
+    p.setAttribute("fill", "currentColor");
+    p.setAttribute("stroke", "currentColor");
+    p.setAttribute("stroke-width", "1.2");
+    p.setAttribute("stroke-linejoin", "round");
+    s.appendChild(p);
+    return s;
+  }
+  var SKIP = "svg,script,style,input,textarea,select,option,.visually-hidden,.wm,#privy-login,#yeet-fund";
+  /** Puts the bolt after YEET in the page's own text. The sign-in and fund widgets draw their own. */
+  function signWords(node) {
+    Array.prototype.slice.call(node.childNodes).forEach(function (child) {
+      if (child.nodeType === 1) { if (!child.matches(SKIP)) signWords(child); return; }
+      if (child.nodeType !== 3 || !/\bYEET\b/.test(child.nodeValue)) return;
+      // One span for the whole text, so a flex parent (a checkbox label, a button) keeps it as one run.
+      var out = doc.createElement("span");
+      child.nodeValue.split(/\b(YEET)\b/).forEach(function (t, k) {
+        if (!t) return;
+        if (k % 2) { var w = doc.createElement("span"); w.className = "sw"; w.appendChild(doc.createTextNode(t)); w.appendChild(bolt()); out.appendChild(w); }
+        else out.appendChild(doc.createTextNode(t));
+      });
+      child.parentNode.replaceChild(out, child);
+    });
+  }
+
   function setType(el) {
     var text = el.textContent.replace(/\s+/g, " ").trim();
     if (!D || !text) return;
@@ -44,6 +78,7 @@
       p.setAttribute("d", L.d);
       s.appendChild(p);
       span.appendChild(s);
+      if (w.replace(/[^A-Za-z]/g, "") === "YEET") span.appendChild(bolt());
       out.appendChild(span);
       out.appendChild(doc.createTextNode(" "));
     });
@@ -133,6 +168,7 @@
   window.YeetPage = { leave: leave };
 
   each("h1.display", setType);
+  each("main", signWords);
   each(".stars", function (h) { if (!h.firstChild) seedStars(h, RM ? 0 : +(h.getAttribute("data-stars") || 16)); });
   each(".slots", liveSlots);
 })();

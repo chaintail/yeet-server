@@ -45,7 +45,7 @@ test('rendered production consent form lists the granted scopes and the daily al
  try{
   const form=consentForm({csrf:'x',accountId:'yeet-privy-alice',clientId:'chatgpt',resource:'https://chatgpt.yeet.win',requested});
   assert.match(form,/Scopes granted<\/dt><dd>openid offline_access yeet:read yeet:write yeet:trade<\/dd>/);
-  assert.match(form,/YEET can send up to 40 USDC a day from your YEET wallet, only when you tap ⚡ YEET\./);
+  assert.match(form,/YEET can send up to 40 USDC a day from your YEET wallet, only when you tap YEET\./);
   assert.doesNotMatch(form,/checked/);
   assert.equal(submit(form).csrf,'x');assert.equal(submit(form).consent,'yes');
   assert.deepEqual(submittedScopes(requested,submit(form)),requested);

@@ -136,7 +136,7 @@
  box-shadow:0 0 0 6px #c99a2e,0 0 0 9px #7a520f,0 0 0 11px #f7d774,0 10px 30px rgba(0,0,0,.6),inset 0 6px 18px rgba(255,255,255,.18)}
 .wheel-hub:disabled{cursor:default;opacity:1}
 .wheel-hub-main{font-size:var(--hubfs,30px)}
-.wheel-hub-sub{font-size:calc(var(--hubfs,30px)*.42);letter-spacing:.12em;opacity:.8;margin-top:4px}
+.wheel-hub-sub{font-size:calc(var(--hubfs,30px)*.66);letter-spacing:.06em;margin-top:2px}
 .wheel-hub-sub:empty{display:none}
 .wheel-stage.st-ready .wheel-hub:not(:disabled){animation:wheel-hubpulse 1.8s ease-in-out infinite}
 @keyframes wheel-hubpulse{50%{box-shadow:0 0 0 6px #c99a2e,0 0 0 9px #7a520f,0 0 0 11px #f7d774,0 0 40px 10px rgba(246,207,90,.55),inset 0 6px 18px rgba(255,255,255,.18)}}
@@ -170,10 +170,12 @@ button{-webkit-tap-highlight-color:transparent}
 .card>.edge-line{position:absolute;inset:-1px -1px auto -1px;height:var(--r-card);border-radius:var(--r-card) var(--r-card) 0 0;overflow:hidden;pointer-events:none}
 .edge-line::before{content:"";position:absolute;left:0;top:0;height:1.5px;width:40%;background:linear-gradient(90deg,transparent,var(--el,rgba(255,224,58,.85)),transparent);animation:edge var(--dur-edge) linear infinite;animation-delay:calc(var(--clk,0)*-1s)}
 @keyframes edge{0%{transform:translateX(-100%)}55%,100%{transform:translateX(260%)}}
-.card>.stars{position:absolute;inset:0 0 auto 0;height:3.25rem;pointer-events:none;overflow:hidden;border-radius:var(--r-card) var(--r-card) 0 0}
-.tw{position:absolute;left:var(--x);top:var(--y);width:var(--s,10px);height:var(--s,10px);opacity:0;animation:twinkle var(--t,4s) ease-in-out infinite;animation-delay:calc(var(--clk,0)*-1s + var(--dl,0s))}
-.tw::before{content:"";position:absolute;inset:0;background:var(--c,#fff);clip-path:polygon(50% 0,60% 40%,100% 50%,60% 60%,50% 100%,40% 60%,0 50%,40% 40%)}
-@keyframes twinkle{0%,64%,100%{opacity:0;transform:scale(.2) rotate(0)}76%{opacity:.9;transform:scale(1) rotate(45deg)}88%{opacity:.35;transform:scale(.55) rotate(80deg)}}
+.card>.stars{position:absolute;top:0;right:1rem;left:auto;width:30%;height:.875rem;pointer-events:none;overflow:hidden}
+/* The stars live in the top edge of the card, above the first line, so they never sit on text or a control. */
+.tw{position:absolute;left:var(--x);top:var(--y);width:var(--s,8px);height:var(--s,8px);margin:calc(var(--s,8px)/-2) 0 0 calc(var(--s,8px)/-2);opacity:0;animation:twinkle var(--t,4s) ease-in-out infinite;animation-delay:calc(var(--clk,0)*-1s + var(--dl,0s))}
+.tw::before{content:"";position:absolute;inset:0;background:var(--c,#fff);clip-path:polygon(50% 0,63% 37%,100% 50%,63% 63%,50% 100%,37% 63%,0 50%,37% 37%)}
+@keyframes twinkle{0%,64%,100%{opacity:0;transform:scale(.3) rotate(0)}76%{opacity:.9;transform:scale(1) rotate(12deg)}88%{opacity:.4;transform:scale(.7) rotate(18deg)}}
+.problem>.stars{display:none}
 
 /* ---------- enter and leave: parts slide in from the left with a lean, one after the other ---------- */
 .card.enter>*:not(.edge-line):not(.stars){animation:rise var(--dur-in) var(--ease-out) both;animation-delay:calc(var(--i,0)*var(--stagger))}
@@ -194,10 +196,15 @@ button{-webkit-tap-highlight-color:transparent}
 .head .sub{color:var(--muted);font:600 .8125rem/1.2 var(--font-mono);white-space:nowrap}
 .display{font:italic 900 1.3125rem/1 var(--font-display);letter-spacing:-.035em;color:#fff}
 .display .set{display:flex;flex-wrap:wrap;gap:.1em .26em}
-.yw{display:block;line-height:0}
+.yw{display:flex;line-height:0}
 .yw svg{display:block;height:1em;overflow:visible}
 .yw path{fill:currentColor}
 .yw.em{color:var(--yellow)}
+/* The mark after the word: the bolt after YEET, the target after SKEET, in the colour of the word. */
+.sw{white-space:nowrap}
+.wm{display:inline-block;width:.9em;height:.9em;margin-left:.14em;vertical-align:-.12em;flex:none}
+.yw{align-items:center}
+.yw>.wm{width:.82em;height:.82em;margin-left:.08em}
 .logo{display:block;line-height:0}
 .logo svg{display:block;height:1.5rem;width:auto}
 .logo path{fill:#fff}
@@ -300,6 +307,8 @@ button{-webkit-tap-highlight-color:transparent}
 .btn .lbl{display:block;line-height:0}
 .btn .lbl svg{display:block;height:1.5rem;width:auto;overflow:visible}
 .btn .lbl path{fill:currentColor}
+.btn .lbl{display:flex;align-items:center;gap:.3rem}
+.btn .lbl>.wm{width:1.3rem;height:1.3rem;margin:0}
 /* two buttons, side by side, always */
 .pair{display:grid;grid-template-columns:1fr 1fr;gap:.5rem;width:100%}
 .btn.small{min-height:2.375rem;padding:0 .75rem;border-radius:.75rem;font-size:.875rem;background:linear-gradient(180deg,var(--f1) -60%,var(--f0) 45%,var(--f2) 160%);box-shadow:inset 0 -2px 0 rgba(0,0,0,.12),inset 0 1px 0 rgba(255,255,255,.5)}
@@ -365,6 +374,8 @@ button{-webkit-tap-highlight-color:transparent}
 .streak.next{font-size:.75rem}
 
 /* ---------- daily spin: the wheel box is square; wheel.css sizes the wheel inside it. Only the look is set here. ---------- */
+/* The card that holds the wheel holds its light too: the rays, the darkening, the flash and the confetti stay inside it. */
+.card.wheel-card{contain:paint}
 .spin{display:flex;flex-direction:column;gap:.5rem}
 .spin-head{display:flex;align-items:center;justify-content:space-between;gap:.5rem}
 .spin-head .display{font-size:1.125rem}
@@ -414,6 +425,7 @@ button{-webkit-tap-highlight-color:transparent}
 
 @media (max-width:360px){
  .card{padding:.625rem}
+ .card>.stars{height:.625rem}
  .row{grid-template-columns:2rem minmax(0,1fr) auto auto;gap:.375rem;padding:.375rem}
  .coin{width:2rem;height:2rem;font-size:.5625rem}
  .btn.step{width:1.75rem;height:1.75rem}
@@ -435,7 +447,7 @@ button{-webkit-tap-highlight-color:transparent}
 /* The wheel keeps fixed-position layers: its box only fades, it never moves or blurs. */
 .card.enter>.spin,.spin.in{animation-name:fade}
 @keyframes fade{from{opacity:0}}
-.totals.stale span:not(:first-child){opacity:.45}
+.totals.stale span:not(:first-child){opacity:.6}
 </style></head><body data-view="portfolio"><main id="root" aria-live="polite"></main>
 <script>(function yeetCard(window){
 'use strict';
@@ -615,7 +627,25 @@ function sparkles(ctx,slice,rimIn,SLICE_DEG){
   ctx.quadraticCurveTo(x,y,x+s*2,y);ctx.quadraticCurveTo(x,y,x,y+s*2);ctx.quadraticCurveTo(x,y,x-s*2,y);ctx.quadraticCurveTo(x,y,x,y-s*2);ctx.fill();
  }
 }
-function drawWheel(ctx,Rw,slices,SLICE_DEG,topTier,flipLabels){
+/** Labels across the slice ('across'): which slices sit on the lower half at rotation R, so their text turns over to stay upright. */
+function lowerHalf(slices,SLICE_DEG,R){return slices.map((c,s)=>{const a=mod(s*SLICE_DEG+SLICE_DEG/2+R,360);return a>=90&&a<270})}
+/** One label across its slice, upright: the number, then its unit ("+17 XP") in the same ink, the unit at 2/3 size. */
+function acrossLabel(ctx,Rw,c,s,SLICE_DEG,lower,topTier){
+ const half=rad(SLICE_DEG/2),r=Rw*0.69;
+ ctx.save();ctx.rotate(rad(s*SLICE_DEG+SLICE_DEG/2+(lower?180:0)));
+ const main=String(c.label),unit=c.sub?String(c.sub):'';
+ let fs=Rw*0.118;
+ const widths=f=>{ctx.font=`900 ${f}px ${FONT}`;const a=ctx.measureText(main).width;let b=0;if(unit){ctx.font=`800 ${f*0.68}px ${FONT}`;b=ctx.measureText(unit).width+f*0.16}return {a,b,w:a+b}};
+ let m=widths(fs);const maxW=2*(r-fs*0.5)*Math.sin(half)*0.86;
+ if(m.w>maxW){fs*=maxW/m.w;m=widths(fs)}
+ const y=(lower?r:-r)+fs*0.36,x0=-m.w/2;
+ ctx.textAlign='left';ctx.textBaseline='alphabetic';
+ ctx.shadowColor=c.tier===topTier?'rgba(255,255,255,.55)':'rgba(0,0,0,.4)';ctx.shadowBlur=Rw*0.01;ctx.shadowOffsetY=Rw*0.004;
+ ctx.fillStyle=c.ink;ctx.font=`900 ${fs}px ${FONT}`;ctx.fillText(main,x0,y);
+ if(unit){ctx.font=`800 ${fs*0.68}px ${FONT}`;ctx.fillText(unit,x0+m.a+fs*0.16,y)}
+ ctx.restore();
+}
+function drawWheel(ctx,Rw,slices,SLICE_DEG,topTier,flipLabels,lower){
  const n=slices.length,rimIn=0.915*Rw;
  ctx.save();ctx.translate(Rw,Rw);
  // gold rim
@@ -646,7 +676,8 @@ function drawWheel(ctx,Rw,slices,SLICE_DEG,topTier,flipLabels){
   ctx.strokeStyle='rgba(40,20,0,.55)';ctx.lineWidth=Rw*0.016;ctx.stroke();ctx.strokeStyle='#f6d77a';ctx.lineWidth=Rw*0.007;ctx.stroke();
  }
  // labels
- for(let s=0;s<n;s+=1){
+ if(lower)for(let s=0;s<n;s+=1)acrossLabel(ctx,Rw,slices[s],s,SLICE_DEG,lower[s],topTier);
+ else for(let s=0;s<n;s+=1){
   const c=slices[s];
   // flipLabels: the text reads hub-to-rim, upright on the wheel's left half (where a page cut-off shows it).
   ctx.save();ctx.rotate(rad(s*SLICE_DEG+SLICE_DEG/2-90+(flipLabels?180:0)));ctx.textAlign=flipLabels?'left':'right';ctx.textBaseline='middle';
@@ -731,6 +762,7 @@ function finishWin(tier,effects){
  *  restSlice / won   where it rests when it opens, and whether that slice is lit as an earlier win.
  *  sound    false: never makes a sound.  ambient  false: no rays, darkening, flash or confetti outside the wheel.
  *  flipLabels  labels read upright on the left half instead of the right.
+ *  labels   'across': each label runs across its slice, number then unit in one line, and stays upright as the wheel turns.
  *  idle     ms between decorative spins to random slices (landing page background); 0: none.
  *  canSpin() / onSpin(v0, windup) / onStopped(slice)   the hub and a swipe call onSpin; the caller then calls start.
  * Returns {stage, start(v0, windup), land(slice), abort(), setHub(main, sub), setEnabled(on), sound, state(), destroy()}.
@@ -748,7 +780,7 @@ function createWheel(container,opts){
  stage.style.setProperty('--slice-deg',`${SLICE_DEG}deg`);
  const q=sel=>stage.querySelector(sel);
  const wrap=q('.wheel-wrap'),rotor=q('.wheel-rotor'),sharp=q('.wheel-sharp'),blurred=q('.wheel-blur'),spot=q('.wheel-spot'),wedge=q('.wheel-wedge');
- const flapper=q('.wheel-flapper'),hub=built.hub,flash=q('.wheel-flash'),fx=q('.wheel-fx');
+ const flapper=q('.wheel-flapper'),hub=built.hub,flash=q('.wheel-flash'),fx=q('.wheel-fx'),layer=q('.wheel-ambient');
  const fctx=fx?.getContext?.('2d')??null;
  const bulbs=Array.from(stage.querySelectorAll('.wheel-bulb'));
 
@@ -765,7 +797,9 @@ function createWheel(container,opts){
  function layout(){
   const w=stage.clientWidth,hh=stage.clientHeight;if(!w||!hh)return;
   const fit=wheelFit(w,hh);const SZ=fit.size;const Rw=Math.floor(SZ/2/1.11);const box=stage.getBoundingClientRect();
-  stage.style.setProperty('--wheel-x',`${box.left+fit.left+SZ/2}px`);stage.style.setProperty('--wheel-y',`${box.top+fit.top+SZ/2}px`);
+  // The rays, darkening and flash are measured from their own layer: the window, or a card that holds them.
+  const ref=layer?layer.getBoundingClientRect():{left:0,top:0};
+  stage.style.setProperty('--wheel-x',`${box.left-ref.left+fit.left+SZ/2}px`);stage.style.setProperty('--wheel-y',`${box.top-ref.top+fit.top+SZ/2}px`);
   stage.style.setProperty('--wheel-size',`${SZ}px`);stage.style.setProperty('--wheel-zoom',String(WHEEL_ZOOM));
   wrap.style.width=wrap.style.height=`${SZ}px`;wrap.style.left=`${fit.left}px`;wrap.style.top=`${fit.top}px`;
   sizeFx();
@@ -780,12 +814,20 @@ function createWheel(container,opts){
   bulbs.forEach((bulb,i)=>{const a=rad((i+0.5)*(360/BULBS));bulb.style.width=bulb.style.height=`${bs}px`;bulb.style.left=`${c+Math.sin(a)*br-bs/2}px`;bulb.style.top=`${c-Math.cos(a)*br-bs/2}px`});
   paint();
  }
+ // Labels across the slices are drawn for the wheel's angle: when a slice crosses to the other half, they are drawn again.
+ const across=opts.labels==='across';let drawnKey='';
+ const lowerKey=()=>across?lowerHalf(slices,SLICE_DEG,R).map(Number).join(''):'';
+ function paintSharp(){
+  const Rw=geomRw;const c1=sharp.getContext?.('2d');if(!Rw||!c1)return null;
+  const dpr=Math.min(window.devicePixelRatio||1,2);c1.setTransform(1,0,0,1,0,0);c1.clearRect(0,0,sharp.width,sharp.height);c1.setTransform(dpr,0,0,dpr,0,0);
+  drawnKey=lowerKey();drawWheel(c1,Rw,slices,SLICE_DEG,topTier,!!opts.flipLabels,across?lowerHalf(slices,SLICE_DEG,R):null);
+  return c1;
+ }
  function paint(){
   const Rw=geomRw;if(!Rw)return;
   const dpr=Math.min(window.devicePixelRatio||1,2);const px=Math.round(Rw*2*dpr);
   sharp.width=sharp.height=px;blurred.width=blurred.height=px;
-  const c1=sharp.getContext?.('2d'),c2=blurred.getContext?.('2d');if(!c1||!c2)return;
-  c1.setTransform(dpr,0,0,dpr,0,0);drawWheel(c1,Rw,slices,SLICE_DEG,topTier,!!opts.flipLabels);
+  const c2=blurred.getContext?.('2d');if(!c2||!paintSharp())return;
   // Rotational motion blur, baked once: rotated copies averaged.
   const n=18,span=16;c2.clearRect(0,0,px,px);
   for(let j=0;j<n;j+=1){c2.save();c2.globalAlpha=1/(j+1);c2.translate(px/2,px/2);c2.rotate(rad((j/(n-1)-0.5)*span));c2.drawImage(sharp,-px/2,-px/2);c2.restore()}
@@ -828,14 +870,15 @@ function createWheel(container,opts){
  let parts=[],fxW=0,fxH=0,fxDirty=false,coinTimer=0;
  function sizeFx(){
   if(!fx)return;const dpr=Math.min(window.devicePixelRatio||1,2);
-  if(fxW===window.innerWidth&&fxH===window.innerHeight)return;
-  fxW=window.innerWidth;fxH=window.innerHeight;fx.width=fxW*dpr;fx.height=fxH*dpr;fctx?.setTransform(dpr,0,0,dpr,0,0);
+  const r=fx.getBoundingClientRect(),W=Math.round(r.width)||window.innerWidth,H=Math.round(r.height)||window.innerHeight;
+  if(fxW===W&&fxH===H)return;
+  fxW=W;fxH=H;fx.width=fxW*dpr;fx.height=fxH*dpr;fctx?.setTransform(dpr,0,0,dpr,0,0);
  }
  const piece=(x,y,vx,vy,c,coin)=>({x,y,vx,vy,c,coin,rot:Math.random()*6.28,vr:(Math.random()-0.5)*14,flip:Math.random()*6.28,vf:6+Math.random()*10,
   w:coin?14+Math.random()*6:7+Math.random()*7,h:coin?0:10+Math.random()*8,life:0,max:3.2+Math.random()*1.8});
  function celebrate(tier,color){
   if(!fctx)return;
-  const r=flapper.getBoundingClientRect();const x=r.left+r.width/2,y=r.top+r.height*0.85;
+  const r=flapper.getBoundingClientRect(),o=fx.getBoundingClientRect();const x=r.left-o.left+r.width/2,y=r.top-o.top+r.height*0.85;
   const count=[90,120,160,230,320,460][Math.max(0,Math.min(5,tier))];
   const cols=[color,'#ffffff','#f6cf5a',mix(color,'#ffffff',0.4)];
   for(let i=0;i<count;i+=1){const a=-Math.PI/2+(Math.random()-0.5)*Math.PI*1.5;const sp=380+Math.random()*(520+tier*90);parts.push(piece(x,y,Math.cos(a)*sp,Math.sin(a)*sp,cols[i%cols.length],tier>=5&&i%3===0))}
@@ -895,6 +938,7 @@ function createWheel(container,opts){
   else if(state==='free')speed=v0;
   else if(state!=='coast')speed=(R-prevR)/dt;
   stepFlapper(prevR,R,dt,speed);
+  if(across&&Math.abs(speed)<240&&lowerKey()!==drawnKey)paintSharp();
   rotor.style.transform=`rotate(${mod(R,360).toFixed(3)}deg)`;
   const blur=Math.max(0,Math.min(1,(Math.abs(speed)-160)/520));
   if(blur!==lastBlur){blurred.style.opacity=blur.toFixed(3);lastBlur=blur}
@@ -1127,7 +1171,13 @@ function keepRoster(p){
  if(p.direction!=='yeet'){roster=null;return}
  const syms=p.legs.map(l=>safeSymbol(l.symbol)).filter(Boolean).slice(0,5);
  if(!roster||roster.proposal_id!==p.proposal_id){roster={proposal_id:p.proposal_id,symbols:syms};draft=null;amountDraft=null;hold=null;return}
- for(const s of syms)if(!roster.symbols.includes(s)&&roster.symbols.length<5){roster.symbols.push(s);if(draft)draft.push(p.legs.find(l=>l.symbol===s)?.parts??0)}
+ // Every coin in the new quote is on the card. Coins at 0 parts keep their place while there is room (5 rows),
+ // the oldest first; a new coin takes the place of one at 0 parts, never of a coin in the trade.
+ let room=5-syms.length;const was=roster.symbols,next=[];
+ for(const s of was)if(syms.includes(s))next.push(s);else if(room>0){next.push(s);room-=1}
+ for(const s of syms)if(!next.includes(s))next.push(s);
+ if(draft){const at=new Map(was.map((s,k)=>[s,draft[k]]));draft=next.map(s=>at.has(s)?at.get(s):(p.legs.find(l=>l.symbol===s)?.parts??0))}
+ roster.symbols=next;
 }
 const legOf=(p,sym)=>p.legs.find(l=>l.symbol===sym)||null;
 function partsOf(p){return draft||(roster?roster.symbols.map(s=>legOf(p,s)?.parts??0):p.legs.map(l=>l.parts))}
@@ -1139,6 +1189,8 @@ function split(total,parts){
  let big=0;parts.forEach((x,k)=>{if(x>parts[big])big=k});shares[big]+=rest;return shares;
 }
 const usdMicro=raw=>usdFmt.format(Number(raw)/1e6);
+// Rounded down to the cent, so a share just under the minimum never shows as the minimum itself.
+const usdFloor=raw=>usdFmt.format(Number(raw/10000n)/100);
 const listOf=a=>a.length<2?a.join(''):`${a.slice(0,-1).join(', ')} and ${a.at(-1)}`;
 /** Why these parts can't be quoted, in words that say what to change; null when they can. */
 function holdFor(p,parts,symbols,usdc=p.amount_usdc){
@@ -1151,9 +1203,12 @@ function holdFor(p,parts,symbols,usdc=p.amount_usdc){
  const fewest=Math.min(...low.map(k=>parts[k]));
  let need=(min*BigInt(sum)+BigInt(fewest)-1n)/BigInt(fewest);need=(need+9999n)/10000n*10000n;
  const names=low.map(k=>symbols[k]??'?');const one=names.length===1;
- const said=listOf(low.map(k=>`${symbols[k]??'?'} (${usdMicro(shares[k])})`));
+ const said=listOf(low.map(k=>`${symbols[k]??'?'} (${usdFloor(shares[k])})`));
+ // An amount is only offered when one trade may hold it; above the per-trade limit, only the parts can fix it.
+ const most=BigInt(AMOUNT_MAX)*1000000n;
+ const fix=need<=most?`, or raise the amount to at least ${usdMicro(need)}.`:` or set ${one?'it':'them'} to 0.`;
  return {title:ERRORS.AMOUNT_TOO_SMALL?.[0]??'A coin gets too little',
-  text:`${said} ${one?'is':'are'} under the ${usdMicro(min)} minimum per coin. Give ${one?names[0]:'them'} more parts, set ${one?'it':'them'} to 0, or ${need<=BigInt(Math.max(AMOUNT_MAX,Math.ceil(Number(p.amount_usdc)||0)))*1000000n?`raise the amount to at least ${usdMicro(need)}.`:`ask in the chat for at least ${usdMicro(need)} in total.`}`};
+  text:`${said} ${one?'is':'are'} under the ${usdMicro(min)} minimum per coin. Give ${one?names[0]:'them'} more parts${need<=most?`, set ${one?'it':'them'} to 0`:''}${fix}`};
 }
 // What to ask yeet_quote for: the stepped parts and the new amount, each only when it was changed on the card.
 function quoteArgs(p){return {proposal_id:p.proposal_id,...(draft?{legs:roster.symbols.map((s,k)=>({symbol:s,parts:draft[k]}))}:{}),...(amountDraft!==null?{amount_usdc:amountDraft}:{})}}
@@ -1167,6 +1222,23 @@ function onStep(i,delta){
 }
 // ---- Amount: a field and a slider, 3 USDC per coin up to 25. The word on the button gets wider with the amount. ----
 const amountOf=p=>amountDraft??p.amount_usdc;
+/** The estimates at the amount and parts on the card. Until the new quote comes back, each coin's quoted estimate is
+ *  scaled by its new USDC over its quoted USDC; a coin that had no USDC in the quote shows a dash. */
+function estimates(p,parts){
+ const qParts=roster?roster.symbols.map(s=>legOf(p,s)?.parts??0):p.legs.map(l=>l.parts);
+ const same=amountDraft===null&&!draft;
+ const was=split(micro(p.amount_usdc),qParts),now=same?was:split(micro(amountOf(p)),parts);
+ const t=p.totals||{};let sum=0,known=true;
+ const rows=(roster?roster.symbols.map(s=>legOf(p,s)):p.legs).map((l,k)=>{
+  if(!l||!(parts[k]>0))return null;
+  const f=same?1:was&&now&&was[k]>0n?Number(now[k])/Number(was[k]):NaN;
+  const out=Number(l.est_out),usd=Number(l.est_out_usd);
+  if(!Number.isFinite(f)||!DECIMAL.test(l.est_out??'')||!DECIMAL.test(l.est_out_usd??'')){known=false;return {amt:same?amount(l.est_out):null,usd:same?money(l.est_out_usd):null}}
+  sum+=usd*f;return {amt:same?amount(l.est_out):amountNum(out*f),usd:same?money(l.est_out_usd):usdFmt.format(usd*f)};
+ });
+ const get=same?money(t.out_usd):known&&rows.some(Boolean)?usdFmt.format(sum):null;
+ return {rows,get};
+}
 const trimAmount=n=>String(Math.round(n*100)/100);
 function amountBounds(p,parts){
  const coins=Math.max(1,parts.filter(x=>x>0).length),leg=Number(p.min_leg_usdc)||3,cur=Number(p.amount_usdc)||0;
@@ -1187,6 +1259,8 @@ function onAmountInput(raw,from){
  paintRange(ui.range,ui.bounds);ui.range.setAttribute('aria-valuetext',`${amountDraft} USDC`);
  const parts=partsOf(p),sum=parts.reduce((a,c)=>a+c,0),shares=split(micro(amountDraft),parts);
  ui.shares.forEach((node,i)=>{if(node&&parts[i]>0)node.textContent=`${pct(sum>0?parts[i]*100/sum:NaN)??'—'} · ${shares?usdMicro(shares[i]):'—'}`});
+ const e=estimates(p,parts);ui.est.forEach((n,i)=>{if(n&&e.rows[i]){n.amt.textContent=`≈ ${e.rows[i].amt??'—'}`;n.usd.textContent=e.rows[i].usd??'—'}});
+ ui.get.textContent=`Get ≈ ${e.get??'—'}`;
  ui.trade.disabled=true;ui.spend.textContent=`Spend ${usdFmt.format(v)}`;ui.totals.classList.add('stale');
  stretchTo(ui.word,widthAt(v,ui.bounds),from==='field');
  if(ui.note)ui.note.textContent='New amount. The quote updates when you let go.';
@@ -1257,7 +1331,7 @@ function wheelNode(won){
  if(!wheel){
   wheelBox=el('div','spin-wheel');
   const at=won?sliceFor(won).slice:null;
-  try{wheel=Wheel.createWheel(wheelBox,{slices:SLICES,restSlice:at,won:!!won,canSpin:()=>canCall()&&!spinBusy&&!spinWon,onSpin:startSpin,onStopped:wheelStopped})}
+  try{wheel=Wheel.createWheel(wheelBox,{slices:SLICES,labels:'across',restSlice:at,won:!!won,canSpin:()=>canCall()&&!spinBusy&&!spinWon,onSpin:startSpin,onStopped:wheelStopped})}
   catch{wheelBox=null;return null}
   if(won)wheel.setHub(`+${won.xp_won}`,'XP');
  }
@@ -1300,7 +1374,10 @@ function spinPanel(h){
 const usdFmt=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2});
 function money(v){if(typeof v!=='string'||!DECIMAL.test(v))return null;const n=Number(v);return Number.isFinite(n)?usdFmt.format(n):null}
 function amount(v){
- if(typeof v!=='string'||!DECIMAL.test(v))return null;const n=Number(v);if(!Number.isFinite(n))return null;
+ if(typeof v!=='string'||!DECIMAL.test(v))return null;return amountNum(Number(v));
+}
+function amountNum(n){
+ if(!Number.isFinite(n))return null;
  const a=Math.abs(n);const opts=a>=1000?{maximumFractionDigits:0}:a>=1?{maximumFractionDigits:2}:{maximumSignificantDigits:4};
  return new Intl.NumberFormat('en-US',opts).format(n);
 }
@@ -1321,7 +1398,23 @@ const ICONS={
  crown:[['path',{d:'M3 18 2 7l5.5 4L12 4l4.5 7L22 7l-1 11z',fill:'currentColor'}]],
  check:[['path',{d:'m4 12.5 5 5L20 6',fill:'none',stroke:'currentColor','stroke-width':'3.2','stroke-linecap':'round','stroke-linejoin':'round'}]],
  share:[['path',{d:'M12 19V5M6 11l6-6 6 6',fill:'none',stroke:'currentColor','stroke-width':'2.8','stroke-linecap':'round','stroke-linejoin':'round'}]],
+ // SKEET's own mark (brand/kit.html i-skeet): a target, never the bolt.
+ skeet:[['circle',{cx:'12',cy:'12',r:'7.5',fill:'none',stroke:'currentColor','stroke-width':'2.4'}],['path',{d:'M12 1.5v4M12 18.5v4M1.5 12h4M18.5 12h4',fill:'none',stroke:'currentColor','stroke-width':'2.4','stroke-linecap':'round'}],['circle',{cx:'12',cy:'12',r:'2.6',fill:'currentColor'}]],
 };
+// The brand's rule: the word YEET is always followed by the bolt, and SKEET by its own mark.
+const SIGN={YEET:'bolt',SKEET:'skeet'};
+const SIGNED=/\b(YEET|SKEET)\b/;
+const sign=word=>icon(SIGN[word],`wm ${SIGN[word]}`);
+/** Puts the mark after every YEET and SKEET in the text of a node. Leaves outlines, inputs, canvases and reader-only text alone. */
+function signWords(node){
+ for(const child of [...node.childNodes]){
+  if(child.nodeType===1){if(!child.matches('svg,canvas,input,textarea,.sr,.wm'))signWords(child);continue}
+  if(child.nodeType!==3||!SIGNED.test(child.nodeValue))continue;
+  const parts=child.nodeValue.split(/\b(YEET|SKEET)\b/),frag=document.createDocumentFragment();
+  parts.forEach((t,k)=>{if(!t)return;if(k%2){const w=el('span','sw');w.append(document.createTextNode(t),sign(t));frag.append(w)}else frag.append(document.createTextNode(t))});
+  child.replaceWith(frag);
+ }
+}
 function icon(name,cls){const s=svg('svg',{viewBox:'0 0 24 24','aria-hidden':'true',focusable:'false'},ICONS[name].map(([t,a])=>svg(t,a)));if(cls)s.setAttribute('class',cls);return s}
 function brandMark(which,cls){const b=BRAND[which];const s=svg('svg',{viewBox:b.box,'aria-hidden':'true',focusable:'false'},[svg('path',{d:b.d})]);s.setAttribute('class',cls);return s}
 // Display type: Archivo outlines, one svg per word. The words stay in the page as hidden text for readers and tests.
@@ -1340,7 +1433,9 @@ function display(tag,text,em){
  const vis=el('span','set');vis.setAttribute('aria-hidden','true');
  for(const w of text.split(' ').filter(Boolean)){
   const L=setLine(TYPE.wide,w,-34,true);const s=svg('svg',{viewBox:`0 0 ${Math.round(L.w)} ${TYPE.em}`,focusable:'false'},[svg('path',{d:L.d})]);
-  s.style.width=`${(L.w/TYPE.em).toFixed(3)}em`;const span=el('span',em&&w.toLowerCase().replace(/[^a-z]/g,'')===em.toLowerCase()?'yw em':'yw');span.append(s);vis.append(span);
+  s.style.width=`${(L.w/TYPE.em).toFixed(3)}em`;const span=el('span',em&&w.toLowerCase().replace(/[^a-z]/g,'')===em.toLowerCase()?'yw em':'yw');span.append(s);
+  const bare=w.replace(/[^A-Za-z]/g,'');if(Object.hasOwn(SIGN,bare))span.append(sign(bare));
+  vis.append(span);
  }
  h.append(el('span','sr',text),vis);return h;
 }
@@ -1353,27 +1448,39 @@ function morph(text){
   const A=setLine(TYPE.wide,text,-6,true),B=setLine(TYPE.narrow,text,10,false);
   const dB=shift(B.d,Math.round((A.w-B.w)/2));
   const wide=A.d.match(NUM).map(Number),narrow=dB.match(NUM).map(Number),glue=A.d.split(NUM);
-  if(wide.length===narrow.length&&dB.split(NUM).join()===glue.join())m={w:Math.round(A.w),wideD:A.d,narrowD:dB,
+  if(wide.length===narrow.length&&dB.split(NUM).join()===glue.join())m={w:Math.round(A.w),nw:B.w,wideD:A.d,narrowD:dB,
    at:t=>{let d=glue[0];for(let i=0;i<wide.length;i+=1)d+=`${Math.round((narrow[i]+(wide[i]-narrow[i])*t)*10)/10}${glue[i+1]}`;return d}};
  }
  MORPH.set(text,m);return m;
 }
 /** Puts the word on a button as outlines at width t (0 narrow, 1 wide); with `idle` it runs between the two on its own. */
+// The word's mark rides in the same drawing, just after the last letter, so it follows the word as it narrows.
+const MARK_U=620,MARK_GAP=90;
+const markXY=(m,t)=>`${Math.round((m.w+m.nw)/2*(1-t)+m.w*t+MARK_GAP)} ${TYPE.base-350-MARK_U/2}`;
+const markAt=(m,t)=>`translate(${markXY(m,t)})`;
 function wordLabel(b,text,t,idle){
  const m=morph(text);if(!m)return null;
  const path=svg('path',{d:m.at(t)});
- const s=svg('svg',{viewBox:`0 ${TYPE.base-700} ${m.w} 720`,focusable:'false'},[path]);s.style.aspectRatio=`${m.w} / 720`;
- if(idle&&!REDUCED)path.append(svg('animate',{attributeName:'d',dur:'5.2s',begin:'-2.6s',repeatCount:'indefinite',calcMode:'spline',keyTimes:'0;0.5;1',keySplines:'.45 0 .2 1;.45 0 .2 1',values:`${m.wideD};${m.narrowD};${m.wideD}`}));
+ const kind=Object.hasOwn(SIGN,text)?SIGN[text]:null;
+ const mk=kind?svg('g',{class:`wm-in ${kind}`,transform:markAt(m,t)},[svg('g',{transform:`scale(${MARK_U/24})`},ICONS[kind].map(([tag,a])=>svg(tag,a)))]):null;
+ const w=m.w+(mk?MARK_GAP+MARK_U:0);
+ const s=svg('svg',{viewBox:`0 ${TYPE.base-700} ${w} 720`,focusable:'false'},mk?[path,mk]:[path]);s.style.aspectRatio=`${w} / 720`;
+ if(idle&&!REDUCED){
+  path.append(svg('animate',{attributeName:'d',dur:'5.2s',begin:'-2.6s',repeatCount:'indefinite',calcMode:'spline',keyTimes:'0;0.5;1',keySplines:'.45 0 .2 1;.45 0 .2 1',values:`${m.wideD};${m.narrowD};${m.wideD}`}));
+  if(mk)mk.append(svg('animateTransform',{attributeName:'transform',type:'translate',dur:'5.2s',begin:'-2.6s',repeatCount:'indefinite',additive:'replace',calcMode:'spline',keyTimes:'0;0.5;1',keySplines:'.45 0 .2 1;.45 0 .2 1',
+   values:[1,0,1].map(k=>markXY(m,k)).join(';')}));
+ }
  const wrap=el('span','lbl');wrap.setAttribute('aria-hidden','true');wrap.append(s);
  b.replaceChildren(el('span','sr',text),wrap);
- return {path,m,t,frame:null};
+ return {path,mk,m,t,frame:null};
 }
+function setWord(word,t){word.t=t;word.path.setAttribute('d',word.m.at(t));word.mk?.setAttribute('transform',markAt(word.m,t))}
 function stretchTo(word,t,smooth){
  if(!word)return;
  if(word.frame!==null){window.cancelAnimationFrame?.(word.frame);word.frame=null}
- if(!smooth||REDUCED||typeof window.requestAnimationFrame!=='function'){word.t=t;word.path.setAttribute('d',word.m.at(t));return}
+ if(!smooth||REDUCED||typeof window.requestAnimationFrame!=='function'){setWord(word,t);return}
  const from=word.t,t0=window.performance?.now?.()??0,ms=220;
- const tick=()=>{const k=Math.min(1,((window.performance?.now?.()??t0+ms)-t0)/ms),e=1-(1-k)*(1-k);word.t=from+(t-from)*e;word.path.setAttribute('d',word.m.at(word.t));word.frame=k<1?window.requestAnimationFrame(tick):null};
+ const tick=()=>{const k=Math.min(1,((window.performance?.now?.()??t0+ms)-t0)/ms),e=1-(1-k)*(1-k);setWord(word,from+(t-from)*e);word.frame=k<1?window.requestAnimationFrame(tick):null};
  word.frame=window.requestAnimationFrame(tick);
 }
 /** The living button: breathing glow, a light that runs the border, a moving fill and a glint. All CSS. */
@@ -1391,7 +1498,7 @@ function fundButton(url){const a=el('a','btn primary fund','Add funds');a.href=u
  const box=el('div','actions');box.append(a);return mark(box,'fund')}
 function link(text,url){const a=el('a','tx',text);a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.onclick=async e=>{e.preventDefault();try{await openLink(url)}catch{note='This link couldn’t open here.';render()}};return a}
 function button(cls,text,onclick){const b=el('button',`btn ${cls}`,text);b.type='button';if(onclick)b.onclick=onclick;return b}
-function head(title,sub,em){const h=el('div','head');const t=el('div','title');t.append(brandMark('mark','mark'),display('h1',title,em));h.append(t);if(sub)h.append(el('span','sub',sub));return mark(h,'head',true)}
+function head(title,sub,em){const h=el('div','head');const t=el('div','title');if(!SIGNED.test(title))t.append(brandMark('mark','mark'));t.append(display('h1',title,em));h.append(t);if(sub)h.append(el('span','sub',sub));return mark(h,'head',true)}
 function noteLine(text,cls='note'){const n=el('p',cls,text);n.setAttribute('role','status');return mark(n,'note',true)}
 function xpChip(text){const x=el('p','xp');x.append(icon('bolt'),document.createTextNode(text));return mark(x,'xp',true)}
 
@@ -1487,9 +1594,10 @@ function renderBasket(p){
  const rows=skeet?p.legs.slice(0,5).map(l=>({sym:safeSymbol(l.symbol),leg:l})):roster.symbols.map(s=>({sym:s,leg:legOf(p,s)}));
  const inTrade=skeet?rows.length:parts.filter(x=>x>0).length;
  const sum=parts.reduce((a,b)=>a+b,0);const shares=skeet?null:split(micro(amountOf(p)),parts);
+ const ests=skeet?null:estimates(p,parts);
  const card=el('section','card basket');card.dataset.direction=skeet?'skeet':'yeet';
  card.append(head(skeet?'SKEET to USDC':'YEET basket',`${inTrade} coin${inTrade===1?'':'s'}`,skeet?'skeet':'yeet'));
- const ui={shares:[],bounds:null,num:null,range:null,trade:null,word:null,note:null,spend:null,totals:null};
+ const ui={shares:[],est:[],bounds:null,num:null,range:null,trade:null,word:null,note:null,spend:null,get:null,totals:null};
  const list=el('ul','rows');
  rows.forEach(({sym,leg:l},i)=>{
   const off=!skeet&&parts[i]===0;
@@ -1500,7 +1608,7 @@ function renderBasket(p){
   const est=el('div',skeet?'est end':'est');
   if(skeet){est.append(el('span','amt',`${amount(l.amount_in)??'—'} ${sym??''}`.trim()),el('span','usd',`≈ ${money(l.est_out_usd)??'—'}`))}
   else if(off||!l){est.classList.add('muted');est.append(el('span','amt','—'))}
-  else{est.append(el('span','amt',`≈ ${amount(l.est_out)??'—'}`),el('span','usd',money(l.est_out_usd)??'—'))}
+  else{const e=ests.rows[i];const a=el('span','amt',`≈ ${e?.amt??'—'}`),u=el('span','usd',e?.usd??'—');est.append(a,u);ui.est[i]={amt:a,usd:u}}
   li.append(est);
   if(!skeet&&Number.isInteger(parts[i])){
    const s=el('div','stepper');s.setAttribute('role','group');s.setAttribute('aria-label',`${sym} parts`);
@@ -1529,8 +1637,9 @@ function renderBasket(p){
  }
  const t=p.totals||{};const totals=mark(el('p','totals'),'totals');if(amountDraft!==null||draft)totals.classList.add('stale');
  const spend=el('span',null,`${skeet?'Sell':'Spend'} ${amountDraft!==null?usdFmt.format(Number(amountDraft)):money(t.in_usd)??'—'}`);
- totals.append(spend,el('span',null,`Get ≈ ${money(t.out_usd)??'—'}`),el('span',(p.warnings||[]).includes('COST_HIGH')?'cost high':'cost',`Cost ${pct(t.cost_pct)??'—'}`));
- ui.spend=spend;ui.totals=totals;card.append(totals);
+ const get=el('span',null,`Get ≈ ${(skeet?money(t.out_usd):ests.get)??'—'}`);
+ totals.append(spend,get,el('span',(p.warnings||[]).includes('COST_HIGH')?'cost high':'cost',`Cost ${pct(t.cost_pct)??'—'}`));
+ ui.spend=spend;ui.get=get;ui.totals=totals;card.append(totals);
  const warns=(Array.isArray(p.warnings)?p.warnings:[]).filter(w=>Object.hasOwn(WARN,w)&&w!=='COST_HIGH');
  if(warns.length){const box=mark(el('div','chips'),'warns');for(const w of warns)box.append(el('span','chip plain',WARN[w]));card.append(box)}
  if(hold){const box=mark(el('div','inline-error'),'hold');box.setAttribute('role','alert');box.dataset.role='hold';box.append(el('strong',null,hold.title),el('span',null,hold.text));card.append(box)}
@@ -1636,7 +1745,7 @@ function renderHome(h){
  if(fund)card.append(fundButton(fund));
  let panel=null;
  if(h.xp&&Number.isInteger(h.xp.total)&&canWheel()&&(spinWon||spinBusy||(h.xp.spin_available&&canCall())))panel=spinPanel(h);
- if(panel)card.append(panel);else if(spinWon)card.append(xpChip(`+${spinWon.xp_won} XP from today’s spin`));
+ if(panel){card.classList.add('wheel-card');card.append(panel)}else if(spinWon)card.append(xpChip(`+${spinWon.xp_won} XP from today’s spin`));
  if(h.xp&&h.xp.spin_available===false&&!spinWon&&canCall())recallSpin();
  const wins=(Array.isArray(h.recent_wins)?h.recent_wins:[]).filter(w=>safeSymbol(w?.symbol)&&typeof w.pct==='number').slice(0,3);
  if(wins.length){const box=mark(el('div','chips'),'wins');for(const w of wins){const c=el('span',`chip ${w.pct>=0?'up':'down'}`);c.append(coinChip(w.symbol,'mini'),document.createTextNode(`${w.symbol} ${w.pct>=0?'+':'−'}${pct(Math.abs(w.pct))}`));box.append(c)}card.append(box)}
@@ -1647,7 +1756,7 @@ function renderHome(h){
 function renderSpin(s){
  const card=el('section','card home');
  const panel=canWheel()?spinPanel(null):null;
- if(panel)card.append(panel);
+ if(panel){card.classList.add('wheel-card');card.append(panel)}
  else{card.append(head('Daily spin',null,'spin'),el('p','big',`+${s.xp_won} XP`));const next=clock(s.next_spin_at);if(next)card.append(el('p','fine',`Next spin after ${next}`))}
  card.append(el('p','note',`${s.total.toLocaleString('en-US')} XP total · ${s.streak_days}-day streak`));
  return card;
@@ -1709,7 +1818,7 @@ function renderError(d,proposal_id){
 }
 // ---- Render: every card enters with an animation, changed parts tick, and what leaves fades out ------------------
 const clockS=()=>(((window.performance?.now?.()??0)/1000)%3600).toFixed(2);
-const STARS=[[64,22,9,5.2,-1.4,'#FFFFFF'],[72,64,6,4.4,-3.1,'#FFE03A'],[56,10,5,6.1,-.6,'#FFFFFF'],[68,84,7,5.6,-4.2,'#FFFFFF']];
+const STARS=[[14,50,9,5.2,-1.4,'#FFFFFF'],[46,45,7,4.4,-3.1,'#FFE03A'],[70,55,8,6.1,-.6,'#FFFFFF'],[92,48,7,5.6,-4.2,'#FFFFFF']];
 /** Adds the card's trim (stars, the light on the top edge) and numbers its parts for the staggered entrance. */
 function dress(card){
  const stars=el('div','stars');stars.setAttribute('aria-hidden','true');
@@ -1756,7 +1865,7 @@ function render(){
  const ghosts=[...root.children].filter(c=>c.classList.contains('ghost'));
  const moving=!REDUCED&&!!old&&old.getBoundingClientRect().height>0;
  const keys=new Map([...node.querySelectorAll('[data-k]')].map(n=>[n.dataset.k,n.textContent]));
- root.style.setProperty('--clk',clockS());
+ signWords(node);root.style.setProperty('--clk',clockS());
  if(node.matches('.card'))dress(node);
  if(kind!==lastKind){
   node.classList.add('enter');
@@ -1767,6 +1876,7 @@ function render(){
  }
  lastKind=kind;prevKeys=keys;
  root.replaceChildren(node,...ghosts);reportHeight();
+ if(wheel&&wheelBox?.isConnected)wheel.relayout();
  if(shareOpen&&moving){const p=node.querySelector('.share-panel');p?.scrollIntoView?.({block:'nearest',behavior:'smooth'})}
 }
 

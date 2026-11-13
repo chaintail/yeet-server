@@ -8,6 +8,7 @@ import { PrivyProvider, usePrivy, useFundWallet } from "@privy-io/react-auth";
 import { embeddedWallets, privyConfig } from "./privy-app.jsx";
 import { DEFAULT_AMOUNT, baseUsdcReader, formatUsdc, fundOptions, validAmount } from "./fund-balance.js";
 import { Swap } from "./screen.jsx";
+import { words } from "./brand-words.jsx";
 
 const SIGN_IN = "/account/login?next=fund";
 
@@ -38,9 +39,9 @@ function Fund({ reader }) {
   return (
     <Swap id={screen}>
       {screen === "loading" ? (
-        <p role="status">Loading your YEET wallet…</p>
+        <p role="status">{words("Loading your YEET wallet…")}</p>
       ) : screen === "waiting" ? (
-        <p role="status">Your YEET wallets are still being set up. Reload this page in a moment.</p>
+        <p role="status">{words("Your YEET wallets are still being set up. Reload this page in a moment.")}</p>
       ) : (
         <FundWallet reader={reader} address={address} />
       )}
@@ -100,7 +101,7 @@ function FundWallet({ reader, address }) {
 
   return (
     <>
-      <p className="lead">Add USDC on Base to your YEET wallet. YEET trades from this balance.</p>
+      <p className="lead">{words("Add USDC on Base to your YEET wallet. YEET trades from this balance.")}</p>
       <dl className="balance">
         <dt>Balance</dt>
         <dd className={balance.status === "ready" ? undefined : "quiet"}>
@@ -123,8 +124,8 @@ function FundWallet({ reader, address }) {
         {busy ? "Adding funds…" : "Add funds"}
       </button>
       <p className="hint fund-ways">Pay by card, Apple Pay or Google Pay through Coinbase, where your device and region support it.</p>
-      <p role="status" className={message ? "saved" : undefined}>{message}</p>
-      <label htmlFor="fund-address">Or send USDC on Base to your YEET wallet</label>
+      <p role="status" className={message ? "saved" : undefined}>{words(message)}</p>
+      <label htmlFor="fund-address">{words("Or send USDC on Base to your YEET wallet")}</label>
       <div className="row">
         <input id="fund-address" readOnly value={address} onFocus={(e) => e.target.select()} />
         <button type="button" className="secondary" onClick={copy}>

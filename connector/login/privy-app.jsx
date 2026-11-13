@@ -1,6 +1,7 @@
 // Shared by the sign-in page (src.jsx) and the fund page (fund.jsx): one Privy configuration for both.
 import React from "react";
 import { LOGIN_METHODS } from "./login-methods.js";
+import { words } from "./brand-words.jsx";
 
 // Every way to sign in (email, Google, Apple, X, Telegram), as PrivyClientConfig.loginMethods names them (3.47.0
 // types). The sign-in page shows only the ones the Privy app has on; see login-methods.js. No wallet sign-in.
@@ -13,7 +14,7 @@ export function privyConfig() {
   return {
     scriptNonce: document.querySelector('meta[property="csp-nonce"]')?.content,
     appearance: {
-      logo: <strong>YEET</strong>,
+      logo: <strong>{words("YEET")}</strong>,
       theme: "dark",
       accentColor: "#FFE03A",
       walletList: [],

@@ -243,16 +243,17 @@ export async function buildYeetPlan(input, deps) {
         if (seen.has(token.assetId))
             throw new PlanValidationError(`legs[${i}].symbol`, `${token.symbol} appears twice`);
         seen.add(token.assetId);
-        return { token, parts: l.parts };
+        return { token, parts: l.parts, index: i };
     });
     // A coin at 0 parts is left out of the trade; the rest split the USDC by parts / sum(parts).
     const resolved = all.filter((l) => l.parts > 0);
     if (resolved.length === 0)
         throw new PlanValidationError("legs", "at least one coin needs 1 or more parts");
     const shares = splitByParts(total, resolved.map((l) => l.parts));
+    // Name the leg as the caller sent it, 0-part coins included, so the index matches their input.
     shares.forEach((s, i) => {
         if (s <= 0n)
-            throw new PlanValidationError(`legs[${i}]`, "amount too small to split");
+            throw new PlanValidationError(`legs[${resolved[i].index}]`, "amount too small to split");
     });
     const legs = resolved.map((l, i) => ({
         symbol: l.token.symbol,

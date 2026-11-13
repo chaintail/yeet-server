@@ -21,6 +21,7 @@ import {
   setupErrorReport,
 } from "./wallet-setup.js";
 import { SetupProgress } from "./setup-screen.jsx";
+import { words } from "./brand-words.jsx";
 import { Swap } from "./screen.jsx";
 
 // How long the page keeps asking the Privy client for the app configuration after Privy reports ready.
@@ -55,7 +56,7 @@ function EndSession() {
       >
         Sign out
       </button>
-      <p role="status">{error}</p>
+      <p role="status">{words(error)}</p>
     </>
   );
 }
@@ -163,7 +164,7 @@ function ChooseMethod({ methods }) {
 
   const notice = (
     <p role="alert" className={error ? "notice" : undefined}>
-      {error}
+      {words(error)}
     </p>
   );
   return (
@@ -206,7 +207,7 @@ function ChooseMethod({ methods }) {
         </>
       ) : (
         <>
-          <p>{introLine(methods)}</p>
+          <p>{words(introLine(methods))}</p>
           {emailOn ? (
             <>
               <label htmlFor="yeet-email">Email</label>
@@ -379,7 +380,7 @@ function FinishSignIn({ config }) {
   if (setup)
     return (
       <>
-        <p>You are signed in. YEET sets up your wallets on Base and Solana, then you go back to ChatGPT.</p>
+        <p>{words("You are signed in. YEET sets up your wallets on Base and Solana, then you go back to ChatGPT.")}</p>
         <SetupProgress step={step} done={done} slow={slow} failed={setupFailed} message={failMessage} onRetry={retry} />
         <button type="button" className="secondary" onClick={logout}>
           Use another account
@@ -389,15 +390,15 @@ function FinishSignIn({ config }) {
 
   return (
     <>
-      <p>You are signed in. YEET sets up your wallets on Base and Solana, then you go back to ChatGPT.</p>
+      <p>{words("You are signed in. YEET sets up your wallets on Base and Solana, then you go back to ChatGPT.")}</p>
       <button type="button" disabled={!ready || busy} onClick={continueLogin}>
-        {busy ? "Setting up…" : setupFailed ? "Try again" : "Continue to YEET"}
+        {busy ? "Setting up…" : setupFailed ? "Try again" : words("Continue to YEET")}
       </button>
       <button type="button" className="secondary" disabled={busy} onClick={logout}>
         Use another account
       </button>
       <p role="alert" className={error ? "notice" : undefined}>
-        {error}
+        {words(error)}
       </p>
     </>
   );
@@ -417,7 +418,7 @@ function SignIn({ config }) {
       ) : screen === "finish" ? (
         <FinishSignIn config={config} />
       ) : screen === "none" ? (
-        <p role="status">{NO_METHOD_LINE}</p>
+        <p role="status">{words(NO_METHOD_LINE)}</p>
       ) : (
         <ChooseMethod methods={methods} />
       )}
