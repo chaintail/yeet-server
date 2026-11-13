@@ -29,8 +29,9 @@ Server side: `connector/core/xp/spin.mjs` (wheel, coin draw), `connector/core/xp
   latest spin again and adds nothing.
 - Grants live in `xp_spin_grant`, unique per (account, reason, unique_ref), so one cause can never grant twice.
   Reasons: `streak_milestone` (unique_ref = the day) and `trade_bonus` (reserved, no caller yet).
-- Internal API for a future caller: `xpRuntime().grantSpin(account, day, reason, uniqueRef)` returns
-  `{id, granted}` (`granted: false` when that cause already granted). Nothing in trade code calls it today.
+- Internal API: `xpRuntime().grantSpin(account, day, reason, uniqueRef)` returns `{id, granted}` (`granted: false`
+  when that cause already granted). Its trade caller is the lucky wheel's claim (`trade_bonus`, unique_ref = the
+  lucky_id), below.
 
 ## daily_spin result
 
@@ -99,6 +100,33 @@ state). With a spin left, calling `daily_spin` again uses it: the card should on
   "sets_completed": 0
 }
 ```
+
+`xp.wheel` (`[{coin, xp}]`, the daily_spin `wheel` shape) is the wheel the next `daily_spin` call returns today: the
+daily spin's while it is unused, else the oldest open extra spin's, else (nothing left) the day's latest spin. The
+landing slice is not marked. Left out when the spin is not configured (`spin.mjs` `nextWheel`).
+
+## Lucky wheel
+
+Server side: `connector/core/xp/lucky.mjs`, `connector/core/xp/availability.mjs`, routes in `core/core.mjs`.
+
+- `lucky_wheel` (model and card, `home`, `{}`) and `lucky_spin` (card only, `{lucky_id}`) both answer
+  `{"lucky": {"lucky_id", "wheel": [{"coin"}] x5, "slice": null|int, "amount_usdc": "5", "claimed", "expires_at"}}`.
+- One lucky wheel per account per UTC day: `lucky_id = l_` + 24 hex of HMAC(secret, `account|day|lucky-id`), stored
+  with its coins on the first `lucky_wheel` of the day. `expires_at` is the next 00:00 UTC.
+- The five coins: the catalog's meme coins (not SOL, not USDC), ranked per UTC day by HMAC(secret, `day|hot|coin`),
+  the same ranking for every account, keeping only coins 1Click quotes now, the first five. Availability is a dry
+  1Click quote of 5 USDC into the coin (nothing moves), cached 5 minutes per coin; the catalog has no availability
+  field. Fewer than 2 tradeable coins: `TEMPORARILY_UNAVAILABLE`.
+- `lucky_spin`: slice = HMAC(secret, `account|day|lucky`) mod the wheel size, stored once; a repeat returns it. Only
+  the owner (anyone else: `INVALID_ARGUMENT`), only on the wheel's day (a spun wheel still reads back later).
+- `yeet_propose.lucky_id` (optional): must be the caller's own wheel, spun, from today, else `INVALID_ARGUMENT`. The
+  proposal is linked to it; lucky_id is part of the request hash (same request_id, other lucky_id: another payload).
+- Claim, decided at settlement (the tracker's settle event, and again on every `trade_status` read): a YEET whose leg
+  into the landed coin is `SUCCESS` with `amount_in >= 5` USDC. A basket counts on that leg alone (other legs do not
+  add to it). Refunded, failed or open legs, another coin, a SKEET: nothing. The claim runs once, in one transaction:
+  `claimed` becomes true, `grantSpin(account, settle day, 'trade_bonus', lucky_id)`, and one stamp of the landed coin
+  (stamp key = lucky_id; it is not a spin, so `daily_spin` repeats skip it). The bonus spin is an ordinary extra
+  `daily_spin` with its own XP and stamp.
 
 ## Text the model reads (daily_spin content)
 

@@ -65,7 +65,7 @@ export function wheelFor(secret,who,day,coins,coin,draw_xp,table=BONUS_TABLE){
 
 export const nextSpinAt=day=>`${addDays(day,1)}T00:00:00.000Z`;
 
-/** Why an extra spin was granted. trade_bonus is reserved for a future caller of grantSpin (no trade code calls it). */
+/** Why an extra spin was granted. trade_bonus: the lucky wheel's claim (lucky.mjs; unique_ref = the lucky_id). */
 export const SPIN_GRANT_REASONS=Object.freeze(['streak_milestone','trade_bonus']);
 /** A grant's id is derived from its cause, so the same cause always names the same grant (and the same draws). */
 export const grantId=(who,day,reason,ref)=>'g_'+createHash('sha256').update(JSON.stringify(['yeet-spin-grant',who,day,reason,String(ref)])).digest('hex').slice(0,24);
@@ -129,6 +129,27 @@ export function createSpin({ledger,secret,coins}){
    if(!ready())return null;
    const day=dayOf(at);
    return nextStreakMilestone(todays(who,day)?streakDays(db,who,day):runEndingOn(db,who,addDays(day,-1)));
+  },
+  /**
+   * yeet_home's xp.wheel: the [{coin, xp}] the next daily_spin call returns today, so the card can draw the slices
+   * before the spin. The landing slice is not revealed. Same order of choice as spin(): today's daily spin if unused,
+   * else the oldest unused extra spin, else (nothing left) the day's latest spin again. Null without a spin.
+   */
+  nextWheel(who,at=ledger.iso()){
+   if(!ready())return null;
+   const day=dayOf(at);
+   const of=(key,coin)=>{
+    const seedDay=key===day?day:`${day}|${key}`;
+    const draw=roll(secret,key===day?`${who}|${day}`:`${who}|${day}|${key}`);
+    return wheelFor(secret,who,seedDay,stamps.coins,coin??rollCoin(secret,who,seedDay,stamps.coins),draw).wheel;
+   };
+   if(!todays(who,day))return of(day);
+   const daily=stamps.forSpin(who,day);
+   if(!daily)return of(day);
+   const grant=openGrants(who,day)[0];
+   if(grant)return of(grant.id);
+   const last=stamps.lastOn(who,day)??daily;
+   return of(last.spin_key,last.coin);
   },
   /** Whether `who` can still spin today (the daily spin or an extra one). */
   available(who,at=ledger.iso()){return left(who,dayOf(at)).spins_available>0},

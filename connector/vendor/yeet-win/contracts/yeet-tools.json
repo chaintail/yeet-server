@@ -527,6 +527,88 @@
       ],
       "additionalProperties": false,
       "description": "BUY caps of the person's XP tier, per trade and per UTC day. Sells are never capped."
+    },
+    "wheel_slice": {
+      "type": "object",
+      "description": "One wheel slice: a tradable coin and the bonus XP value shown on it (base_xp is paid on top).",
+      "properties": {
+        "coin": {
+          "$ref": "#/$defs/symbol"
+        },
+        "xp": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        }
+      },
+      "required": [
+        "coin",
+        "xp"
+      ],
+      "additionalProperties": false
+    },
+    "lucky_id": {
+      "type": "string",
+      "pattern": "^l_[a-z0-9]{8,40}$",
+      "description": "Id of one lucky wheel (one per account and UTC day)."
+    },
+    "lucky": {
+      "type": "object",
+      "description": "The lucky wheel: the server’s hottest coins today; YEET amount_usdc into the landed coin for one bonus daily spin and a stamp of that coin.",
+      "properties": {
+        "lucky_id": {
+          "$ref": "#/$defs/lucky_id"
+        },
+        "wheel": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "coin": {
+                "$ref": "#/$defs/symbol"
+              }
+            },
+            "required": [
+              "coin"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 2,
+          "maxItems": 8
+        },
+        "slice": {
+          "description": "Index into wheel where the spin landed; null before the spin.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 7
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "amount_usdc": {
+          "$ref": "#/$defs/usdc"
+        },
+        "claimed": {
+          "type": "boolean",
+          "description": "True once a settled YEET of at least amount_usdc into the landed coin granted the bonus spin."
+        },
+        "expires_at": {
+          "$ref": "#/$defs/time"
+        }
+      },
+      "required": [
+        "lucky_id",
+        "wheel",
+        "slice",
+        "amount_usdc",
+        "claimed",
+        "expires_at"
+      ],
+      "additionalProperties": false
     }
   },
   "tools": {
@@ -639,6 +721,15 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "wheel": {
+                    "description": "The slices the next daily_spin returns today, before the spin (the landing slice is not marked).",
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/wheel_slice"
+                    },
+                    "minItems": 1,
+                    "maxItems": 26
                   }
                 },
                 "required": [
@@ -834,6 +925,10 @@
             "minimum": 50,
             "maximum": 300,
             "description": "Optional slippage in basis points."
+          },
+          "lucky_id": {
+            "$ref": "#/$defs/lucky_id",
+            "description": "Optional: the lucky wheel this YEET is for (the card sets it)."
           }
         },
         "required": [
@@ -1774,6 +1869,85 @@
         "TEMPORARILY_UNAVAILABLE",
         "USERNAME_TAKEN",
         "USERNAME_NOT_ALLOWED"
+      ]
+    },
+    "lucky_wheel": {
+      "priority": "P2",
+      "title": "Lucky wheel",
+      "description": "Shows today's lucky wheel card: up to five randomly picked coins and the YEET offer for the coin it lands on.",
+      "inputSchema": {
+        "$ref": "#/$defs/empty"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "lucky": {
+            "$ref": "#/$defs/lucky"
+          }
+        },
+        "required": [
+          "lucky"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "scope": "yeet:read",
+      "card": "home",
+      "visible": true,
+      "widgetAccessible": true,
+      "errors": [
+        "INVALID_ARGUMENT",
+        "REAUTH_REQUIRED",
+        "TEMPORARILY_UNAVAILABLE"
+      ]
+    },
+    "lucky_spin": {
+      "priority": "P2",
+      "title": "Spin the lucky wheel",
+      "description": "Spin today’s lucky wheel. Only the card calls this; one spin per wheel, and a repeat returns the same coin.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "lucky_id": {
+            "$ref": "#/$defs/lucky_id"
+          }
+        },
+        "required": [
+          "lucky_id"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "lucky": {
+            "$ref": "#/$defs/lucky"
+          }
+        },
+        "required": [
+          "lucky"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "scope": "yeet:write",
+      "card": "home",
+      "visible": false,
+      "widgetAccessible": true,
+      "errors": [
+        "INVALID_ARGUMENT",
+        "REAUTH_REQUIRED",
+        "TEMPORARILY_UNAVAILABLE"
       ]
     }
   },

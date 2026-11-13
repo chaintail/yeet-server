@@ -11,6 +11,7 @@ import {streakDays} from './streak.mjs';
 import {createSpin,BONUS_TABLE,STREAK_BONUS} from './spin.mjs';
 import {assertSpinTable} from '../../vendor/yeet-win/router/dist/src/spin-table.js';
 import {leaderboard} from './board.mjs';
+import {createLucky} from './lucky.mjs';
 
 export const p2On=(env=process.env)=>env.YEET_P2==='1';
 const FINAL_LEG=new Set(['SUCCESS','REFUNDED','FAILED']);
@@ -27,13 +28,14 @@ export const serverSpinTable=()=>({base_xp:DEFAULT_RULES.find(r=>r.rule_id==='da
 /** Throws unless the server table matches the contract's x-yeet-spin (values, order, weights summing to 100). */
 export const checkSpinTable=(spec,table=serverSpinTable())=>assertSpinTable(table,spec);
 
-export function openXp({file=':memory:',secret,now=Date.now,coins}={}){
+export function openXp({file=':memory:',secret,now=Date.now,coins,luckyCoins}={}){
  const ledger=openLedger(file,{now});
  const db=ledger.db;
  db.exec(`CREATE TABLE IF NOT EXISTS xp_trade(
    trade_id TEXT PRIMARY KEY, account_id TEXT NOT NULL, direction TEXT NOT NULL, status TEXT NOT NULL,
    points INTEGER NOT NULL, settled_at TEXT NOT NULL);`);
  const spin=createSpin({ledger,secret,coins});
+ const lucky=createLucky({ledger,secret,spin,...(luckyCoins?{coins:luckyCoins}:{})});
  const tradeRow=id=>db.prepare('SELECT * FROM xp_trade WHERE trade_id=?').get(id);
 
  /** Records a settled trade and pays its XP; a second call for the same trade returns the first result. */
@@ -75,20 +77,23 @@ export function openXp({file=':memory:',secret,now=Date.now,coins}={}){
   /** The XP summary behind yeet_home's xp block (homeXp cuts it to the contract). next_streak_milestone: {days, xp} of
    * the next streak length that pays a bonus, or null when the spin is off. stamps: every coin's stamp card (catalog
    * order, zero counts included); sets_completed: cards filled so far; spins_available: spins left today (daily +
-   * unused extra spins); extra_spin_reason: why the next extra spin was granted, or null (docs/WHEEL-STAMPS.md). */
+   * unused extra spins); extra_spin_reason: why the next extra spin was granted, or null; wheel: the [{coin, xp}] the
+   * next daily_spin returns (spin.mjs nextWheel; left out without a spin) (docs/WHEEL-STAMPS.md). */
   summary(who){
    const at=ledger.iso();
    return {total:ledger.total(who),streak_days:streakDays(db,who,dayOf(at)),spin_available:spin.available(who,at),
     next_streak_milestone:spin.nextMilestone(who,at),...spin.left(who,at),stamps:spin.stamps.list(who),
-    sets_completed:spin.stamps.setsCompleted(who)};
+    sets_completed:spin.stamps.setsCompleted(who),...(wheel=>wheel?{wheel}:{})(spin.nextWheel(who,at))};
   },
+  /** The lucky wheel (lucky.mjs): wheel(who, available), spin(who, id), check, link, linked, settle. */
+  lucky,
   /** yeet_home's recent_wins. The contract asks for {symbol, pct}; the stored data has what a leg paid and received
    * but no later price, so no gain since the buy can be stated truthfully. An empty list until a price history exists. */
   recentWins:()=>[],
   /** The account's XP total (trade caps by tier, trade/limits.mjs). */
   total:who=>ledger.total(who),
   doSpin:who=>spin.spin(who),
-  /** Internal: one extra spin for `who` on `day` (spin.mjs grantSpin). Kept for a future trade bonus; no caller yet. */
+  /** Internal: one extra spin for `who` on `day` (spin.mjs grantSpin). The lucky wheel's claim calls spin.grantSpin. */
   grantSpin:(who,day,reason,uniqueRef)=>spin.grantSpin(who,day,reason,uniqueRef),
   /** names(accountId): the name a row shows; the default name when left out. */
   board:(kind,who,names)=>leaderboard(db,{kind,me:who,at:now(),...(names?{names}:{})}),

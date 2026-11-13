@@ -209,12 +209,16 @@ test('home summary: total, streak and spin availability; recent wins stay empty'
  const now=clock();const xp=openXp({secret:SECRET,now});
  const next={days:3,xp:STREAK_BONUS};
  const empty=xp.spin.stamps.coins.map(coin=>({coin,count:0,slots:7,card:1,progress:0,complete:false}));
- assert.deepEqual(xp.summary('a'),{total:0,streak_days:0,spin_available:true,next_streak_milestone:next,spins_available:1,extra_spin_reason:null,stamps:empty,sets_completed:0});
+ // wheel: the slices the next spin returns, known before the spin.
+ const wheel=xp.summary('a').wheel;
+ assert.equal(wheel.length,xp.spin.stamps.coins.length);
+ assert.deepEqual(xp.summary('a'),{total:0,streak_days:0,spin_available:true,next_streak_milestone:next,spins_available:1,extra_spin_reason:null,stamps:empty,sets_completed:0,wheel});
  xp.signIn('a');xp.signIn('a');
- assert.deepEqual(xp.summary('a'),{total:5,streak_days:1,spin_available:true,next_streak_milestone:next,spins_available:1,extra_spin_reason:null,stamps:empty,sets_completed:0});
+ assert.deepEqual(xp.summary('a'),{total:5,streak_days:1,spin_available:true,next_streak_milestone:next,spins_available:1,extra_spin_reason:null,stamps:empty,sets_completed:0,wheel});
  const s=xp.doSpin('a');
+ assert.deepEqual(s.wheel,wheel,'the home wheel is the wheel the spin returned');
  const after=empty.map(c=>c.coin===s.stamp.coin?{...c,count:1,progress:1}:c);
- assert.deepEqual(xp.summary('a'),{total:5+s.xp_won,streak_days:1,spin_available:false,next_streak_milestone:next,spins_available:0,extra_spin_reason:null,stamps:after,sets_completed:0});
+ assert.deepEqual(xp.summary('a'),{total:5+s.xp_won,streak_days:1,spin_available:false,next_streak_milestone:next,spins_available:0,extra_spin_reason:null,stamps:after,sets_completed:0,wheel:s.wheel});
  assert.deepEqual(xp.recentWins(),[]);
 });
 
@@ -268,8 +272,9 @@ test('next_streak_milestone: today’s spin still counts until it happens; homeX
  // The pinned contract lists next_streak_milestone in yeet_home.xp, so the home block carries it unchanged and parses.
  const summary=xp.summary('a');
  const HOME_XP_KEYS=homeXpKeys(toolSchemas.yeet_home.output);
- assert.deepEqual(HOME_XP_KEYS,['total','streak_days','spin_available','next_streak_milestone']);
+ assert.deepEqual(HOME_XP_KEYS,['total','streak_days','spin_available','next_streak_milestone','wheel']);
  const {stamps:_s,sets_completed:_n,spins_available:_a,extra_spin_reason:_r,...listed}=summary;const block=homeXp(summary,HOME_XP_KEYS);
+ assert.ok(Array.isArray(block.wheel)&&block.wheel.length>0,'xp.wheel passes the contract cut');
  assert.deepEqual(block,listed);
  const xpSchema=zodSchema(z,toolSchemas.yeet_home.output.properties.xp);
  assert.equal(xpSchema.safeParse(block).success,true);

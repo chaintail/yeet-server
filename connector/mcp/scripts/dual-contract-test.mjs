@@ -5,8 +5,8 @@ import {toolSchemas,zodSchema,contract} from '../tool-contract.mjs';
 import {toolError} from '../errors.mjs';
 import {instructions,descriptions,titles} from '../instructions.mjs';
 import {allScopes} from '#scope-catalog';
-const ALL=['yeet_home','yeet_coins','yeet_propose','yeet_quote','execute_trade','submit_trade_signature','trade_status','yeet_portfolio','skeet_propose','yeet_leaderboard','daily_spin','yeet_set_username'];
-test('every published schema has a top-level object, resolved references, strict input; the twelve contract tools',()=>{
+const ALL=['yeet_home','yeet_coins','yeet_propose','yeet_quote','execute_trade','submit_trade_signature','trade_status','yeet_portfolio','skeet_propose','yeet_leaderboard','daily_spin','yeet_set_username','lucky_wheel','lucky_spin'];
+test('every published schema has a top-level object, resolved references, strict input; the fourteen contract tools',()=>{
  assert.deepEqual(Object.keys(toolSchemas),ALL);
  for(const schema of Object.values(toolSchemas)){
   assert.equal(schema.output.type,'object');assert.doesNotMatch(JSON.stringify(schema),/\$ref/);assert.equal(schema.input.additionalProperties,false);
@@ -24,6 +24,15 @@ test('shared pieces follow plan 2.1',()=>{
  assert.doesNotThrow(()=>input.parse({request_id:'r',amount_usdc:'20',legs:[{symbol:'WIF',parts:10}]}));
  assert.throws(()=>input.parse({request_id:'r',amount_usdc:'20',legs:[]}));
  assert.throws(()=>input.parse({request_id:'r',amount_usdc:'20',legs:[{symbol:'WIF',parts:10}],slippage_bps:400}));
+ // The lucky wheel: yeet_propose takes an optional lucky_id; the lucky object is closed.
+ assert.doesNotThrow(()=>input.parse({request_id:'r',amount_usdc:'5',legs:[{symbol:'WIF',parts:1}],lucky_id:'l_7k2m9q4x8v1b'}));
+ assert.throws(()=>input.parse({request_id:'r',amount_usdc:'5',legs:[{symbol:'WIF',parts:1}],lucky_id:'L_bad'}));
+ const lucky=zodSchema(z,toolSchemas.lucky_wheel.output);
+ const spec={lucky:{lucky_id:'l_7k2m9q4x8v1b',wheel:[{coin:'WIF'},{coin:'BOME'},{coin:'PENGU'},{coin:'TRUMP'},{coin:'NEARKAT'}],slice:null,amount_usdc:'5',claimed:false,expires_at:'2026-11-14T00:00:00Z'}};
+ assert.doesNotThrow(()=>lucky.parse(spec),'the WHEEL-CARD.md example parses');
+ assert.doesNotThrow(()=>zodSchema(z,toolSchemas.lucky_spin.output).parse({lucky:{...spec.lucky,slice:2}}));
+ assert.throws(()=>lucky.parse({lucky:{...spec.lucky,wheel:[{coin:'WIF'}]}}),'at least 2 coins');
+ assert.throws(()=>lucky.parse({lucky:{...spec.lucky,extra:1}}));
  const exec=zodSchema(z,toolSchemas.execute_trade.input);
  assert.doesNotThrow(()=>exec.parse({proposal_id:'p_abcdefghij0123456789',revision:1,confirm:'A'.repeat(43)}));
  assert.throws(()=>exec.parse({proposal_id:'p_abcdefghij0123456789',revision:1,confirm:'A'.repeat(42)}));

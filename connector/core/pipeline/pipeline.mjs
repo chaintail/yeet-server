@@ -322,7 +322,11 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
  const solUsdc=async owner=>{const m=usdcOn('sol',catalog)?.address;return (await wallets.holdings(owner)).filter(h=>h.mint===m).reduce((a,h)=>a+h.raw,0n)};
 
  return {
-  limits,wallets,proposals,tracker,codes,ledger,drivers,buyChain,sellChain,
+  limits,wallets,proposals,tracker,codes,ledger,drivers,buyChain,sellChain,catalog,
+  /** The 1Click client (dry quotes for the lucky wheel's coin availability, core/xp/availability.mjs). */
+  client,
+  /** The proposal a trade of the account came from (the lucky wheel's claim, core.mjs). */
+  proposalOf:(ctx,id)=>owned(ctx,id).proposal_id,
   execute,submit,cancel,landings:()=>Promise.allSettled([...watches]),signRequests:async(ctx,id)=>signRequests(owned(ctx,id)),recoverTrade,
   /** The first-party signing page: the trade's legs and its open sign requests, for the account's own trade only.
    * Recovery runs first (as a replayed code does), so a paused system, a closed sign window or a near deadline ends

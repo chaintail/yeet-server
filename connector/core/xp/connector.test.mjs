@@ -80,12 +80,17 @@ test('YEET_P2=1 end to end: home -> spin -> leaderboard, then a settled trade sh
  // Sign-in paid 5 XP once today; the spin is open; no wins are invented.
  const home=await alice.call('yeet_home');
  assert.equal(home.isError,undefined,JSON.stringify(home.content));
- assert.deepEqual(home.structuredContent.xp,{total:5,streak_days:1,spin_available:true,next_streak_milestone:{days:3,xp:25}});
+ const {wheel,...xpRest}=home.structuredContent.xp;
+ assert.deepEqual(xpRest,{total:5,streak_days:1,spin_available:true,next_streak_milestone:{days:3,xp:25}});
+ assert.ok(Array.isArray(wheel)&&wheel.length>=2&&wheel.every(w=>typeof w.coin==='string'&&Number.isInteger(w.xp)),'xp.wheel reaches the card');
  assert.deepEqual(home.structuredContent.recent_wins,[]);
 
  const spin=await alice.call('daily_spin');
  assert.equal(spin.isError,undefined,JSON.stringify(spin.content));
  const s=spin.structuredContent;
+ // daily_spin's own wheel is still cut by the pinned contract (stamps fields not listed); recompute it server side.
+ const {xpRuntime}=await import('./xp.mjs');
+ assert.deepEqual(xpRuntime().spin.spin(alice.sub).wheel,wheel,'xp.wheel before the spin is the wheel the spin used');
  assert.match(spin.content[0].text,new RegExp(`^You won ${s.xp_won} XP and a [A-Z]+ stamp \\(1 of 7\\)\\.$`));
  assert.ok(s.xp_won>=5&&s.xp_won<=5+40+25,String(s.xp_won));assert.equal(s.total,5+s.xp_won);assert.equal(s.streak_days,1);
  assert.equal(s.next_spin_at,new Date(Date.UTC(...(d=>[d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate()+1])(new Date()))).toISOString());
@@ -123,6 +128,59 @@ test('YEET_P2=1 end to end: home -> spin -> leaderboard, then a settled trade sh
   assert.deepEqual(st.structuredContent.xp_award,{points:70,total});
  }
  assert.equal((await alice.call('yeet_home')).structuredContent.xp.total,total);
+});
+
+test('lucky wheel end to end: lucky_wheel -> lucky_spin -> YEET 5 USDC into the landed coin -> settled: claimed, one bonus spin',async()=>{
+ const f=fakeRuntime();
+ configureTradeEngine(f.overrides);
+ const {xpRuntime}=await import('./xp.mjs');
+ const gus=await signIn('did:privy:lucky-gus'),hal=await signIn('did:privy:lucky-hal');
+ const err=r=>{assert.equal(r.isError,true);return JSON.parse(r.content[0].text).error};
+
+ const w=await gus.call('lucky_wheel');
+ assert.equal(w.isError,undefined,JSON.stringify(w.content));
+ const L=w.structuredContent.lucky;
+ assert.match(L.lucky_id,/^l_[a-z0-9]{8,40}$/);assert.equal(L.wheel.length,5);assert.equal(L.slice,null);assert.equal(L.claimed,false);assert.equal(L.amount_usdc,'5');
+ assert.match(w.content[0].text,/^Today's lucky wheel: [A-Z0-9, ]+\. Spin it in the card\.$/);
+ // Before the spin, a propose with the lucky_id is refused.
+ assert.equal(err(await gus.call('yeet_propose',{request_id:'lucky-early',amount_usdc:'5',legs:[{symbol:L.wheel[0].coin,parts:1}],lucky_id:L.lucky_id})),'INVALID_ARGUMENT');
+
+ const s=await gus.call('lucky_spin',{lucky_id:L.lucky_id});
+ assert.equal(s.isError,undefined,JSON.stringify(s.content));
+ const landed=s.structuredContent.lucky;assert.ok(Number.isInteger(landed.slice));
+ const coin=landed.wheel[landed.slice].coin;
+ assert.deepEqual((await gus.call('lucky_spin',{lucky_id:L.lucky_id})).structuredContent,s.structuredContent,'second lucky spin the same day: same coin');
+ assert.equal(err(await hal.call('lucky_spin',{lucky_id:L.lucky_id})),'INVALID_ARGUMENT','someone else’s wheel');
+ assert.equal(err(await hal.call('yeet_propose',{request_id:'lucky-hal',amount_usdc:'5',legs:[{symbol:coin,parts:1}],lucky_id:L.lucky_id})),'INVALID_ARGUMENT','propose with someone else’s lucky_id');
+
+ // What the card sends: {request_id, amount_usdc: lucky.amount_usdc, legs: [{symbol: <landed coin>, parts: 1}], lucky_id}.
+ const p=await gus.call('yeet_propose',{request_id:'lucky-1',amount_usdc:landed.amount_usdc,legs:[{symbol:coin,parts:1}],lucky_id:L.lucky_id});
+ assert.equal(p.isError,undefined,JSON.stringify(p.content));
+ // An idempotent retry returns the same proposal (and a fresh confirm code, which replaces the first).
+ const retry=await gus.call('yeet_propose',{request_id:'lucky-1',amount_usdc:'5',legs:[{symbol:coin,parts:1}],lucky_id:L.lucky_id});
+ assert.equal(retry.structuredContent.proposal_id,p.structuredContent.proposal_id,'idempotent retry');
+ const x=await gus.call('execute_trade',{proposal_id:p.structuredContent.proposal_id,revision:1,confirm:retry._meta['yeet/confirm'].code});
+ assert.equal(x.structuredContent?.status,'awaiting_signature',JSON.stringify(x.content));
+ for(const r of x.structuredContent.sign_requests)assert.equal((await gus.call('submit_trade_signature',{trade_id:r.trade_id,leg:r.leg,attempt_id:r.attempt_id,signed:signAs(f.wallet,r)})).isError,undefined);
+ assert.equal((await gus.call('lucky_wheel')).structuredContent.lucky.claimed,false,'not before it settles');
+ f.confirmSent();
+ const engine=await tradeEngine();await engine.tracker.pollOnce();await engine.tracker.pollOnce();await engine.tracker.pollOnce();
+ await new Promise(r=>setImmediate(r));
+ // The tracker's settle event claimed it (before any trade_status read).
+ assert.equal(xpRuntime().lucky.get(gus.sub,L.lucky_id).lucky.claimed,true);
+ const st=await gus.call('trade_status',{trade_id:x.structuredContent.trade_id});
+ assert.equal(st.structuredContent.status,'success');
+ const after=await gus.call('lucky_wheel');
+ assert.equal(after.structuredContent.lucky.claimed,true);assert.equal(after.content[0].text,'Lucky wheel claimed: your bonus spin is ready in the card.');
+ const grants=xpRuntime().ledger.db.prepare("SELECT reason,unique_ref FROM xp_spin_grant WHERE identity_id=? AND reason='trade_bonus'").all(gus.sub).map(r=>({...r}));
+ assert.deepEqual(grants,[{reason:'trade_bonus',unique_ref:L.lucky_id}],'one grant per lucky_id after settle event + trade_status');
+ assert.equal(xpRuntime().spin.stamps.list(gus.sub).find(c=>c.coin===coin).count,1,'a stamp of the landed coin');
+ // The bonus spin is an ordinary extra spin through daily_spin: the daily spin, then the bonus, then nothing left.
+ assert.equal(xpRuntime().summary(gus.sub).spins_available,2);
+ await gus.call('daily_spin');
+ assert.equal(xpRuntime().summary(gus.sub).extra_spin_reason,'trade_bonus');
+ const bonus=await gus.call('daily_spin');assert.equal(bonus.isError,undefined);
+ assert.equal(xpRuntime().summary(gus.sub).spins_available,0);
 });
 
 test('yeet_home: needs_funds carries fund_url on the public origin; a funded wallet carries none',async()=>{

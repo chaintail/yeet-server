@@ -157,11 +157,13 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
   /** SPL mint of a catalogue coin. */
   mintOf:symbol=>coin(symbol).address,
   /** yeet_propose */
-  async propose(ctx,{request_id,amount_usdc,legs,slippage_bps}){
+  async propose(ctx,{request_id,amount_usdc,legs,slippage_bps,lucky_id}){
    checkKillSwitch(limits);
    codes.checkRate(ctx.accountId);
    const slippage=slippageOf(slippage_bps);
-   const hash=sha256({direction:'yeet',amount_usdc,legs,slippage});
+   // lucky_id (the lucky wheel, core/xp/lucky.mjs) is part of the request: the same request_id with another lucky_id is
+   // another payload. Absent, the hash is the same as before (canonical drops undefined keys).
+   const hash=sha256({direction:'yeet',amount_usdc,legs,slippage,lucky_id});
    const existing=prior(ctx,request_id,hash);
    if(existing)return present(existing,existing.revision,ctx,await wallets.resolve(ctx.accountId));
    validateYeetLegs(legs);

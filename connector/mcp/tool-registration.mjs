@@ -20,6 +20,8 @@ const ROUTES={
  skeet_propose:args=>['/proposals/skeet',args],
  yeet_leaderboard:({board='xp'})=>[`/leaderboard/${board}`],
  daily_spin:()=>['/spin',{}],
+ lucky_wheel:()=>['/lucky'],
+ lucky_spin:({lucky_id})=>['/lucky/spin',{lucky_id}],
  // Registered once the pinned contract lists the tool.
  yeet_set_username:({username})=>['/username',{username}],
 };
@@ -35,7 +37,16 @@ export function spinText(r){
  * top-level properties so the closed output schema still passes; the fields flow through once the contract lists them. */
 // yeet_home and the proposals carry `limits` (XP tier caps: tier, per_trade_usdc, daily_limit_usdc, left_today_usdc).
 const CUT_TO_CONTRACT=new Set(['daily_spin','yeet_home','yeet_propose','yeet_quote','skeet_propose']);
-const TEXT={daily_spin:spinText};
+/** lucky_wheel and lucky_spin: one plain sentence for the model (the card reads structuredContent). */
+export function luckyText(r){
+ const l=r?.lucky;
+ if(!l)return "YEET luckyText.";
+ const coins=l.wheel.map(w=>w.coin).join(', ');
+ if(l.claimed)return `Lucky wheel claimed: your bonus spin is ready in the card.`;
+ if(l.slice===null)return `Today's lucky wheel: ${coins}. Spin it in the card.`;
+ return `The lucky wheel landed on ${l.wheel[l.slice].coin}: YEET ${l.amount_usdc} USDC into ${l.wheel[l.slice].coin} for a bonus spin and a ${l.wheel[l.slice].coin} stamp.`;
+}
+const TEXT={daily_spin:spinText,lucky_wheel:luckyText,lucky_spin:luckyText};
 /** P0 and P1 are always registered; P2 (leaderboard, spin) only with YEET_P2=1. */
 export const registeredTools=(env=process.env)=>Object.values(toolSpecs).filter(t=>t.priority!=='P2'||env.YEET_P2==='1');
 export const TOOLS=Object.freeze(Object.values(toolSpecs).map(t=>Object.freeze({...t,route:ROUTES[t.name]})));

@@ -6,7 +6,8 @@
 // Stamps are only written by grantIn, which spin.mjs calls inside the same transaction as the spin's xp_event row
 // (daily_spin or extra_spin), so a spin can never pay XP without its stamp, and xp_stamp_spin (one row per spin: the day
 // for the daily spin, the grant id for an extra spin) makes a replay return the stored stamp instead of adding another. A coin that later leaves the catalog keeps its stored count and is
-// still listed (after the catalog coins).
+// still listed (after the catalog coins). The lucky wheel's claim (lucky.mjs) also calls grantIn, keyed on the lucky_id,
+// in the same transaction as its spin grant.
 import {tradable} from '../coins.mjs';
 /** XP paid once per completed card (a set), on top of that day's spin; the set_completed rule's default points. */
 export {SET_COMPLETE_XP} from './ledger.mjs';
@@ -46,8 +47,9 @@ export function createStamps({ledger,coins=stampCoins()}){
   coins,
   /** The stamp one spin gave (`key`: the day for the daily spin, the grant id for an extra spin), or undefined. */
   forSpin:spinRow,
-  /** The latest stamp `who` got on `day`, or undefined. */
-  lastOn:(who,day)=>db.prepare('SELECT spin_key,coin,count_after,set_bonus_xp FROM xp_stamp_spin WHERE identity_id=? AND day=? ORDER BY ts DESC,rowid DESC LIMIT 1').get(who,day),
+  /** The latest stamp a spin gave `who` on `day`, or undefined. A lucky-wheel stamp (key `l_...`, lucky.mjs) is not a
+   * spin and is skipped. */
+  lastOn:(who,day)=>db.prepare("SELECT spin_key,coin,count_after,set_bonus_xp FROM xp_stamp_spin WHERE identity_id=? AND day=? AND spin_key NOT LIKE 'l\\_%' ESCAPE '\\' ORDER BY ts DESC,rowid DESC LIMIT 1").get(who,day),
   /** Inside the caller's transaction: one stamp of `coin` for the spin `key` on `day`, once. A repeat returns the stored row. */
   grantIn(who,key,day,coin,at){
    const prior=spinRow(who,key);

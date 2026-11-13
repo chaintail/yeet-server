@@ -9,6 +9,7 @@ import {coins} from './coins.mjs';
 import {unavailable,failure,withUserMessage} from './failure.mjs';
 import {tradeEngine,onTradeSettled} from './trade/runtime.mjs';
 import {xpRuntime,p2On,homeXp,homeXpKeys,checkSpinTable} from './xp/xp.mjs';
+import {createAvailability,quoteProbe} from './xp/availability.mjs';
 import {z} from 'zod';
 import {toolSchemas,zodSchema,contract} from '../mcp/tool-contract.mjs';
 import {homeWithFundUrl,failureWithFundUrl} from './fund-link.mjs';
@@ -21,13 +22,31 @@ if(process.env.PRIVY_LOGIN!=='1'&&!devStub)throw Error('No identity verifier con
 initializeIdentityStore({app:process.env.PRIVY_LOGIN==='1'?process.env.PRIVY_APP_ID:DEV_APP_ID});
 const user=id=>account(id);
 // XP (lane E, YEET_P2=1): trade settlement pays through the tracker's onSettled hook; read per event so the flag is live.
-onTradeSettled(e=>{if(p2On())xpRuntime().onSettled(e)});
+onTradeSettled(e=>{if(p2On()){xpRuntime().onSettled(e);luckySettled(e)}});
 /** XP never stands in the way of the answer it decorates: a failure is logged and the XP part is left out. */
 /** yeet_home's xp fields as the pinned contract lists them; the summary is cut to these. */
 const HOME_XP_KEYS=homeXpKeys(toolSchemas.yeet_home.output);
 // The card draws the wheel from the contract's x-yeet-spin; the server draws the award. Refuse to start if they differ.
 checkSpinTable(contract['x-yeet-spin']);
 const xpSafe=(what,fn,fallback)=>{try{return fn()}catch(e){console.error(JSON.stringify({event:'xp_failed',what,error:String(e?.message??e).slice(0,200)}));return fallback}};
+// Lucky wheel (xp/lucky.mjs). The claim runs from the tracker's settle event and again from every trade_status read
+// (as trade XP does), so a lost event still claims; lucky.settle claims once whatever the path.
+const luckyClaim=(engine,accountId,tradeId,view)=>{
+ const x=xpRuntime(),proposal=engine.proposalOf({accountId},tradeId);
+ if(!x.lucky.linked(proposal))return;
+ const r=x.lucky.settle(accountId,proposal,view??engine.status({accountId},tradeId));
+ if(r.fresh)console.log(JSON.stringify({event:'lucky_claimed',trade:tradeId,grant:r.grant?.id??null}));
+};
+function luckySettled(e){
+ if(e?.direction!=='yeet')return;
+ tradeEngine().then(engine=>xpSafe('lucky_settle',()=>luckyClaim(engine,e.accountId,e.tradeId)),()=>{});
+}
+// Which meme coins 1Click can quote now: dry quotes through the engine's own client, cached 5 minutes per coin.
+let availability;
+const luckyAvailable=engine=>{
+ if(availability?.client!==engine.client)availability={client:engine.client,check:createAvailability({probe:quoteProbe({client:engine.client,catalog:engine.catalog})})};
+ return availability.check.available;
+};
 const app=express();app.disable('x-powered-by');app.use(express.json({limit:'32kb'}));
 app.get('/health',(_q,r)=>r.json({ok:true}));
 // Public facts about this deployment (version.mjs); read once at start, the settings are fixed for the process.
@@ -111,6 +130,8 @@ export const ROUTE_SCOPES=Object.freeze([
  ['GET',/^\/portfolio$/,'yeet:read'],
  ['GET',/^\/leaderboard\/(xp|week)$/,'yeet:read'],
  ['POST',/^\/spin$/,'yeet:write'],
+ ['GET',/^\/lucky$/,'yeet:read'],
+ ['POST',/^\/lucky\/spin$/,'yeet:write'],
  ['POST',/^\/username$/,'yeet:write'],
 ]);
 export const routeScope=(method,path)=>ROUTE_SCOPES.find(([m,p])=>m===method&&p.test(path))?.[2]??null;
@@ -149,7 +170,17 @@ app.get('/home',trade('yeet_home',async(e,ctx)=>{
  if(!p2On())return home;
  return {...home,xp:xpSafe('home',()=>homeXp(xpRuntime().summary(ctx.accountId),HOME_XP_KEYS),null),recent_wins:xpSafe('wins',()=>xpRuntime().recentWins(),[])};
 }));
-app.post('/proposals',trade('yeet_propose',(e,ctx,a)=>e.propose(ctx,a)));
+// lucky_id (optional): the caller's own lucky wheel, spun today, else INVALID_ARGUMENT. The proposal is linked to it;
+// the bonus is decided when the trade settles (lucky.settle), since yeet_quote can still change coins and amount.
+// Without YEET_P2 the lucky tools are not registered and lucky_id is ignored.
+app.post('/proposals',trade('yeet_propose',async(e,ctx,a)=>{
+ if(a.lucky_id===undefined)return e.propose(ctx,a);
+ if(!p2On()){const {lucky_id:_,...rest}=a;return e.propose(ctx,rest)}
+ xpRuntime().lucky.check(ctx.accountId,a.lucky_id);
+ const out=await e.propose(ctx,a);
+ xpRuntime().lucky.link(ctx.accountId,a.lucky_id,out.proposal_id);
+ return out;
+}));
 app.post('/proposals/skeet',trade('skeet_propose',(e,ctx,a)=>e.skeet(ctx,a)));
 app.post('/proposals/:id/quote',trade(null,(e,ctx,_a,q)=>{const a=inputs.yeet_quote.safeParse({...q.body,proposal_id:q.params.id});if(!a.success)throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});return e.quote(ctx,a.data)}));
 app.post('/trades',trade('execute_trade',(e,ctx,a)=>e.execute(ctx,a)));
@@ -157,7 +188,9 @@ app.post('/trades',trade('execute_trade',(e,ctx,a)=>e.execute(ctx,a)));
 app.post('/trades/:id/signature',trade(null,(e,ctx,_a,q)=>{const a=inputs.submit_trade_signature.safeParse({...q.body,trade_id:q.params.id});if(!a.success)throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});return e.submit(ctx,a.data)}));
 app.get('/trades/:id',trade(null,(e,ctx,_a,q)=>{
  const view=e.status(ctx,q.params.id);
- return p2On()?{...view,xp_award:xpSafe('trade',()=>xpRuntime().tradeAward(ctx.accountId,view),null)}:view;
+ if(!p2On())return view;
+ if(view.direction==='yeet')xpSafe('lucky_status',()=>luckyClaim(e,ctx.accountId,view.trade_id,view));
+ return {...view,xp_award:xpSafe('trade',()=>xpRuntime().tradeAward(ctx.accountId,view),null)};
 }));
 app.get('/portfolio',trade('yeet_portfolio',(e,ctx)=>e.portfolio(ctx)));
 // The first-party signing page (as/sign-page.mjs, CARD-SIGNING.md section 2.5). Only the sign-in server reaches these,
@@ -184,19 +217,26 @@ app.post('/sign/trades/:id/requests',pageTrade((e,ctx,q)=>e.pageRequests(ctx,q.p
 app.post('/sign/trades/:id/signature',pageTrade((e,ctx,q)=>{const a=inputs.submit_trade_signature.safeParse({...q.body,trade_id:q.params.id});if(!a.success)throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});return e.submit(ctx,a.data)}));
 // Leaderboard and daily spin (P2): answered only with YEET_P2=1, otherwise a typed retryable failure.
 function xpRoute(tool,fn){
- return (q,r)=>{
+ return async(q,r)=>{
   if(q.role!=='mcp')return r.sendStatus(403);
   if(!p2On())return unavailable(r);
   const args=inputs[tool].safeParse(q.method==='GET'?{...q.params}:q.body??{});
   if(!args.success)return r.status(400).json(failure('INVALID_ARGUMENT'));
-  try{r.json(fn(xpRuntime(),q.subject,args.data))}
-  catch(e){console.error(JSON.stringify({event:'xp_route_failed',route:q.route?.path,error:String(e?.message??e).slice(0,200)}));unavailable(r)}
+  try{r.json(await fn(xpRuntime(),q.subject,args.data))}
+  catch(e){
+   // A typed refusal (the lucky wheel: someone else's or an expired lucky_id) is the caller's mistake, not an outage.
+   if(e?.name==='TradeError'&&e.code==='INVALID_ARGUMENT')return r.status(400).json(failure('INVALID_ARGUMENT'));
+   console.error(JSON.stringify({event:'xp_route_failed',route:q.route?.path,error:String(e?.message??e).slice(0,200)}));unavailable(r);
+  }
  };
 }
 /** The name a board shows: the username the person set, otherwise the default name. */
 export const boardName=id=>usernameOf(id)??handle(id);
 app.get('/leaderboard/:board',xpRoute('yeet_leaderboard',(x,who,a)=>x.board(a.board??'xp',who,boardName)));
 app.post('/spin',xpRoute('daily_spin',(x,who)=>x.doSpin(who)));
+// Lucky wheel (xp/lucky.mjs): today's five hot coins (only coins 1Click quotes now), then the server's slice.
+app.get('/lucky',xpRoute('lucky_wheel',async(x,who)=>x.lucky.wheel(who,luckyAvailable(await tradeEngine()))));
+app.post('/lucky/spin',xpRoute('lucky_spin',(x,who,a)=>x.lucky.spin(who,a.lucky_id)));
 // Username (username.mjs): read by the sign-in server's account page; set from that page or by yeet_set_username.
 app.get('/username',(q,r)=>{if(q.role!=='as')return r.sendStatus(403);r.json({username:usernameOf(q.subject)??null,name:boardName(q.subject)})});
 app.post('/username',(q,r)=>{
