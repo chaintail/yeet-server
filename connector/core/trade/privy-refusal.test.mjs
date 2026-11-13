@@ -164,6 +164,22 @@ test('cancel: a trade never broadcast ends failed through the guard, cap returne
  await assert.rejects(engine.cancel(bob,tradeId),e=>e.code==='INVALID_ARGUMENT','another account');
 });
 
+test('cancel waits for a recovery pass that holds the trade, then cancels (no race with the tracker tick)',async()=>{
+ let slow=false;
+ const wrap=f=>async(url,init)=>{if(slow&&String(url).includes('/v1/transactions'))await new Promise(r=>setTimeout(r,300));return f(url,init)};
+ const privy=fakePrivy({rpcFailures:[{at:0,status:'timeout',accepted:false},{at:1,status:408,body:{error:'Request timeout'}}]});
+ const {engine,db,now,oneclick}=await privyEngine(privy,{wrap});
+ const r=await exec(engine,alice,await engine.propose(alice,one));
+ noDepositSeen(oneclick);
+ now.advance(RESEND_AFTER_MS+1000);await engine.tracker.pollOnce();
+ slow=true;
+ const pass=engine.tracker.pollOnce();// holds the trade while its Privy lookup is slow
+ await new Promise(r=>setTimeout(r,50));
+ const out=await engine.cancel(alice,r.trade_id);
+ await pass;
+ assert.equal(out.cancelled,true,out.reason);assert.equal(legRows(db,r.trade_id)[0].send_status,'failed');assert.equal(spent(db),'0');
+});
+
 test('cancel refuses when Privy has a transaction under the reference, or 1Click sees a deposit, or a leg was sent; nothing changes',async()=>{
  // Privy accepted the first send (its answer was lost): the lookup finds it.
  {

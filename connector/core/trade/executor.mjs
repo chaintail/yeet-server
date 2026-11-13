@@ -35,6 +35,8 @@ export const RESEND_AFTER_MS=15_000;
 export const REKEY_AFTER_MS=60_000;
 /** At most this many keys after the first; then the leg stays `sending` (spent) and is only looked up. */
 export const MAX_KEY_GENERATION=2;
+/** How long an operator cancel waits (wall clock) for a send or recovery pass that holds the trade. */
+export const CANCEL_WAIT_MS=15_000;
 const TX_HASH=/^(0x[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{43,90})$/;
 const codeOf=e=>e instanceof TradeError?e.code:'TEMPORARILY_UNAVAILABLE';
 /** execute_trade leg status (contract enum sent|failed|not_sent): an attempted transfer that is not confirmed yet may
@@ -435,6 +437,8 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
   const t=trade(tradeId);
   if(!t||t.account_id!==ctx.accountId)refuse('INVALID_ARGUMENT','unknown trade');
   const view=extra=>({trade_id:tradeId,status:trade(tradeId).status,legs:legsOf(tradeId).map(l=>({idx:l.idx,symbol:l.symbol,send_status:l.send_status,send_attempts:l.send_attempts,tx_hash:l.tx_hash??null})),...extra});
+  // A recovery pass (every tracker tick) holds the trade for a moment: wait for it, up to CANCEL_WAIT_MS.
+  for(const until=Date.now()+CANCEL_WAIT_MS;inFlight.has(tradeId)&&Date.now()<until;)await new Promise(r=>setTimeout(r,100));
   if(inFlight.has(tradeId))return view({cancelled:false,reason:'the trade is being sent right now; try again in a minute'});
   inFlight.add(tradeId);
   try{
