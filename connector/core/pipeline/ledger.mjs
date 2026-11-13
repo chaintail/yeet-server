@@ -85,6 +85,9 @@ export function transitionLeg(db,{tradeId,idx,from,to,evidence,set={},at}){
 /** Design 1.2: sha256("yeet-attempt:" + trade_id + ":" + leg + ":" + n), hex. */
 export const attemptIdOf=(tradeId,idx,n)=>createHash('sha256').update(`yeet-attempt:${tradeId}:${idx}:${n}`).digest('hex');
 
+/** spend_hold is created by trade/db.mjs migration 7. 1Click statuses that prove nothing was deposited at the address. */
+const NO_DEPOSIT=['PENDING_DEPOSIT'];
+
 export function createLedger({db,now=Date.now,sponsorLimits=DEFAULT_SPONSORSHIP_LIMITS,log=console.log}){
  const ceilings=sponsorshipCeilings(sponsorLimits);
  const trade=id=>db.prepare('SELECT * FROM trades WHERE id=?').get(id);
@@ -105,8 +108,19 @@ export function createLedger({db,now=Date.now,sponsorLimits=DEFAULT_SPONSORSHIP_
   db.prepare('UPDATE sponsor_day SET transactions=transactions-1,lamports=lamports-? WHERE day=? AND account_id=? AND chain=?').run(s.lamports,s.day,s.account_id,'sol');
   if(s.rent_lamports>0)db.prepare('UPDATE sponsor_rent_day SET accounts=accounts-1,lamports=lamports-? WHERE day=? AND account_id=?').run(s.rent_lamports,s.day,s.account_id);
  }
- /** A BUY leg that never moved funds goes back to the daily USDC cap (inside the caller's transaction). */
- function releaseSpend(t,l){if(t.direction==='yeet')recordSpend(db,t.account_id,t.created_at,-BigInt(l.amount_in_raw))}
+ /**
+  * A BUY leg that never moved funds through the pipeline goes back to the daily USDC cap, but not yet (review finding
+  * 2): the 1Click deposit address stays live until the quote deadline, and the wallet can pay it directly. The amount
+  * is held (spend_hold) and released by releaseDue once the deadline has passed and 1Click still reports
+  * PENDING_DEPOSIT; any other status keeps it spent and raises `deposit_outside_pipeline`.
+  */
+ function releaseSpend(t,l){
+  if(t.direction!=='yeet')return;
+  let deadline;try{deadline=Date.parse(JSON.parse(l.live_quote_json).deadline)}catch{deadline=NaN}
+  if(!Number.isFinite(deadline))deadline=now();
+  db.prepare("INSERT INTO spend_hold(trade_id,idx,account_id,spent_at,amount_raw,deposit_address,deposit_memo,release_after,state,created_at) VALUES(?,?,?,?,?,?,?,?,'held',?) ON CONFLICT(trade_id,idx) DO NOTHING")
+   .run(t.id,l.idx,t.account_id,t.created_at,String(l.amount_in_raw),l.deposit_address,l.deposit_memo??null,deadline,now());
+ }
 
  return {
   attempt,send,trade,leg,
@@ -128,6 +142,15 @@ export function createLedger({db,now=Date.now,sponsorLimits=DEFAULT_SPONSORSHIP_
     const l=leg(tradeId,idx);
     if(!l||l.send_status!=='awaiting_signature')throw new TransitionRefused('leg is not awaiting a signature');
     if(db.prepare("SELECT 1 FROM client_trade WHERE trade_id=? AND leg_idx=? AND status IN('pending','signing','confirming')").get(tradeId,idx))throw new TransitionRefused('an attempt is already open');
+    // Review finding 6: one trade per account holds unsigned reservations at a time. Unsigned attempts of the
+    // account's other trades are abandoned with their fee and rent back (their legs keep awaiting a signature and get
+    // a fresh request on replay), so replaying execute_trade cannot pin the global rent budget.
+    for(const o of db.prepare("SELECT * FROM client_trade WHERE account_id=? AND trade_id<>? AND status='pending'").all(accountId,tradeId)){
+     setAttempt(o.attempt_id,'pending','abandoned',{failure_reason:'SUPERSEDED_BY_NEWER_TRADE'});
+     const s=send(o.attempt_id);
+     if(s&&s.state==='pending'){db.prepare("UPDATE sponsor_send SET state='not_submitted',updated_at=? WHERE attempt_id=?").run(now(),o.attempt_id);refund(s)}
+     recordLegEvent(db,{tradeId:o.trade_id,idx:o.leg_idx,status:leg(o.trade_id,o.leg_idx).send_status,evidence:{attempt_id:o.attempt_id,abandoned:'SUPERSEDED_BY_NEWER_TRADE'},at:now()});
+    }
     const n=(db.prepare('SELECT MAX(attempt_no) AS n FROM client_trade WHERE trade_id=? AND leg_idx=?').get(tradeId,idx).n??0)+1;
     const id=attemptIdOf(tradeId,idx,n),t=now(),day=utcDay(t);
     db.prepare(`INSERT INTO client_trade(attempt_id,trade_id,leg_idx,attempt_no,account_id,wallet,chain,kind,status,payload_json,payload_sha256,unsigned_base64,last_valid_block_height,expires_at,sponsor_exit,created_at,updated_at)
@@ -239,6 +262,26 @@ export function createLedger({db,now=Date.now,sponsorLimits=DEFAULT_SPONSORSHIP_
     releaseSpend(t,l);
     return true;
    });
+  },
+  holds:tradeId=>db.prepare('SELECT * FROM spend_hold WHERE trade_id=? ORDER BY idx').all(tradeId),
+  /** Review finding 2: held BUY amounts past their deposit deadline. `statusOf(depositAddress, memo)` is the 1Click
+   * status call; PENDING_DEPOSIT releases the amount to the daily cap, any other status keeps it spent and alerts, an
+   * error leaves the hold for the next tick. Returns {released, kept}. */
+  async releaseDue(statusOf){
+   const due=db.prepare("SELECT * FROM spend_hold WHERE state='held' AND release_after<? ORDER BY release_after LIMIT 50").all(now());
+   let released=0,kept=0;
+   for(const h of due){
+    let st;try{st=(await statusOf(h.deposit_address,h.deposit_memo??undefined))?.status}catch{continue}
+    if(typeof st!=='string')continue;
+    tx(db,()=>{
+     if(db.prepare("UPDATE spend_hold SET state=?,oneclick_status=?,resolved_at=? WHERE trade_id=? AND idx=? AND state='held'").run(NO_DEPOSIT.includes(st)?'released':'kept',st,now(),h.trade_id,h.idx).changes!==1)return;
+     if(NO_DEPOSIT.includes(st)){recordSpend(db,h.account_id,h.spent_at,-BigInt(h.amount_raw));released++}
+     else kept++;
+     recordLegEvent(db,{tradeId:h.trade_id,idx:h.idx,status:leg(h.trade_id,h.idx)?.send_status??'not_sent',evidence:{spend_hold:NO_DEPOSIT.includes(st)?'released':'kept',oneclick_status:st,amount_raw:h.amount_raw},at:now()});
+    });
+    if(!NO_DEPOSIT.includes(st))this.raiseAlert({key:`deposit_outside:${h.trade_id}:${h.idx}`,tradeId:h.trade_id,kind:'deposit_outside_pipeline',detail:{leg:h.idx,oneclick_status:st,amount_raw:h.amount_raw}});
+   }
+   return {released,kept};
   },
   /** Ops outbox: one row per dedup key; true when new. */
   raiseAlert({key,tradeId='-',kind,detail}){

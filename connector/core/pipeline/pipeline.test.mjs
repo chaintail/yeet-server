@@ -15,6 +15,14 @@ const sub=(p,ctx,req,signed,opts)=>p.submit(ctx,{trade_id:req.trade_id,leg:req.l
 async function code(pr,c){await assert.rejects(pr,e=>e.code===c,`expected ${c}`)}
 const leg=(db,id,idx)=>db.prepare('SELECT * FROM trade_legs WHERE trade_id=? AND idx=?').get(id,idx);
 const confirmAll=(rpc,x)=>{for(const l of x.legs)if(l.tx_hash)rpc.statuses.set(l.tx_hash,{status:'confirmed',commitment:'confirmed',slot:5})};
+/** Review finding 2: a not-sent BUY amount stays spent until the deposit deadline passes with 1Click at PENDING_DEPOSIT. */
+async function capBackAfterDeadline(f,{held,after=0n}){
+ const day=f.now();
+ assert.equal(spentToday(f.db,ALICE.accountId,day),held,'held until the deposit deadline');
+ f.now.advance(31*60_000);
+ await f.p.ledger.releaseDue(async()=>({status:'PENDING_DEPOSIT'}));
+ assert.equal(spentToday(f.db,ALICE.accountId,day),after,'released after the deadline');
+}
 
 test('BUY all-Solana: sign requests, person signs, fee payer co-signs, persisted before send, confirmed, 1Click told, settled',async()=>{
  const f=fakePipeline();const {p,db,rpc,feePayer,oneclick}=f;
@@ -100,9 +108,9 @@ test('kill switch flipped after the sign request: refused before any co-sign; re
  assert.equal(feePayer.calls,0);
  await p.recoverTrade(x.trade_id);
  assert.ok([0,1].every(i=>leg(db,x.trade_id,i).send_status==='not_sent'));
- assert.equal(spentToday(db,ALICE.accountId,f.now()),0n);
  assert.equal(db.prepare('SELECT status FROM trades WHERE id=?').get(x.trade_id).status,'failed');
  assert.equal(db.prepare('SELECT COALESCE(SUM(transactions),0) n FROM sponsor_day').get().n,0,'fee reservations returned');
+ await capBackAfterDeadline(f,{held:10_000_000n});
 });
 
 test('chain pause YEET_SOLANA_PAUSE refuses execute and submit',async()=>{
@@ -142,7 +150,7 @@ test('fee payer policy refusal: leg failed, nothing sent, cap and fee quota retu
  const out=await sub(p,ALICE,x.sign_requests[0],signAs(aliceWallet,x.sign_requests[0]));
  assert.equal(out.legs[0].send_status,'failed');
  assert.equal(rpc.sent.length,0);
- assert.equal(spentToday(db,ALICE.accountId,f.now()),0n);
+ assert.equal(spentToday(db,ALICE.accountId,f.now()),5_000_000n,'held: the deposit address is still live');
  assert.equal(db.prepare('SELECT SUM(transactions) n FROM sponsor_day').get().n,0);
  // A transient fee payer error keeps the claim (no bytes): the leg stays signing until the blockhash is past.
  feePayer.refuse='PRIVY_HTTP_503';
@@ -169,7 +177,20 @@ test('expired and never landed: not_sent only after two separate proofs past the
  assert.equal(leg(db,x.trade_id,0).send_status,'signing','first proof only');
  await p.recoverTrade(x.trade_id);
  assert.equal(leg(db,x.trade_id,0).send_status,'not_sent');
- assert.equal(spentToday(db,ALICE.accountId,f.now()),0n);
+ await capBackAfterDeadline(f,{held:5_000_000n});
+});
+
+test('F9: after the kill switch is set, co-signed bytes are not rebroadcast',async()=>{
+ const {p,env,rpc}=fakePipeline();
+ const x=await exec(p,ALICE,await p.propose(ALICE,{...basket,legs:[{symbol:'WIF',parts:1}],amount_usdc:'5'}));
+ await sub(p,ALICE,x.sign_requests[0],signAs(aliceWallet,x.sign_requests[0]));
+ assert.equal(rpc.sent.length,1);
+ env.YEET_KILL_SWITCH='1';
+ await p.recoverTrade(x.trade_id);
+ assert.equal(rpc.sent.length,1,'no rebroadcast while paused');
+ env.YEET_KILL_SWITCH='0';
+ await p.recoverTrade(x.trade_id);
+ assert.equal(rpc.sent.length,2,'resumes after the pause');
 });
 
 test('landed and failed on chain: leg failed, the fee stays spent, the USDC cap comes back',async()=>{
@@ -179,8 +200,8 @@ test('landed and failed on chain: leg failed, the fee stays spent, the USDC cap 
  rpc.statuses.set(s.legs[0].tx_hash,{status:'failed',commitment:'confirmed',slot:9,err:{InstructionError:[3,'Custom']}});
  await p.recoverTrade(x.trade_id);
  assert.equal(leg(db,x.trade_id,0).send_status,'failed');
- assert.equal(spentToday(db,ALICE.accountId,f.now()),0n);
  assert.equal(db.prepare('SELECT SUM(transactions) n FROM sponsor_day').get().n,1,'the fee was paid');
+ await capBackAfterDeadline(f,{held:5_000_000n});
 });
 
 test('fee payer below the floor: refused before the claim, alert raised once, nothing co-signed',async()=>{
@@ -217,7 +238,33 @@ test('nobody signs: after the sign window the legs are not_sent, the trade faile
  assert.ok([0,1].every(i=>leg(db,x.trade_id,i).send_status==='not_sent'));
  assert.equal(db.prepare('SELECT status FROM trades WHERE id=?').get(x.trade_id).status,'failed');
  assert.equal(db.prepare('SELECT status FROM proposals WHERE id=(SELECT proposal_id FROM trades WHERE id=?)').get(x.trade_id).status,'failed');
- assert.equal(spentToday(db,ALICE.accountId,now()),0n);
+ await capBackAfterDeadline(f,{held:10_000_000n});
+});
+
+test('F2: a not-sent BUY whose deposit address received funds anyway keeps the amount spent and alerts',async()=>{
+ const f=fakePipeline();const {p,db,now}=f;
+ const x=await exec(p,ALICE,await p.propose(ALICE,{...basket,legs:[{symbol:'WIF',parts:1}],amount_usdc:'5'}));
+ now.advance(11*60_000);
+ await p.tracker.pollOnce();
+ assert.equal(leg(db,x.trade_id,0).send_status,'not_sent');
+ now.advance(20*60_000);
+ assert.deepEqual(await p.ledger.releaseDue(async()=>({status:'PROCESSING'})),{released:0,kept:1});
+ assert.equal(spentToday(db,ALICE.accountId,now()),5_000_000n);
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM trade_alerts WHERE kind='deposit_outside_pipeline'").get().n,1);
+ // A 1Click error leaves the hold for the next tick; a kept hold is never released later.
+ assert.deepEqual(await p.ledger.releaseDue(async()=>({status:'PENDING_DEPOSIT'})),{released:0,kept:0});
+ assert.equal(p.ledger.holds(x.trade_id)[0].state,'kept');
+});
+
+test('F6: a new trade abandons the account\'s unsigned attempts on other trades and returns their fee and rent',async()=>{
+ const f=fakePipeline();const {p,db}=f;
+ const one=await exec(p,ALICE,await p.propose(ALICE,{...basket,request_id:'a1',legs:[{symbol:'WIF',parts:1}],amount_usdc:'5'}));
+ const two=await exec(p,ALICE,await p.propose(ALICE,{...basket,request_id:'a2',legs:[{symbol:'BOME',parts:1}],amount_usdc:'5'}));
+ assert.equal(db.prepare('SELECT status FROM client_trade WHERE attempt_id=?').get(one.sign_requests[0].attempt_id).status,'abandoned');
+ assert.equal(db.prepare('SELECT SUM(accounts) n FROM sponsor_rent_day').get().n,1,'one rent reservation held');
+ assert.equal(db.prepare('SELECT SUM(transactions) n FROM sponsor_day').get().n,1);
+ assert.equal(leg(db,one.trade_id,0).send_status,'awaiting_signature','the old leg can still be signed with a fresh request');
+ assert.equal(two.sign_requests.length,1);
 });
 
 test('dry run: validated and simulated, never co-signed or sent; the leg keeps waiting',async()=>{
@@ -235,7 +282,7 @@ test('quotas: per-account daily sponsored transactions refuse a BUY leg (not_sen
  const x=await exec(p,ALICE,await p.propose(ALICE,basket));
  assert.equal(x.sign_requests.length,1);
  assert.equal(leg(db,x.trade_id,1).send_status,'not_sent');
- assert.equal(spentToday(db,ALICE.accountId,f.now()),5_000_000n);
+ await capBackAfterDeadline(f,{held:10_000_000n,after:5_000_000n});
  assert.equal(db.prepare('SELECT accounts FROM sponsor_rent_day').get().accounts,1);
 });
 

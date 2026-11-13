@@ -275,6 +275,30 @@ export const MIGRATIONS=Object.freeze([
    accounts INTEGER NOT NULL,
    lamports INTEGER NOT NULL,
    PRIMARY KEY(day,account_id)) STRICT;`,
+ // 7: gas sponsorship integration. Alert kinds for the Base driver and the deferred spend release (review findings
+ // 1, 2, 3, 4, 7); spend_hold keeps a not-sent BUY amount spent until its 1Click deposit deadline has passed.
+ `CREATE TABLE trade_alerts_v7(
+   id INTEGER PRIMARY KEY,
+   dedup_key TEXT NOT NULL UNIQUE,
+   trade_id TEXT NOT NULL,
+   kind TEXT NOT NULL CHECK(kind IN('stuck','stale','partial','balance_mismatch','fee_payer_low','fee_payer_recovered','gas_wallet_low','gas_wallet_recovered','sponsor_review','expiry_proof_unavailable',
+    'deposit_outside_pipeline','base_transfer_outside_bytes','base_topup_misused','base_transfer_stuck','gas_topup_stuck','gas_topup_replace_capped','gas_topup_receipt_mismatch','gas_charge_over_reservation')),
+   detail_json TEXT NOT NULL,
+   created_at INTEGER NOT NULL,
+   acked_at INTEGER) STRICT;
+  INSERT INTO trade_alerts_v7 SELECT * FROM trade_alerts;
+  DROP TABLE trade_alerts;
+  ALTER TABLE trade_alerts_v7 RENAME TO trade_alerts;
+  CREATE INDEX trade_alerts_open ON trade_alerts(acked_at,id);
+  CREATE TABLE spend_hold(
+   trade_id TEXT NOT NULL, idx INTEGER NOT NULL, account_id TEXT NOT NULL,
+   spent_at INTEGER NOT NULL,                                      -- the trade's created_at: the cap day the amount was spent on
+   amount_raw TEXT NOT NULL, deposit_address TEXT NOT NULL, deposit_memo TEXT,
+   release_after INTEGER NOT NULL,                                 -- the leg's 1Click deposit deadline
+   state TEXT NOT NULL CHECK(state IN('held','released','kept')), oneclick_status TEXT,
+   created_at INTEGER NOT NULL, resolved_at INTEGER,
+   PRIMARY KEY(trade_id,idx)) STRICT;
+  CREATE INDEX spend_hold_due ON spend_hold(state,release_after);`,
 ]);
 
 /** Opens (and migrates) the trade database. `file` defaults to $STATE_DIR/trade.sqlite; ':memory:' for tests. */

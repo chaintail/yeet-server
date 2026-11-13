@@ -11,8 +11,8 @@ test('migrations create the plan 4.2 tables once and re-open without change',()=
   const file=join(dir,'trade.sqlite');
   let db=openTradeDb(file);
   const tables=()=>db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map(r=>r.name);
-  // Migration 6 (user-signed pipeline) adds client_trade, sponsor_day, sponsor_rent_day and sponsor_send.
-  const ALL=['client_trade','confirm_codes','daily_spend','proposal_legs','proposals','sponsor_day','sponsor_rent_day','sponsor_send','trade_alerts','trade_balance_checks','trade_events','trade_legs','trades','wallets'];
+  // Migration 6 (user-signed pipeline) adds client_trade, sponsor_day, sponsor_rent_day and sponsor_send; 7 adds spend_hold.
+  const ALL=['client_trade','confirm_codes','daily_spend','proposal_legs','proposals','spend_hold','sponsor_day','sponsor_rent_day','sponsor_send','trade_alerts','trade_balance_checks','trade_events','trade_legs','trades','wallets'];
   assert.deepEqual(tables(),ALL);
   assert.equal(db.prepare('PRAGMA user_version').get().user_version,MIGRATIONS.length);
   db.close();db=openTradeDb(file);migrate(db);

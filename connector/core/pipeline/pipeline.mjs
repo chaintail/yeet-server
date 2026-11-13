@@ -68,7 +68,9 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
  drivers??=createDrivers({env,db,ledger,fetch,now,log:event,gateFor,liveBroadcast,overrides:driverOverrides});
  const codes=createConfirmCodes({db,now,mintLimit:limits.codeMintLimit});
  const proposals=createProposals({db,client,limits,wallets,codes,now,catalog});
- const tracker=createTracker({db,client,now,onSettled,intervalMs:trackerIntervalMs,trackMaxHours:limits.trackMaxHours,accounting:{raiseAlert:a=>ledger.raiseAlert(a),async tick(){}}});
+ const tracker=createTracker({db,client,now,onSettled,intervalMs:trackerIntervalMs,trackMaxHours:limits.trackMaxHours,accounting:{raiseAlert:a=>ledger.raiseAlert(a),
+  // Review finding 2: held BUY amounts return to the daily cap only after the deposit deadline, on 1Click's word.
+  async tick(){await ledger.releaseDue((addr,memo)=>client.status(addr,memo))}}});
  const trade=id=>db.prepare('SELECT * FROM trades WHERE id=?').get(id);
  const legsOf=id=>db.prepare('SELECT * FROM trade_legs WHERE trade_id=? ORDER BY idx').all(id);
  const legOf=(id,idx)=>db.prepare('SELECT * FROM trade_legs WHERE trade_id=? AND idx=?').get(id,idx);

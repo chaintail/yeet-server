@@ -40,6 +40,8 @@ export function createClientSigning({ledger,rpc,signatureStatus,historySignature
 
  async function broadcast(a){
   if(!liveBroadcast||!a.signed_base64)return false;
+  // Review finding 9: every send, first or rebroadcast, re-reads the kill switch, YEET_LIVE, the allowlist and the pause.
+  try{gate(a.account_id)}catch{event({event:'broadcast_paused',attempt:ref(a.attempt_id)});return false}
   try{await rpc.broadcast(Buffer.from(a.signed_base64,'base64'));ledger.recordSent(a.attempt_id);return true}
   catch(e){event({event:'broadcast_failed',attempt:ref(a.attempt_id),error:String(e?.message??e).slice(0,120)});return false}
  }

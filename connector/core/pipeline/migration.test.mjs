@@ -13,7 +13,7 @@ test('v5 state file upgrades to v6 with its rows intact',()=>{
  db.prepare("INSERT INTO trade_legs(trade_id,idx,symbol,amount_in_raw,deposit_address,live_quote_json,send_status,tx_hash,updated_at,privy_tx_id,refused_at) VALUES('t1',0,'WIF','5','0xdep','{}','sent','0xhash',1,'privy-1',7)").run();
  db.prepare("INSERT INTO trade_alerts(dedup_key,trade_id,kind,detail_json,created_at) VALUES('k','t1','stale','{}',1)").run();
  migrate(db);
- assert.equal(db.prepare('PRAGMA user_version').get().user_version,6);
+ assert.equal(db.prepare('PRAGMA user_version').get().user_version,MIGRATIONS.length);
  const l=db.prepare('SELECT * FROM trade_legs').get();
  assert.equal(l.send_status,'sent');assert.equal(l.tx_hash,'0xhash');assert.equal(l.privy_tx_id,'privy-1');assert.equal(l.refused_at,7);assert.equal(l.attempt_id,null);
  assert.equal(db.prepare('SELECT origin_chain FROM trades').get().origin_chain,null);
