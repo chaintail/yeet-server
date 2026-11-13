@@ -1,5 +1,5 @@
 // Consent agreements and the one-time referral screen, end to end against the sign-in server and core in this
-// process (ports 38870-38873, throwaway state and secrets). Nothing outside the temp directory is touched.
+// process (ports 38890-38893, throwaway state and secrets). Nothing outside the temp directory is touched.
 import test, {after} from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync} from 'node:fs';
@@ -8,7 +8,7 @@ import {join} from 'node:path';
 import {randomBytes,createHash} from 'node:crypto';
 
 const ORIGIN='https://chatgpt.yeet.win';
-const PORTS={AS_PORT:38870,CORE_PORT:38871,ADMIN_PORT:38872,CONNECTOR_PORT:38873};
+const PORTS={AS_PORT:38890,CORE_PORT:38891,ADMIN_PORT:38892,CONNECTOR_PORT:38893};
 const AS=`http://127.0.0.1:${PORTS.AS_PORT}`;
 const root=mkdtempSync(join(tmpdir(),'yeet-consent-referral-'));
 const secrets=join(root,'secrets'),state=join(root,'state');
