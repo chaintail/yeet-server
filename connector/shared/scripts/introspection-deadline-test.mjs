@@ -48,3 +48,21 @@ test("r8 M1: a prompt AS response resolves and keeps the 32 KiB cap", async () =
     server.closeAllConnections();server.close();
   }
 });
+
+test("introspection: a 4xx answer means not active; 429, 5xx, other codes and timeouts stay errors", async () => {
+  const server = await listen((req, res) => {
+    req.resume();
+    const status = Number(req.url.slice(1));
+    if (status === 0) return; // never answers
+    res.writeHead(status, { "content-type": "application/json" });
+    res.end(status === 400 ? '{"error":"invalid_request"}' : status === 401 ? "not json" : "{}");
+  });
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    for (const s of [400, 401, 403, 404]) assert.deepEqual(await postIntrospection(new URL(`${base}/${s}`), {}, "token=x"), { active: false }, String(s));
+    for (const s of [429, 500, 502, 503, 302]) await assert.rejects(postIntrospection(new URL(`${base}/${s}`), {}, "token=x"), /Introspection denied/, String(s));
+    await assert.rejects(postIntrospection(new URL(`${base}/0`), {}, "token=x", 200), /Introspection timeout/);
+  } finally {
+    server.closeAllConnections();server.close();
+  }
+});

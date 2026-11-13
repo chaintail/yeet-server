@@ -45,7 +45,11 @@ test('A-4: protected-resource metadata names the bare origin as resource and iss
 });
 
 test('A-4: unauthenticated POST / is 401 with resource_metadata pointing at the bare metadata path',async()=>{
- for(const bearer of [undefined,'not-a-real-token']){
+ // JWT-shaped bearers (alg none, or RS256 with a junk signature) make the sign-in server answer 4xx; still 401.
+ const b64=o=>Buffer.from(JSON.stringify(o)).toString('base64url');
+ const jwtNone=`${b64({alg:'none',typ:'JWT'})}.${b64({sub:'x',aud:ORIGIN})}.`;
+ const jwtJunk=`${b64({alg:'RS256',typ:'JWT',kid:'research-key-1'})}.${b64({sub:'x',aud:ORIGIN,exp:9999999999})}.${'A'.repeat(342)}`;
+ for(const bearer of [undefined,'not-a-real-token',jwtNone,jwtJunk]){
   const r=await rpc({jsonrpc:'2.0',id:1,method:'tools/list'},bearer);
   assert.equal(r.status,401);
   assert.equal(r.headers.get('www-authenticate'),`Bearer resource_metadata="${ORIGIN}/.well-known/oauth-protected-resource"`);

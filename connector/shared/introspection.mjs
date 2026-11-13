@@ -27,6 +27,11 @@ export function postIntrospection(url, headers, body, deadlineMs = INTROSPECTION
         });
         r.on("end", () => {
           try {
+            // A 4xx is the sign-in server refusing this token (for example a JWT-shaped bearer it cannot read):
+            // the token is not active, so the caller answers 401 with WWW-Authenticate. 5xx and anything else
+            // stay errors, which the caller answers with 503 because the sign-in server's state is unknown. 429 is
+            // the sign-in server's rate limit, which says nothing about the token, so it stays an error too.
+            if (r.statusCode >= 400 && r.statusCode < 500 && r.statusCode !== 429) return settle(resolve, { active: false });
             if (r.statusCode !== 200) throw Error("Introspection denied");
             settle(resolve, JSON.parse(data));
           } catch (e) {
