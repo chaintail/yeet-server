@@ -1,4 +1,4 @@
-import {allScopes} from '#scope-catalog';
+import {allScopes,expandScopes} from '#scope-catalog';
 import { request } from "node:http";
 import { AS, AS_INTERNAL, RESOURCE, secret } from "./common.mjs";
 // One absolute deadline covers connect, headers and the full body: a trickling AS cannot extend it
@@ -80,6 +80,7 @@ export function validatePrincipal(token) {
   return {
     subject: token.sub,
     client: token.client_id,
-    scopes: new Set(token.scope.split(" ").filter(s => allScopes.includes(s))),
+    // An old scope name also counts under its current name (scope-catalog.mjs: yeet:trade is yeet:prepare).
+    scopes: expandScopes(token.scope.split(" ").filter(s => allScopes.includes(s))),
   };
 }

@@ -17,7 +17,6 @@ import {
   requestServerSetup,
   setupErrorReport,
 } from "./wallet-setup.js";
-import { SetupProgress } from "./setup-screen.jsx";
 import { words } from "./brand-words.jsx";
 import { Swap } from "./screen.jsx";
 
@@ -205,6 +204,25 @@ function ChooseMethod({ methods }) {
       ) : (
         <>
           <p>{words(introLine(methods))}</p>
+          {others.map((m, i) => (
+            <button
+              key={m.id}
+              type="button"
+              className={i > 0 ? "secondary" : undefined}
+              disabled={busy}
+              onClick={() => {
+                markStarted();
+                start(m);
+              }}
+            >
+              {m.id === "telegram" && telegramBusy ? "Waiting for Telegram…" : `Continue with ${m.label}`}
+            </button>
+          ))}
+          {emailOn && others.length ? (
+            <p className="divider">
+              <span>or</span>
+            </p>
+          ) : null}
           {emailOn ? (
             <>
               <label htmlFor="yeet-email">Email</label>
@@ -217,35 +235,52 @@ function ChooseMethod({ methods }) {
                 spellCheck={false}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                onKeyDown={onEnter(send)}
+                onKeyDown={onEnter(() => {
+                  markStarted();
+                  send();
+                })}
               />
-              <button type="button" disabled={busy} onClick={send}>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  markStarted();
+                  send();
+                }}
+              >
                 {sending ? "Sending code…" : "Email me a code"}
               </button>
               {notice}
             </>
           ) : null}
-          {emailOn && others.length ? (
-            <p className="divider">
-              <span>or</span>
-            </p>
-          ) : null}
-          {others.map((m, i) => (
-            <button
-              key={m.id}
-              type="button"
-              className={emailOn || i > 0 ? "secondary" : undefined}
-              disabled={busy}
-              onClick={() => start(m)}
-            >
-              {m.id === "telegram" && telegramBusy ? "Waiting for Telegram…" : `Continue with ${m.label}`}
-            </button>
-          ))}
           {emailOn ? null : notice}
         </>
       )}
     </Swap>
   );
+}
+
+/** Set when the person starts a sign-in on this page; read once after it (also across the Google or Apple redirect). */
+const STARTED_KEY = "yeet-sign-in-started";
+function markStarted() {
+  try {
+    sessionStorage.setItem(STARTED_KEY, "1");
+  } catch {
+    /* without storage the person presses Continue once more */
+  }
+}
+function takeStarted() {
+  try {
+    const v = sessionStorage.getItem(STARTED_KEY) === "1";
+    sessionStorage.removeItem(STARTED_KEY);
+    return v;
+  } catch {
+    return false;
+  }
+}
+/** What to call the signed-in person on the Continue button: their email, as Privy has it. */
+export function accountLabel(user) {
+  return user?.email?.address || user?.google?.email || user?.apple?.email || "your YEET account";
 }
 
 /** Puts the Privy access token on the page form and submits it; the server then opens the YEET session. */
@@ -283,6 +318,9 @@ function FinishSignIn({ config }) {
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const running = useRef(false);
+  // The sign-in was started on this page a moment ago: that press is the one this connection needs, so go straight on.
+  const [auto] = useState(() => takeStarted());
+  const went = useRef(false);
 
   /** Server setup: the server creates any missing wallet (no signer is attached: the person signs every trade). */
   async function serverSetup() {
@@ -351,7 +389,7 @@ function FinishSignIn({ config }) {
         e?.serverMessage ||
           (e?.code === "wallets-not-ready"
             ? "Your YEET wallets are still being set up. Try again in a moment."
-            : "YEET could not finish setting up trading on your wallets. Nothing was charged. Tap Try again."),
+            : "YEET could not finish connecting. Nothing was charged. Try again."),
       );
       setBusy(false);
       return;
@@ -365,11 +403,25 @@ function FinishSignIn({ config }) {
     }
   }
 
+  useEffect(() => {
+    if (setup || !auto || !ready || went.current) return;
+    went.current = true;
+    continueLogin();
+    // continueLogin reads the latest hooks; it runs once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setup, auto, ready]);
+
   if (setup)
     return (
       <>
-        <p>{words("You are signed in. YEET sets up your wallets on Base and Solana, then you go back to ChatGPT.")}</p>
-        <SetupProgress step={step} done={done} slow={slow} failed={setupFailed} message={failMessage} onRetry={retry} />
+        <p role="status" aria-live="polite">
+          {words(setupFailed ? failMessage || "YEET could not finish connecting. Nothing was charged." : slow ? "Still connecting. This can take a moment." : "Connecting YEET to ChatGPT…")}
+        </p>
+        {setupFailed || slow ? (
+          <button type="button" onClick={retry}>
+            Try again
+          </button>
+        ) : null}
         <button type="button" className="secondary" onClick={logout}>
           Use another account
         </button>
@@ -378,9 +430,8 @@ function FinishSignIn({ config }) {
 
   return (
     <>
-      <p>{words("You are signed in. YEET sets up your wallets on Base and Solana, then you go back to ChatGPT.")}</p>
       <button type="button" disabled={!ready || busy} onClick={continueLogin}>
-        {busy ? "Setting up…" : setupFailed ? "Try again" : words("Continue to YEET")}
+        {busy ? "Connecting…" : setupFailed ? "Try again" : `Continue as ${accountLabel(user)}`}
       </button>
       <button type="button" className="secondary" disabled={busy} onClick={logout}>
         Use another account

@@ -12,7 +12,8 @@ const token = {
 };
 const principal = validatePrincipal(token);
 assert.equal(principal.subject, token.sub);
-assert.deepEqual([...principal.scopes], ["yeet:read", "yeet:trade"]);
+// A token under the old scope name also counts under the current one (scope-catalog.mjs).
+assert.deepEqual([...principal.scopes], ["yeet:read", "yeet:trade", "yeet:prepare"]);
 for (const delta of [
   { sub: "folio-privy-synthetic" },
   { sub: "arbitrary" },

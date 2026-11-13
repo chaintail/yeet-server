@@ -92,6 +92,34 @@ Pages:
   (anonymized user id), `openai/session` (anonymized conversation id) [R]. YEET keys "tell the person once per
   conversation" on `openai/session`.
 
+### 6a. When ChatGPT asks the person to approve a tool call (read again 2026-11-13)
+
+- [R] https://developers.openai.com/apps-sdk/reference: `readOnlyHint`: "Signal that the tool only retrieves or computes
+  information"; `destructiveHint`: "Declare that the tool may delete or overwrite user data so the host knows to elicit
+  explicit approval first."; "These hints only influence how ChatGPT or Codex frames the tool call to the user";
+  "ChatGPT does not load approval-gated arguments into widget values before approval".
+- [MS] https://developers.openai.com/apps-sdk/build/mcp-server: "`destructiveHint`: `true` when a tool can cause
+  irreversible or difficult to reverse outcomes."; "Annotations help ChatGPT and Codex choose appropriate confirmation
+  and safety behavior."; "Require confirmation for consequential write actions."
+- The only trigger for the host's own approval step that the pages name is `destructiveHint: true`. A tool that is
+  merely not read-only is not said to be approval-gated.
+- Used for: `yeet_accept_terms` is `readOnlyHint: false, destructiveHint: true, idempotentHint: true,
+  openWorldHint: false`. The record it writes stands once written (first acceptance of a version), which is the
+  "difficult to reverse" case. What the approval looks like, and whether it appears on every call, is the host's
+  choice and only shows in ChatGPT.
+- A tool's card template is part of the tool's descriptor (`_meta["openai/outputTemplate"]`), so a tool cannot
+  return a result without its card conditionally. Used for: `yeet_overview` has no template at all, and the device
+  step has its own tool (`yeet_unlock`) and otherwise lives inside the trade card.
+- Scopes [AU] https://developers.openai.com/apps-sdk/build/auth: `scopes_supported` "helps ChatGPT explain the
+  permissions it is going to ask the user for"; the page does not say whether the person sees scope names or
+  descriptions, nor what ChatGPT does when a stored token lacks a scope a tool now names in `securitySchemes` beyond
+  "rely on the `WWW-Authenticate` challenge to prompt ChatGPT to re-authorize". Used for: the scope is named
+  `yeet:prepare`, and the server accepts the old `yeet:trade` so it never sends that challenge to an existing
+  connection.
+- ChatGPT's client [AU]: the stable client id `https://chatgpt.com/oauth/client.json` and redirect
+  `https://chatgpt.com/connector_platform_oauth_redirect`, or `https://chatgpt.com/connector/oauth/{callback_id}`.
+  Used for: the one-screen connect applies only to a client whose redirect is one of these.
+
 ## 7. Identity; browser storage
 
 - After OAuth linking ChatGPT sends `Authorization: Bearer <token>` on every MCP request; the server verifies issuer,

@@ -5,7 +5,7 @@ import {toolSchemas,zodSchema,contract} from '../tool-contract.mjs';
 import {toolError} from '../errors.mjs';
 import {instructions,descriptions,titles} from '../instructions.mjs';
 import {allScopes} from '#scope-catalog';
-const ALL=['yeet_overview','yeet_home','yeet_coins','yeet_propose','yeet_quote','execute_trade','submit_trade_signature','trade_status','yeet_portfolio','yeet_fund','skeet_propose','yeet_leaderboard','yeet_checkin','daily_spin','yeet_set_username','lucky_wheel','lucky_spin'];
+const ALL=['yeet_overview','yeet_unlock','yeet_terms','yeet_accept_terms','yeet_referral','apply_referral','yeet_home','yeet_coins','yeet_propose','yeet_quote','execute_trade','submit_trade_signature','trade_status','yeet_portfolio','yeet_fund','skeet_propose','yeet_leaderboard','yeet_checkin','daily_spin','yeet_set_username','lucky_wheel','lucky_spin'];
 test('every published schema has a top-level object, resolved references, strict input; the contract tools',()=>{
  assert.deepEqual(Object.keys(toolSchemas),ALL);
  for(const schema of Object.values(toolSchemas)){
@@ -41,7 +41,7 @@ test('shared pieces follow plan 2.1',()=>{
 test('the error enum and x-yeet-errors catalogue agree; every code has a card; retryable codes as the contract says',async()=>{
  const {TOOL_ERRORS}=await import('#contracts/errors');
  const codes=contract.$defs.failure.properties.error.enum;
- assert.deepEqual(codes,['INVALID_ARGUMENT','COIN_NOT_SUPPORTED','PARTS_EMPTY','AMOUNT_TOO_SMALL','COST_TOO_HIGH','LIMIT_EXCEEDED','BALANCE_LOW','WALLET_NOT_READY','CONFIRMATION_REQUIRED','REQUOTE_REQUIRED','TRADING_PAUSED','REAUTH_REQUIRED','TEMPORARILY_UNAVAILABLE','USERNAME_TAKEN','USERNAME_NOT_ALLOWED']);
+ assert.deepEqual(codes,['INVALID_ARGUMENT','COIN_NOT_SUPPORTED','PARTS_EMPTY','AMOUNT_TOO_SMALL','COST_TOO_HIGH','LIMIT_EXCEEDED','BALANCE_LOW','WALLET_NOT_READY','CONFIRMATION_REQUIRED','REQUOTE_REQUIRED','TRADING_PAUSED','REAUTH_REQUIRED','TEMPORARILY_UNAVAILABLE','USERNAME_TAKEN','USERNAME_NOT_ALLOWED','TERMS_REQUIRED']);
  assert.deepEqual(Object.keys(TOOL_ERRORS).sort(),[...codes].sort());
  for(const code of codes){
   const result=JSON.parse(toolError({error:code}).content[0].text);
@@ -53,7 +53,7 @@ test('the error enum and x-yeet-errors catalogue agree; every code has a card; r
 });
 test('step-up repeats the complete scope catalog; tool failures never echo stacks or hosts',()=>{
  const result=toolError({error:'REAUTH_REQUIRED'});
- assert.ok(result._meta['mcp/www_authenticate'][0].includes(allScopes.join(' ')));
+ assert.ok(result._meta['mcp/www_authenticate'][0].includes('scope="openid offline_access yeet:read yeet:write yeet:prepare"'),'the advertised names only');
  assert.doesNotMatch(JSON.stringify(toolError({error:'host-internal:38316 token=secret',message:'private'})),/internal|secret|private/);
  assert.equal(toolError({error:'NOPE'}).content[0].text.includes('TEMPORARILY_UNAVAILABLE'),true);
 });
@@ -61,7 +61,8 @@ test('model-visible catalog: titles and descriptions for every tool; data-not-in
  assert.deepEqual(Object.keys(titles),ALL);assert.deepEqual(Object.keys(descriptions),ALL);
  assert.match(instructions,/YEET/);
  assert.match(instructions,/YEET/);
- assert.ok(instructions.length>=450&&instructions.length<=1400,`instructions length ${instructions.length}`);
+ // 1400 before the terms sentence (the person accepts the terms in the chat; mcp/instructions.mjs).
+ assert.ok(instructions.length>=450&&instructions.length<=1650,`instructions length ${instructions.length}`);
  // Owner, voice 39611: the overview is the entry; a basket only after the person brought up a coin.
  assert.match(instructions,/YEET/);
  assert.match(instructions,/YEET/);

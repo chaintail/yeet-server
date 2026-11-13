@@ -135,6 +135,8 @@ services:
       YEET_BALANCE_TOLERANCE_BPS: ${YEET_BALANCE_TOLERANCE_BPS:-}
       YEET_STUCK_AFTER_MINUTES: ${YEET_STUCK_AFTER_MINUTES:-}
       YEET_P2: ${YEET_P2:-}
+      # Where the YEET terms are accepted: chat (default) or page (the /account/terms page). connector/core/terms.mjs.
+      YEET_TERMS_MODE: ${YEET_TERMS_MODE:-}
       STATE_DIR: /state
     # Secret values (PRIVY_APP_SECRET, YEET_PRIVY_AUTHORIZATION_KEY, ONECLICK_JWT, YEET_XP_SECRET) only from this file.
     env_file: [{path: /var/lib/yeet-connector/config/core.env, required: false}]

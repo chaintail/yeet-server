@@ -4,6 +4,12 @@ Owner direction (voice 39611, 2026-11-14): journeys first, few cards of our own,
 follow-ups carry the rest. The platform facts this relies on are in [APPS-SDK-FACTS.md](APPS-SDK-FACTS.md); the cards,
 their views and states are in yeet-win `docs/CARDS.md`.
 
+## Journey 0: connect, terms, win code, first trade on a device (rulings of 2026-11-13)
+
+1. (This passage quotes ChatGPT-facing wording that is not part of this repository.)
+
+Details and the reasons: docs/TERMS-IN-CHAT.md.
+
 ## The journeys
 
 (This passage quotes ChatGPT-facing wording that is not part of this repository.)

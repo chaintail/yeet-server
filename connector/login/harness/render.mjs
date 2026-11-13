@@ -18,8 +18,10 @@ const here = (p) => fileURLToPath(new URL(p, import.meta.url));
 const out = arg("--out", here("./out"));
 const serve = arg("--serve", null);
 
-const { document, providerErrorPage, expiredAuthorizationBody, renewableConsentCopy } = await import("../../as/auth-pages.mjs");
-const { consentForm, referralForm, REFERRAL_TITLE } = await import("../../as/consent-selection.mjs");
+const { document, providerErrorPage, expiredAuthorizationBody } = await import("../../as/auth-pages.mjs");
+const { consentForm, legalLine } = await import("../../as/consent-selection.mjs");
+const { termsBody, TERMS_TITLE } = await import("../../as/terms-page.mjs");
+const { termsObject } = await import("../../core/terms.mjs");
 const { ACCOUNT_TITLE, accountBody, usernameMessage } = await import("../../as/account-page.mjs");
 const { FUND_TITLE } = await import("../../as/fund-page.mjs");
 
@@ -55,15 +57,16 @@ return real(url,init)};})();</script>`;
 }
 const page = (title, body, state) => document(title, body).replace("</head>", `${state ? harness(state) : ""}</head>`);
 const loginForm = (mode = "") =>
-  `<form method="POST" data-yeet-prompt="login"><input type="hidden" name="csrf" value="x"><div id="privy-login"${mode ? ` data-mode="${mode}"` : ""}><p role="status">Loading secure sign in…</p></div><script type="module" src="/account/privy-login/login.js"></script></form>`;
-const requested = ["openid", "offline_access", "yeet:read", "yeet:write", "yeet:trade"];
+  `<form method="POST" data-yeet-prompt="login"><input type="hidden" name="csrf" value="x"><div id="privy-login"${mode ? ` data-mode="${mode}"` : ""}><p role="status">Loading secure sign in…</p></div><script type="module" src="/account/privy-login/login.js"></script>${legalLine()}</form>`;
+const CONNECT = "Sign in to connect YEET to ChatGPT";
 const PAGES = {
-  signin: page("Sign in to YEET", loginForm(), { authenticated: false, appConfig }),
-  setup: page("Sign in to YEET", loginForm(), { authenticated: true, user: base, appConfig }),
-  "setup-failed": page("Sign in to YEET", loginForm(), { authenticated: true, user: base, appConfig, wallets: "fail" }),
-  continue: page("Sign in to YEET", loginForm(), { authenticated: true, user: withWallets, appConfig }),
-  consent: page("Connect YEET to ChatGPT", consentForm({ csrf: "x", accountId: "yeet-privy-a1b2c3", clientId: "https://chatgpt.com/oauth/client.json", resource: "https://chatgpt.yeet.win", requested, renewal: renewableConsentCopy(86400 * 30) })),
-  referral: page(REFERRAL_TITLE, referralForm({ csrf: "x" })),
+  signin: page(CONNECT, loginForm(), { authenticated: false, appConfig }),
+  setup: page(CONNECT, loginForm(), { authenticated: true, user: base, appConfig }),
+  "setup-failed": page(CONNECT, loginForm(), { authenticated: true, user: base, appConfig, wallets: "fail" }),
+  continue: page(CONNECT, loginForm(), { authenticated: true, user: withWallets, appConfig }),
+  consent: page("Connect YEET to ChatGPT", consentForm({ csrf: "x", name: "Nimble Tapir 88", connectedSeconds: 86400 * 7 })),
+  terms: page(TERMS_TITLE, termsBody({ csrf: "x", terms: termsObject(null, { mode: "page", pageUrl: "https://chatgpt.yeet.win/account/terms" }) })),
+  "terms-accepted": page(TERMS_TITLE, termsBody({ csrf: "x", terms: termsObject({ accepted_at: Date.parse("2026-11-13T10:00:00Z") }) })),
   account: page(ACCOUNT_TITLE, accountBody({ csrf: "x", username: "moonboi", name: "moonboi", saved: true })),
   "account-new": page(ACCOUNT_TITLE, accountBody({ csrf: "x", username: null, name: "Lucky Otter 42" })),
   "account-taken": page(ACCOUNT_TITLE, accountBody({ csrf: "x", username: null, name: "Lucky Otter 42", value: "satoshi", error: usernameMessage("USERNAME_TAKEN") })),

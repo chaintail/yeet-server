@@ -34,8 +34,8 @@ after(async()=>{
  rmSync(root,{recursive:true,force:true});
 });
 
-const LISTED=['execute_trade','skeet_propose','submit_trade_signature','trade_status','yeet_coins','yeet_fund','yeet_home','yeet_overview','yeet_portfolio','yeet_propose','yeet_quote'];
-const SCOPES=['openid','offline_access','yeet:read','yeet:write','yeet:trade'];
+const LISTED=['apply_referral','execute_trade','skeet_propose','submit_trade_signature','trade_status','yeet_accept_terms','yeet_coins','yeet_fund','yeet_home','yeet_overview','yeet_portfolio','yeet_propose','yeet_quote','yeet_referral','yeet_terms','yeet_unlock'];
+const SCOPES=['openid','offline_access','yeet:read','yeet:write','yeet:prepare'];
 const local=url=>{const u=new URL(url,ORIGIN);return u.origin===ORIGIN?`${AS}${u.pathname}${u.search}`:u.href};
 function jar(){const c=new Map();return {header:()=>[...c].map(([k,v])=>`${k}=${v}`).join('; '),add(r){for(const s of r.headers.getSetCookie()){const p=s.split(';')[0],i=p.indexOf('=');c.set(p.slice(0,i),p.slice(i+1))}}}}
 async function rpc(body,bearer){
@@ -138,11 +138,13 @@ test('sign-in pages use yeet cookies and YEET titles; identity config is off wit
 
 /** Signs in (development identity), consents to every scope and returns the token answer. */
 let signedIn;
-async function signIn({clientId='local-chatgpt-fixture',redirect='http://127.0.0.1:38314/callback',identity='DEV:did:privy:acceptance-alice',prompt}={}){
+/** scopes: what the client asks for (an older client still asks for yeet:trade). terms: accept the YEET terms through
+ * the connector afterwards, as the assistant does once the person agreed (false: the account has not accepted). */
+async function signIn({clientId='local-chatgpt-fixture',redirect='http://127.0.0.1:38314/callback',identity='DEV:did:privy:acceptance-alice',prompt,scopes=SCOPES,terms=true}={}){
  const cookies=jar(),verifier=randomBytes(32).toString('base64url');
  const challenge=createHash('sha256').update(verifier).digest('base64url');
  const auth=new URL(AS+'/auth');
- auth.search=new URLSearchParams({client_id:clientId,response_type:'code',redirect_uri:redirect,code_challenge:challenge,code_challenge_method:'S256',scope:SCOPES.join(' '),resource:ORIGIN,state:'s1',...(prompt?{prompt}:{})});
+ auth.search=new URLSearchParams({client_id:clientId,response_type:'code',redirect_uri:redirect,code_challenge:challenge,code_challenge_method:'S256',scope:scopes.join(' '),resource:ORIGIN,state:'s1',...(prompt?{prompt}:{})});
  const step=async(url,init={})=>{const r=await fetch(local(url),{redirect:'manual',...init,headers:{cookie:cookies.header(),...init.headers}});cookies.add(r);return r};
  const form=(body)=>({method:'POST',headers:{'content-type':'application/x-www-form-urlencoded',origin:ORIGIN},body:new URLSearchParams(body)});
  let r=await step(auth.href);assert.equal(r.status,303);
@@ -150,18 +152,28 @@ async function signIn({clientId='local-chatgpt-fixture',redirect='http://127.0.0
  let page=r.headers.get('location');let d=await (await step(page)).json();assert.equal(d.prompt,'login');assert.equal(d.identity,'YEET');
  r=await step(page,form({csrf:d.csrf,identity_token:identity}));assert.equal(r.status,303);
  r=await step(r.headers.get('location'));assert.equal(r.status,303);
- page=r.headers.get('location');d=await (await step(page)).json();assert.equal(d.prompt,'consent');
- assert.deepEqual(d.consent_selection,{trade_requested:true,requires_confirm:true});
- r=await step(page,form({csrf:d.csrf,consent:'yes',agree_wallet:'yes',agree_chatgpt:'yes',agree_near:'yes',agree_terms:'yes',agree_privacy:'yes'}));assert.equal(r.status,303);
- // A new account sees the referral screen once on the same interaction; Skip continues the flow.
- d=await (await step(r.headers.get('location'))).json();assert.equal(d.prompt,'referral');
- r=await step(page,form({csrf:d.csrf,step:'referral',referral_action:'skip',referral_code:'WIN'}));assert.equal(r.status,303);
+ page=r.headers.get('location');
+ const next=await step(page);
+ // ChatGPT (its connector redirect URI) after a sign-in inside this authorization: no connect page, straight back.
+ const chatgpt=/^https:\/\/chatgpt\.com\//.test(redirect);
+ if(chatgpt){assert.equal(next.status,303,'no screen between the sign-in and the redirect');r=next}
+ else{
+  // Any other client gets the connect page: one press, no agreements, no other screen.
+  d=await next.json();assert.equal(d.prompt,'consent');
+  assert.deepEqual(d.consent_selection,{prepare_requested:true,requires_confirm:true});
+  r=await step(page,form({csrf:d.csrf,consent:'yes'}));assert.equal(r.status,303);
+ }
  r=await step(r.headers.get('location'));assert.equal(r.status,303);
  const callback=new URL(r.headers.get('location'));assert.equal(callback.origin+callback.pathname,redirect);
  const code=callback.searchParams.get('code');assert.ok(code);
  const token=await (await fetch(AS+'/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',code,code_verifier:verifier,redirect_uri:redirect,client_id:clientId,resource:ORIGIN})})).json();
  assert.ok(token.access_token,JSON.stringify(Object.keys(token)));
- assert.deepEqual(token.scope.split(' ').sort(),['yeet:read','yeet:trade','yeet:write']);
+ assert.deepEqual(token.scope.split(' ').sort(),scopes.filter(s=>s.startsWith('yeet:')).sort());
+ if(terms){
+  const {TERMS_VERSION,REQUIRED_IDS}=await import('../core/terms.mjs');
+  const a=(await (await rpc({jsonrpc:'2.0',id:90,method:'tools/call',params:{name:'yeet_accept_terms',arguments:{version:TERMS_VERSION,confirmed:[...REQUIRED_IDS]}}},token.access_token)).json()).result;
+  assert.equal(a.isError,undefined,JSON.stringify(a.content));
+ }
  return token;
 }
 const token=()=>signedIn??=signIn();
@@ -418,6 +430,60 @@ test('a registered client that never completes an authorization expires after 1 
  assert.ok(tok.refresh_token);
  const refreshed=await fetch(AS+'/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'refresh_token',refresh_token:tok.refresh_token,client_id:used,resource:ORIGIN,scope:[...SCOPES,'yeet:unlisted'].join(' ')})});
  const body=await refreshed.json();assert.equal(refreshed.status,200,JSON.stringify(body));assert.ok(body.access_token);
+});
+
+test('terms in the chat, end to end: gated until accepted, the overview answers, a missing statement and an old version are refused, then everything works',async()=>{
+ const {TERMS_VERSION,REQUIRED_IDS,STATEMENTS}=await import('../core/terms.mjs');
+ const tok=await signIn({identity:'DEV:did:privy:acceptance-terms',terms:false});
+ const call=async(name,args={})=>(await (await rpc({jsonrpc:'2.0',id:31,method:'tools/call',params:{name,arguments:args}},tok.access_token)).json()).result;
+ const refused=r=>{assert.equal(r.isError,true);return JSON.parse(r.content[0].text)};
+ // Every tool that does something for the person is refused with the terms; nothing reaches the engine.
+ for(const [name,args] of [['yeet_home',{}],['yeet_coins',{}],['yeet_portfolio',{}],['yeet_fund',{}],['yeet_referral',{}],['trade_status',{trade_id:'t_abcdefghij0123456789'}],
+  ['yeet_propose',{request_id:'11111111-1111-4111-8111-111111111111',amount_usdc:'20',legs:[{symbol:'WIF',parts:10}]}],['execute_trade',{proposal_id:'p_abcdefghij0123456789',revision:1,confirm:'a'.repeat(43)}]]){
+  const b=refused(await call(name,args));
+  assert.equal(b.error,'TERMS_REQUIRED',name+': '+JSON.stringify(b).slice(0,160));assert.equal(b.terms.accepted,false);assert.equal(b.terms.version,TERMS_VERSION);
+  assert.deepEqual(b.terms.statements.map(s=>s.id),STATEMENTS.map(s=>s.id));assert.match(b.guidance,/YEET/);
+ }
+ // The overview and the terms themselves answer.
+ // (This fixture account has no wallets, so the overview itself answers WALLET_NOT_READY: the point here is that the
+ // terms gate does not stand in front of it. Its terms block and first suggestion: mcp/scripts/terms-test.mjs.)
+ const ov=await call('yeet_overview');assert.notEqual(ov.isError&&JSON.parse(ov.content[0].text).error,'TERMS_REQUIRED');
+ assert.equal((await call('yeet_terms')).structuredContent.terms.accepted,false);
+ // Refused: a required statement missing; another version. Nothing is recorded.
+ assert.deepEqual(refused(await call('yeet_accept_terms',{version:TERMS_VERSION,confirmed:REQUIRED_IDS.filter(id=>id!=='privacy')})).missing,['privacy']);
+ assert.equal(refused(await call('yeet_accept_terms',{version:'2026-10-01',confirmed:[...REQUIRED_IDS]})).error,'TERMS_REQUIRED');
+ assert.equal(refused(await call('yeet_home')).error,'TERMS_REQUIRED');
+ // Accepted: recorded, the overview comes back, and the tools answer.
+ const ok=await call('yeet_accept_terms',{version:TERMS_VERSION,confirmed:[...REQUIRED_IDS,'product_email']});
+ assert.equal(ok.isError,undefined,JSON.stringify(ok.content));assert.equal(ok.structuredContent.terms.accepted,true);assert.ok(ok.structuredContent.terms.accepted_at);
+ assert.ok('overview' in ok.structuredContent,'the overview rides along (null when it cannot be read just now; the acceptance stands)');
+ assert.equal((await call('yeet_terms')).structuredContent.terms.accepted,true);
+ const home=await call('yeet_home');assert.notEqual(home.isError&&JSON.parse(home.content[0].text).error,'TERMS_REQUIRED');
+ {const c=await call('yeet_coins');assert.notEqual(c.isError&&JSON.parse(c.content[0].text).error,'TERMS_REQUIRED')}
+ // The win code card's tools: open, then applied once.
+ assert.deepEqual((await call('yeet_referral')).structuredContent.status,'open');
+ const applied=await call('apply_referral',{code:'win',card_build:(await import('../mcp/refresh.mjs')).CARD_BUILD});
+ assert.deepEqual([applied.structuredContent.status,applied.structuredContent.code],['applied','WIN']);
+ assert.deepEqual((await call('yeet_referral')).structuredContent.status,'applied');
+ // Another account is still asked.
+ const other=await signIn({identity:'DEV:did:privy:acceptance-terms-2',terms:false});
+ const b=JSON.parse((await (await rpc({jsonrpc:'2.0',id:32,method:'tools/call',params:{name:'yeet_home',arguments:{}}},other.access_token)).json()).result.content[0].text);
+ assert.equal(b.error,'TERMS_REQUIRED');
+});
+
+test('scopes end to end: discovery advertises yeet:prepare only; a client that still asks for yeet:trade gets a token that reaches the same tools',async()=>{
+ const meta=await (await fetch(AS+'/.well-known/oauth-authorization-server',{headers:{host:new URL(ORIGIN).host}})).json();
+ assert.ok(meta.scopes_supported.includes('yeet:prepare'));
+ const old=await signIn({identity:'DEV:did:privy:acceptance-oldscope',scopes:['openid','offline_access','yeet:read','yeet:write','yeet:trade']});
+ assert.deepEqual(old.scope.split(' ').sort(),['yeet:read','yeet:trade','yeet:write']);
+ const fresh=await token();assert.ok(fresh.scope.split(' ').includes('yeet:prepare'));
+ for(const tok of [old,fresh]){
+  const call=async(name,args)=>(await (await rpc({jsonrpc:'2.0',id:33,method:'tools/call',params:{name,arguments:args}},tok.access_token)).json()).result;
+  const tools=(await (await rpc({jsonrpc:'2.0',id:34,method:'tools/list',params:{}},tok.access_token)).json()).result.tools;
+  assert.equal(tools.find(t=>t.name==='execute_trade')._meta.securitySchemes[0].scopes[0],'yeet:prepare');
+  const r=await call('execute_trade',{proposal_id:'p_abcdefghij0123456789',revision:1,confirm:'a'.repeat(43),card_build:(await import('../mcp/refresh.mjs')).CARD_BUILD});
+  assert.notEqual(JSON.parse(r.content[0].text).error,'REAUTH_REQUIRED',tok===old?'old scope name':'new scope name');
+ }
 });
 
 test('no oidc-provider default TTL notices and no upstream-parsed body warning',async()=>{

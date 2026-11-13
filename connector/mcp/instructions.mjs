@@ -4,6 +4,7 @@ import {toolSpecs} from './tool-contract.mjs';
 export const instructions = [
  "YEET LINES.1.",
  "YEET LINES.2.",
+ "YEET instructions.3.",
  "YEET LINES.7.",
  "YEET LINES.7.",
  "YEET instructions.6.",

@@ -20,14 +20,18 @@ export const SUGGESTIONS=Object.freeze({
  discover:Object.freeze({id:'discover',label:'Discover a new coin to yeet',say:'Help me find a new coin to yeet'}),
  fund:Object.freeze({id:'fund',label:'Fund my account',say:'Fund my account'}),
  others:Object.freeze({id:'others',label:'See what other people are yeeting',say:'What are other people yeeting?'}),
+ // First while the current terms are not accepted (terms.mjs); then, once, the win code (terms-store.mjs referrals).
+ terms:Object.freeze({id:'terms',label:'Review and accept the YEET terms',say:'Show me the YEET terms'}),
+ referral:Object.freeze({id:'referral',label:'Got a win code?',say:'I have a win code'}),
 });
 /**
  * Order by state: no USDC -> funding first; a daily check-in still open -> the check-in first (after funding when
  * both hold); holdings before discovery only when the person holds a coin. A check-in already done today goes last.
  * `wheel` and `board`: whether the check-in and the leaderboard exist in this deployment.
  */
-export function suggestionsFor({usdc,checkinOpen,holdings,wheel=true,board=true}){
+export function suggestionsFor({usdc,checkinOpen,holdings,wheel=true,board=true,termsDue=false,referralOpen=false}){
  const broke=usdc!==null&&micro(usdc)===0n,S=SUGGESTIONS,out=[];
+ if(termsDue)out.push(S.terms);else if(referralOpen)out.push(S.referral);
  if(broke)out.push(S.fund);
  if(wheel&&checkinOpen)out.push(S.checkin);
  if(holdings>0)out.push(S.holdings,S.discover);else out.push(S.discover,S.holdings);
@@ -39,7 +43,8 @@ export function suggestionsFor({usdc,checkinOpen,holdings,wheel=true,board=true}
  * home: the pipeline's yeet_home answer (funding, ready, limits). bag: yeet_portfolio's answer or null. xp: the XP
  * summary or null. winner: pnl.mjs winnerOf or null. username: the name a board shows.
  */
-export function overview({home,bag=null,xp=null,winner=null,username,wheel=true,board=true}){
+export function overview({home,bag=null,xp=null,winner=null,username,wheel=true,board=true,terms=null,referral=null}){
+ const termsDue=!!terms&&!terms.accepted,referralOpen=!!terms?.accepted&&referral?.status==='open';
  const f=home.funding??null;
  const usdc=f?totalUsdc(f.base_usdc,f.solana_usdc):totalUsdc(home.wallets?.base?.usdc);
  const coins=bag?(bag.solana?.holdings??[]).filter(h=>h.symbol!=='USDC'&&Number(h.amount)>0):null;
@@ -50,6 +55,7 @@ export function overview({home,bag=null,xp=null,winner=null,username,wheel=true,
   xp:xp?xp.total:null,tier:home.limits?.tier??'Noob',streak_days:xp?xp.streak_days:null,checkin_open:checkinOpen,
   holdings_count:coins?Math.min(64,coins.length):null,top_winner:winner,
   trading:home.ready==='paused'?'paused':'live',needs_card_sign_in:'unknown',
-  suggestions:suggestionsFor({usdc,checkinOpen:checkinOpen===true,holdings:coins?.length??0,wheel:wheel&&!!xp,board}),
+  suggestions:suggestionsFor({usdc,checkinOpen:checkinOpen===true,holdings:coins?.length??0,wheel:wheel&&!!xp,board,termsDue,referralOpen}),
+  ...(terms?{terms,referral_open:referralOpen}:{}),
  };
 }

@@ -91,6 +91,6 @@ export function fundRoutes(app, { enabled, session, loginPath = "/account/login"
 }
 
 /** Where the sign-in form sends the person after a successful sign-in. Only the fund page is accepted. */
-export const afterSignIn = (next) => (next === FUND_NEXT ? FUND_PATH : "/account/");
+export const afterSignIn = (next) => (next === FUND_NEXT ? FUND_PATH : next === "terms" ? "/account/terms" : "/account/");
 /** Hidden field the sign-in form carries when it was opened from the fund page. */
-export const nextField = (next) => (next === FUND_NEXT ? `<input type="hidden" name="next" value="${FUND_NEXT}">` : "");
+export const nextField = (next) => (next === FUND_NEXT || next === "terms" ? `<input type="hidden" name="next" value="${next}">` : "");

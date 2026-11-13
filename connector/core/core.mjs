@@ -17,6 +17,10 @@ import {versionInfo} from './version.mjs';
 import {overview,totalUsdc} from './overview.mjs';
 import {winnerOf} from './trade/pnl.mjs';
 import {boardAnswer} from './xp/boards.mjs';
+import {TERMS_VERSION,termsObject,checkAcceptance,termsOpen} from './terms.mjs';
+import {acceptanceOf,recordAcceptance,referralOf,decideReferral,referralCode} from './terms-store.mjs';
+import {createAccountLogin} from './account-login.mjs';
+import {hasScope} from '#scope-catalog';
 // Accounts are created on the first verified sign-in (identity-store.mjs). The identity app is Privy in
 // production and the development stub only under TEST_PROFILE=1 with DEV_IDENTITY_STUB=1.
 const devStub=TEST&&process.env.DEV_IDENTITY_STUB==='1';
@@ -128,8 +132,12 @@ export const ROUTE_SCOPES=Object.freeze([
  ['POST',/^\/proposals$/,'yeet:write'],
  ['POST',/^\/proposals\/skeet$/,'yeet:write'],
  ['POST',/^\/proposals\/p_[a-z0-9]{20}\/quote$/,'yeet:write'],
- ['POST',/^\/trades$/,'yeet:trade'],
- ['POST',/^\/trades\/t_[a-z0-9]{20}\/signature$/,'yeet:trade'],
+ ['POST',/^\/trades$/,'yeet:prepare'],
+ ['POST',/^\/trades\/t_[a-z0-9]{20}\/signature$/,'yeet:prepare'],
+ ['GET',/^\/terms$/,'yeet:read'],
+ ['POST',/^\/terms\/accept$/,'yeet:write'],
+ ['GET',/^\/referral$/,'yeet:read'],
+ ['POST',/^\/referral$/,'yeet:write'],
  ['GET',/^\/trades\/t_[a-z0-9]{20}$/,'yeet:read'],
  ['GET',/^\/portfolio$/,'yeet:read'],
  ['GET',/^\/fund$/,'yeet:read'],
@@ -141,7 +149,52 @@ export const ROUTE_SCOPES=Object.freeze([
  ['POST',/^\/username$/,'yeet:write'],
 ]);
 export const routeScope=(method,path)=>ROUTE_SCOPES.find(([m,p])=>m===method&&p.test(path))?.[2]??null;
-app.use((q,r,next)=>{if(q.role==='mcp'){const needed=routeScope(q.method,q.path);if(!needed||!q.principal.scopes.has(needed))return r.sendStatus(403)}next()});
+app.use((q,r,next)=>{if(q.role==='mcp'){const needed=routeScope(q.method,q.path);if(!needed||!hasScope(q.principal.scopes,needed))return r.sendStatus(403)}next()});
+// ---- The YEET terms (terms.mjs, terms-store.mjs, docs/TERMS-IN-CHAT.md). Until the person accepted the CURRENT version,
+// every connector route answers 403 TERMS_REQUIRED with the terms, except the overview (it answers, with
+// terms.accepted false and "review and accept the YEET terms" as its first suggestion) and the terms routes
+// themselves. The sign-in server's own routes (the account page, wallet set-up, the trade page of a trade that already
+// exists) and the operator's are not gated here.
+const termsOf=accountId=>termsObject(acceptanceOf(accountId,TERMS_VERSION));
+app.use((q,r,next)=>{
+ if(q.role!=='mcp'||termsOpen(q.method,q.path))return next();
+ const terms=termsOf(q.subject);
+ if(terms.accepted)return next();
+ r.status(403).json({...failure('TERMS_REQUIRED'),terms});
+});
+app.get('/terms',(q,r)=>{if(q.role!=='mcp'&&q.role!=='as')return r.sendStatus(403);r.json({terms:termsOf(q.subject)})});
+// yeet_accept_terms (source chat, with ChatGPT's conversation id when it sent one) and the /account/terms page (source
+// page). Refused unless the version is the current one and every required statement is among `confirmed`.
+app.post('/terms/accept',async(q,r)=>{
+ if(q.role!=='mcp'&&q.role!=='as')return r.sendStatus(403);
+ const b=q.body??{};
+ if(typeof b.version!=='string'||!Array.isArray(b.confirmed)||b.confirmed.length>12||b.confirmed.some(x=>typeof x!=='string'))return r.status(400).json(failure('INVALID_ARGUMENT'));
+ const source=q.role==='as'?'page':'chat';
+ const check=checkAcceptance({version:b.version,confirmed:b.confirmed});
+ if(!check.ok){
+  console.log(JSON.stringify({event:'terms_refused',account:q.subject,version:String(b.version).slice(0,20),reason:check.reason,missing:check.missing,source}));
+  return r.status(403).json({...failure('TERMS_REQUIRED'),terms:termsOf(q.subject),reason:check.reason,missing:check.missing});
+ }
+ const session=source==='chat'&&typeof b.session==='string'?b.session.slice(0,200):null;
+ const {record,fresh}=recordAcceptance({accountId:q.subject,version:TERMS_VERSION,statements:check.confirmed,source,clientId:q.role==='mcp'?q.principal.client:'terms-page',session});
+ console.log(JSON.stringify({event:'terms_accepted',account:q.subject,version:record.version,statements:record.statements,accepted_at:record.accepted_at,source:record.source,client:record.client_id,session:record.session,fresh}));
+ const terms=termsObject(record);
+ if(q.role==='as')return r.json({terms});
+ // The overview, so the conversation continues; null when it cannot be read just now (the acceptance stands).
+ let view=null;
+ try{view=await overviewFor(await tradeEngine(),{accountId:q.subject,clientId:q.principal.client})}catch(e){console.error(JSON.stringify({event:'terms_overview_failed',error:String(e?.message??e).slice(0,200)}))}
+ r.json({terms,overview:view});
+});
+// The win code (yeet_referral and the card-only apply_referral): the rule of the connect screen it came from.
+app.get('/referral',(q,r)=>{if(q.role!=='mcp')return r.sendStatus(403);r.json(referralOf(q.subject))});
+app.post('/referral',(q,r)=>{
+ if(q.role!=='mcp')return r.sendStatus(403);
+ const b=q.body??{},code=b.code===undefined?null:referralCode(b.code),skip=b.skip===true;
+ if((b.code!==undefined&&!code)||(!code&&!skip)||(code&&skip))return r.status(400).json(failure('INVALID_ARGUMENT'));
+ const out=decideReferral(q.subject,{code,skip});
+ console.log(JSON.stringify({event:'referral_decided',account:q.subject,status:out.status,code:out.code}));
+ r.json(out);
+});
 // Wallet setup at sign-in (trade/wallet-ensure.mjs): only the sign-in server asks, after it verified the Privy identity.
 let walletEnsurer;
 app.post('/wallets/ensure',async(q,r)=>{
@@ -178,12 +231,20 @@ app.get('/home',trade('yeet_home',async(e,ctx)=>{
 }));
 // yeet_overview (overview.mjs): the entry answer. The portfolio read, the XP summary and the cost basis each fail soft
 // (their fields are null); only the wallets and readiness (e.home) can refuse the call.
-app.get('/overview',trade('yeet_overview',async(e,ctx)=>{
+let accountLogin;
+async function overviewFor(e,ctx,{card=false}={}){
  const [home,bag]=await Promise.all([e.home(ctx),e.portfolio(ctx).catch(()=>null)]);
  const xp=p2On()?xpSafe('overview',()=>xpRuntime().summary(ctx.accountId),null):null;
  const winner=bag?xpSafe('winner',()=>winnerOf(bag.solana.holdings,e.averageCost(ctx.accountId)),null):null;
- return overview({home,bag,xp,winner,username:boardName(ctx.accountId),wheel:p2On(),board:p2On()});
-}));
+ const view=overview({home,bag,xp,winner,username:boardName(ctx.accountId),wheel:p2On(),board:p2On(),terms:termsOf(ctx.accountId),referral:referralOf(ctx.accountId)});
+ if(!card)return view;
+ // Card only (the connector moves it to _meta["yeet/account"]): who the connected account is, for the device check.
+ accountLogin??=createAccountLogin();
+ const did=didFor(ctx.accountId),login=await accountLogin(did);
+ const wallets=[home.wallets?.base?.address,home.wallets?.solana?.address].filter(a=>typeof a==='string');
+ return {...view,card_account:{user:did??null,email:login?.email??null,masked:login?.masked??null,google:login?.google===true,apple:login?.apple===true,wallets}};
+}
+app.get('/overview',trade('yeet_overview',(e,ctx)=>overviewFor(e,ctx,{card:true})));
 // yeet_fund: the funding card. All USDC as one number (read fresh: the card asks again after the funding page).
 app.get('/fund',trade('yeet_fund',async(e,ctx)=>{
  const home=await e.home(ctx),f=home.funding;

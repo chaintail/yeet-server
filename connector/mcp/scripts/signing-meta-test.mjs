@@ -91,7 +91,7 @@ test('resources: overview, basket, portfolio, receipt and lucky declare exactly 
 });
 
 test("results: _meta['yeet/signer'] on the overview, proposal and trade results only, card-only, next to the confirm code",async()=>{
- assert.deepEqual([...SIGNER_TOOLS].sort(),['execute_trade','skeet_propose','submit_trade_signature','trade_status','yeet_overview','yeet_propose','yeet_quote']);
+ assert.deepEqual([...SIGNER_TOOLS].sort(),['execute_trade','skeet_propose','submit_trade_signature','trade_status','yeet_overview','yeet_propose','yeet_quote','yeet_unlock']);
  const want={privy_app_id:APP,script_url:`${ORIGIN}${asset.path}`,sign_page_url:`${ORIGIN}/sign`};
  const {client,close}=await connect(ENV);
  try{

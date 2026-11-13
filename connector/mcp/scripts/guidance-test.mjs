@@ -92,7 +92,7 @@ test('yeet_overview: offer the suggestions in order, never a coin; the lead foll
  const plain=g('yeet_overview',o(S('discover','holdings','fund')));
  rules('overview',plain);
  assert.match(plain,/^Welcome Lucky Otter 42 in one short line/);assert.match(plain,/YEET/);
- assert.match(plain,/YEET/);assert.match(plain,/never ask them to log in\.$/);
+ assert.match(plain,/YEET/);assert.match(plain,/YEET/);
  assert.match(g('yeet_overview',o(S('fund','checkin'))),/YEET/);
  assert.match(g('yeet_overview',o(S('checkin','holdings'))),/YEET/);
  const paused=g('yeet_overview',o(S('checkin'),{trading:'paused'}));rules('overview paused',paused);assert.match(paused,/trading is paused right now/);
@@ -123,7 +123,8 @@ test('funding is described for both networks: no string says USDC can only be ad
  assert.ok(contract.tools.yeet_home.outputSchema.properties.funding);assert.ok(contract.$defs.proposal.properties.funding);
  assert.doesNotMatch(contract.tools.yeet_home.outputSchema.properties.fund_url.description,/adds USDC on Base\b/);
  assert.match(contract.tools.yeet_home.outputSchema.properties.fund_url.description,/YEET/);
- assert.doesNotMatch(contract['x-yeet-scopes']['yeet:trade'],/tap/i);
+ assert.doesNotMatch(contract['x-yeet-scopes']['yeet:prepare'],/tap/i);
+ assert.equal(contract['x-yeet-scopes']['yeet:trade'],undefined,'the old scope name has no description any more');
 });
 
 test('yeet_coins: pick a few, do not read the list out',()=>{

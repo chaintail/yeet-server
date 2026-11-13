@@ -8,11 +8,21 @@ import {guidanceFor} from './guidance.mjs';
 import {SIGNER_META_KEY,signerMetaFromEnv} from '#shared/signing.mjs';
 import {staleness as processStaleness,staleKey,appRefresh,withRefresh,BUILD_META_KEY} from './refresh.mjs';
 import {refreshGuidance} from './guidance.mjs';
+import {hasScope} from '#scope-catalog';
+/** Card-only `_meta` key for the connected account (contract x-yeet-meta.account): the device check in the trade card. */
+export const ACCOUNT_META_KEY='yeet/account';
 
 /** Core route per tool: route(args) -> [core route, body or undefined for GET]. Everything else about a tool (title,
  * description, schemas, annotations, scope, card, visibility, widget access, card-only confirm) is the contract's. */
 const ROUTES={
  yeet_overview:()=>['/overview'],
+ // The device step on its own card, on request: the same answer as the overview.
+ yeet_unlock:()=>['/overview'],
+ yeet_terms:()=>['/terms'],
+ // `session`: ChatGPT's anonymized conversation id, recorded with the acceptance (never an argument of the tool).
+ yeet_accept_terms:(args,session)=>['/terms/accept',{...args,source:'chat',...(session?{session}:{})}],
+ yeet_referral:()=>['/referral'],
+ apply_referral:args=>['/referral',args],
  yeet_home:()=>['/home'],
  yeet_coins:()=>['/coins'],
  yeet_propose:args=>['/proposals',args],
@@ -42,7 +52,7 @@ export function spinText(r){
 /** Tools whose core result may carry fields the pinned contract does not list yet (stamps): cut to the contract's
  * top-level properties so the closed output schema still passes; the fields flow through once the contract lists them. */
 // yeet_home and the proposals carry `limits` (XP tier caps: tier, per_trade_usdc, daily_limit_usdc, left_today_usdc).
-const CUT_TO_CONTRACT=new Set(['yeet_overview','daily_spin','yeet_home','yeet_propose','yeet_quote','skeet_propose']);
+const CUT_TO_CONTRACT=new Set(['yeet_overview','yeet_unlock','daily_spin','yeet_home','yeet_propose','yeet_quote','skeet_propose']);
 /** lucky_wheel and lucky_spin: one plain sentence for the model (the card reads structuredContent). */
 export function luckyText(r){
  const l=r?.lucky;
@@ -70,7 +80,11 @@ export function checkinText(r){
 }
 /** yeet_fund's text for the model: the one USDC number. */
 export const fundText=r=>`${r.usdc===null?"YEET fundText.":`They have ${r.usdc} USDC`}. The funding card is up.`;
-const TEXT={yeet_overview:overviewText,yeet_fund:fundText,yeet_checkin:checkinText,daily_spin:spinText,lucky_wheel:luckyText,lucky_spin:luckyText};
+/** yeet_terms and yeet_accept_terms: what the model reads first, in one line; the JSON follows in structuredContent. */
+export const termsText=r=>r.terms.accepted?`The person accepted the YEET terms (version ${r.terms.version}).`:`The person has not accepted the YEET terms (version ${r.terms.version}). Statements: ${r.terms.statements.map(s=>`[${s.id}${s.required?'':', optional'}] ${s.text} ${s.url}`).join(' | ')}`;
+export const acceptText=r=>`Recorded: the person accepted the YEET terms (version ${r.terms.version}).${r.overview?` ${overviewText(r.overview)}`:''}`;
+export const referralText=r=>r.status==='applied'?`YEET referralText: ${r.code}.`:r.status==='skipped'?'They skipped the win code. The card is up if they want to type one.':"YEET referralText.";
+const TEXT={yeet_terms:termsText,yeet_accept_terms:acceptText,yeet_referral:referralText,apply_referral:referralText,yeet_unlock:()=>'The card with the one-time device step is up.',yeet_overview:overviewText,yeet_fund:fundText,yeet_checkin:checkinText,daily_spin:spinText,lucky_wheel:luckyText,lucky_spin:luckyText};
 /** P0 and P1 are always registered; P2 (leaderboard, spin) only with YEET_P2=1. */
 export const registeredTools=(env=process.env)=>Object.values(toolSpecs).filter(t=>t.priority!=='P2'||env.YEET_P2==='1');
 export const TOOLS=Object.freeze(Object.values(toolSpecs).map(t=>Object.freeze({...t,route:ROUTES[t.name]})));
@@ -78,7 +92,7 @@ for(const t of TOOLS)if(!t.route)throw Error(`No core route for contract tool ${
 
 /** Results that carry `_meta['yeet/signer']` (CARD-SIGNING.md section 2.3a): the overview (its card checks the device
  * sign-in and shows the sign-in when needed), the proposals the card trades from and the trade answers it follows. Card-only, like the confirm code; never in structuredContent or content. */
-export const SIGNER_TOOLS=new Set(['yeet_overview','yeet_propose','yeet_quote','skeet_propose','execute_trade','submit_trade_signature','trade_status']);
+export const SIGNER_TOOLS=new Set(['yeet_overview','yeet_unlock','yeet_propose','yeet_quote','skeet_propose','execute_trade','submit_trade_signature','trade_status']);
 export function createMcpServer({token,callCore,env=process.env,staleness=processStaleness}) {
  const server=new McpServer({name:'yeet',version:'0.2.0'},{instructions});
  // Signing set up here (https RESOURCE, PRIVY_APP_ID, vendored signer): the signing cards declare the signing domains
@@ -94,7 +108,8 @@ export function createMcpServer({token,callCore,env=process.env,staleness=proces
   server.registerTool(name,{title:tool.title,description:tool.description,inputSchema:zodSchema(z,schemas.input),outputSchema:output,
    annotations:tool.annotations,_meta:{...meta(scope),...toolMeta(name)}},async(input,extra)=>{
    const granted=token.scope?.split(' ')??[];
-   if(!granted.includes(scope))return toolError({error:'REAUTH_REQUIRED'},ctx);
+   // An old scope name counts as its current one (yeet:trade is yeet:prepare).
+   if(!hasScope(granted,scope))return toolError({error:'REAUTH_REQUIRED'},ctx);
    // card_build (refresh.mjs): which card build made this call. Never sent on to core. A call without it on a tool the
    // model can see is the model's own call: its result is where the model is told about a stale app, once.
    const {card_build:cardBuild,...args}=input??{};
@@ -102,13 +117,16 @@ export function createMcpServer({token,callCore,env=process.env,staleness=proces
    staleness.note(key,{cardBuild,cardOnly:!tool.visible});
    const tellRefresh=tool.visible&&cardBuild===undefined&&staleness.take(key);
    try{
-    const [path,body]=route(args);
+    const session=typeof extra?._meta?.['openai/session']==='string'?extra._meta['openai/session'].slice(0,200):undefined;
+    const [path,body]=route(args,session);
     const result=await callCore(path,body);
     // The one-time confirm code goes to the card only (_meta). content repeats structuredContent, so neither may carry it.
     const isObject=result&&typeof result==='object'&&!Array.isArray(result);
     const confirm=tool.confirm&&isObject?result.confirm:undefined;
     const listed=CUT_TO_CONTRACT.has(name)&&schemas.output.properties?new Set(Object.keys(schemas.output.properties)):null;
-    const data=isObject?Object.fromEntries(Object.entries(result).filter(([k])=>k!=='confirm'&&k!=='guidance'&&(!listed||listed.has(k)))):result;
+    // The connected account (user id, email for the device code, wallets) goes to the card only, like the confirm code.
+    const account=isObject&&result.card_account&&typeof result.card_account==='object'?result.card_account:undefined;
+    const data=isObject?Object.fromEntries(Object.entries(result).filter(([k])=>k!=='confirm'&&k!=='guidance'&&k!=='card_account'&&(!listed||listed.has(k)))):result;
     // Agent guidance (guidance.mjs): for the model, in structuredContent (the card ignores it) and in the text it reads.
     const own=isObject?guidanceFor(name,data,ctx):undefined;
     const guidance=tellRefresh&&isObject?withRefresh(refreshGuidance(),own):own;
@@ -117,7 +135,7 @@ export function createMcpServer({token,callCore,env=process.env,staleness=proces
     if(!parsed.success)return toolError({error:'TEMPORARILY_UNAVAILABLE'},ctx);
     const text=TEXT[name]?TEXT[name](result):JSON.stringify(parsed.data);
     // Card only: the server's card build, so a card built from another commit can tell it is stale.
-    const cardMeta={[BUILD_META_KEY]:staleness.build,...(confirm?{[CONFIRM_META_KEY]:confirm}:{}),...(signer&&SIGNER_TOOLS.has(name)?{[SIGNER_META_KEY]:signer}:{})};
+    const cardMeta={[BUILD_META_KEY]:staleness.build,...(confirm?{[CONFIRM_META_KEY]:confirm}:{}),...(account?{[ACCOUNT_META_KEY]:account}:{}),...(signer&&SIGNER_TOOLS.has(name)?{[SIGNER_META_KEY]:signer}:{})};
     // The one-sentence tools (spin, lucky wheel) carry the guidance as a second text block; JSON text already has it.
     const content=[{type:'text',text},...(TEXT[name]&&parsed.data.guidance?[{type:'text',text:parsed.data.guidance}]:[])];
     return {structuredContent:parsed.data,...(Object.keys(cardMeta).length?{_meta:cardMeta}:{}),content};

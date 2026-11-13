@@ -50,7 +50,7 @@ const PASS_THROUGH=new Set(['yeet_home','daily_spin','lucky_wheel','lucky_spin',
 const checked=new Set();
 after(()=>{for(const n of PASS_THROUGH)assert.ok(checked.has(n),`no successful ${n} call was compared with core`)});
 
-const SCOPES=['openid','offline_access','yeet:read','yeet:write','yeet:trade'];
+const SCOPES=['openid','offline_access','yeet:read','yeet:write','yeet:prepare'];
 const {CARD_BUILD,APP}=await import('../../mcp/refresh.mjs');
 const CARD_ONLY=new Set(['execute_trade','submit_trade_signature','daily_spin','lucky_spin']);
 const local=url=>{const u=new URL(url,ORIGIN);return u.origin===ORIGIN?`${AS}${u.pathname}${u.search}`:u.href};
@@ -67,11 +67,13 @@ async function signIn(did){
  let r=await step(auth.href);let page=r.headers.get('location');let d=await (await step(page)).json();
  r=await step(page,form({csrf:d.csrf,identity_token:`DEV:${did}`}));r=await step(r.headers.get('location'));
  page=r.headers.get('location');d=await (await step(page)).json();assert.equal(d.prompt,'consent');
- r=await step(page,form({csrf:d.csrf,consent:'yes',agree_wallet:'yes',agree_chatgpt:'yes',agree_near:'yes',agree_terms:'yes',agree_privacy:'yes'}));d=await (await step(r.headers.get('location'))).json();assert.equal(d.prompt,'referral');
- r=await step(page,form({csrf:d.csrf,step:'referral',referral_action:'win',referral_code:'WIN'}));r=await step(r.headers.get('location'));
+ r=await step(page,form({csrf:d.csrf,consent:'yes'}));r=await step(r.headers.get('location'));
  const code=new URL(r.headers.get('location')).searchParams.get('code');
  const token=await (await fetch(AS+'/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',code,code_verifier:verifier,redirect_uri:redirect,client_id:'local-chatgpt-fixture',resource:ORIGIN})})).json();
  assert.ok(token.access_token);
+ {const {TERMS_VERSION,REQUIRED_IDS}=await import('../terms.mjs');
+  const a=(await (await rpc({jsonrpc:'2.0',id:9,method:'tools/call',params:{name:'yeet_accept_terms',arguments:{version:TERMS_VERSION,confirmed:[...REQUIRED_IDS]}}},token.access_token)).json()).result;
+  assert.equal(a.isError,undefined,JSON.stringify(a.content));assert.equal(a.structuredContent.terms.accepted,true);}
  const me=await (await fetch(AS+'/me',{headers:{authorization:`Bearer ${token.access_token}`}})).json();
  const call=async(name,input={})=>{
   lastCore=null;
@@ -223,7 +225,7 @@ test('YEET_P2=1 end to end: home -> spin -> leaderboard, then a settled trade sh
  assert.match(ov.guidance,/^Welcome .+ in one short line/);assert.equal(o.content[1].text,ov.guidance);
  assert.match(o.content[0].text,new RegExp(`^${handle(alice.sub)}: [0-9.]+ USDC, ${total} XP \\((Noob|Winner)\\), 1-day streak`));
  assert.match(o.content[0].text,/Offer next: /);
- for(const leak of [alice.sub,'0x','Base','Solana','wallet'])assert.ok(!JSON.stringify([ov,o.content[0].text]).includes(leak),leak);
+ for(const leak of [alice.sub,'0x','Base','Solana','wallet'])assert.ok(!JSON.stringify([{...ov,terms:undefined},o.content[0].text]).includes(leak),leak);   // the terms statements name the YEET wallet in words
 });
 
 test('lucky wheel end to end: lucky_wheel -> lucky_spin -> YEET 5 USDC into the landed coin -> settled: claimed, one bonus spin',async()=>{

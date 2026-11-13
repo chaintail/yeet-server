@@ -281,7 +281,8 @@
             "REAUTH_REQUIRED",
             "TEMPORARILY_UNAVAILABLE",
             "USERNAME_TAKEN",
-            "USERNAME_NOT_ALLOWED"
+            "USERNAME_NOT_ALLOWED",
+            "TERMS_REQUIRED"
           ]
         },
         "message": {
@@ -299,6 +300,19 @@
         },
         "guidance": {
           "$ref": "#/$defs/guidance"
+        },
+        "terms": {
+          "$ref": "#/$defs/terms",
+          "description": "With TERMS_REQUIRED: the current terms and where the person accepts them."
+        },
+        "missing": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9_]{1,40}$"
+          },
+          "description": "With TERMS_REQUIRED from yeet_accept_terms: required statements that were not confirmed."
         }
       },
       "required": [
@@ -1336,6 +1350,331 @@
       "type": "string",
       "pattern": "^[0-9a-f]{7,40}$",
       "description": "Set by the card only: the build of the card that makes this call."
+    },
+    "terms_statement": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]{1,40}$"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "What the person agrees to, in one sentence."
+        },
+        "url": {
+          "$ref": "#/$defs/https_url",
+          "description": "The document or section this statement refers to."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "false: the person may leave it out (product emails)."
+        }
+      },
+      "required": [
+        "id",
+        "text",
+        "url",
+        "required"
+      ],
+      "additionalProperties": false
+    },
+    "terms": {
+      "type": "object",
+      "description": "The YEET terms the person accepts once per version, and where they stand.",
+      "properties": {
+        "accepted": {
+          "type": "boolean",
+          "description": "true: the person accepted this version."
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "The current version. A new version is asked again."
+        },
+        "accepted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "statements": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 12,
+          "items": {
+            "$ref": "#/$defs/terms_statement"
+          }
+        },
+        "terms_url": {
+          "$ref": "#/$defs/https_url"
+        },
+        "privacy_url": {
+          "$ref": "#/$defs/https_url"
+        },
+        "mode": {
+          "enum": [
+            "chat",
+            "page"
+          ],
+          "description": "chat: the assistant shows the statements and records the acceptance with yeet_accept_terms. page: the person accepts on page_url."
+        },
+        "page_url": {
+          "$ref": "#/$defs/https_url",
+          "description": "The YEET page with the same statements as checkboxes. It records the same acceptance."
+        }
+      },
+      "required": [
+        "accepted",
+        "version",
+        "statements",
+        "terms_url",
+        "privacy_url",
+        "mode"
+      ],
+      "additionalProperties": false
+    },
+    "referral": {
+      "type": "object",
+      "description": "The win code: asked once, after the terms and before the first trade.",
+      "properties": {
+        "status": {
+          "enum": [
+            "open",
+            "applied",
+            "skipped"
+          ]
+        },
+        "code": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z0-9]{1,16}$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The code that was applied, else null."
+        },
+        "default_code": {
+          "type": "string",
+          "pattern": "^[A-Z0-9]{1,16}$",
+          "description": "What the input starts with."
+        },
+        "guidance": {
+          "$ref": "#/$defs/guidance"
+        }
+      },
+      "required": [
+        "status",
+        "code",
+        "default_code"
+      ],
+      "additionalProperties": false
+    },
+    "overview": {
+      "type": "object",
+      "properties": {
+        "username": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "description": "The name the person goes by on YEET."
+        },
+        "usdc": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/usdc"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "All the USDC the person can YEET with, as one number. null: it could not be read just now."
+        },
+        "xp": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tier": {
+          "enum": [
+            "Noob",
+            "Winner",
+            "VIP"
+          ]
+        },
+        "streak_days": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checkin_open": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "true while today’s daily check-in (the wheel) still has a spin left."
+        },
+        "holdings_count": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 64
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How many different meme coins the person holds."
+        },
+        "top_winner": {
+          "description": "The held coin that is up the most against the person’s own average YEET price, or null.",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "symbol": {
+                  "$ref": "#/$defs/symbol"
+                },
+                "pct": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000
+                },
+                "since": {
+                  "const": "buy"
+                }
+              },
+              "required": [
+                "symbol",
+                "pct",
+                "since"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trading": {
+          "enum": [
+            "live",
+            "paused"
+          ]
+        },
+        "needs_card_sign_in": {
+          "const": "unknown",
+          "description": "The server cannot see whether this device is signed in. The card checks, shows the sign-in when needed and reports back."
+        },
+        "suggestions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "description": "Next actions, most useful first.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "enum": [
+                  "terms",
+                  "referral",
+                  "checkin",
+                  "holdings",
+                  "discover",
+                  "fund",
+                  "others"
+                ]
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 48
+              },
+              "say": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "description": "What the person would say to pick it."
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "say"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "app_refresh": {
+          "type": "object",
+          "description": "Present when the person’s YEET app in ChatGPT is out of date: where they refresh it and how.",
+          "properties": {
+            "url": {
+              "$ref": "#/$defs/https_url"
+            },
+            "steps": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          "required": [
+            "url",
+            "steps"
+          ],
+          "additionalProperties": false
+        },
+        "guidance": {
+          "$ref": "#/$defs/guidance"
+        },
+        "terms": {
+          "$ref": "#/$defs/terms"
+        },
+        "referral_open": {
+          "type": "boolean",
+          "description": "true: the win code was never asked."
+        }
+      },
+      "required": [
+        "username",
+        "usdc",
+        "xp",
+        "tier",
+        "streak_days",
+        "checkin_open",
+        "holdings_count",
+        "top_winner",
+        "trading",
+        "needs_card_sign_in",
+        "suggestions"
+      ],
+      "additionalProperties": false
     }
   },
   "tools": {
@@ -1354,192 +1693,41 @@
         "additionalProperties": false
       },
       "outputSchema": {
+        "$ref": "#/$defs/overview"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "scope": "yeet:read",
+      "card": null,
+      "visible": true,
+      "widgetAccessible": true,
+      "errors": [
+        "INVALID_ARGUMENT",
+        "REAUTH_REQUIRED",
+        "TEMPORARILY_UNAVAILABLE",
+        "WALLET_NOT_READY"
+      ]
+    },
+    "yeet_unlock": {
+      "priority": "P0",
+      "title": "Unlock your wallet",
+      "description": "Shows the one-time step that trusts this device for trading.",
+      "inputSchema": {
         "type": "object",
         "properties": {
-          "username": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 32,
-            "description": "The name the person goes by on YEET."
-          },
-          "usdc": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/usdc"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "All the USDC the person can YEET with, as one number. null: it could not be read just now."
-          },
-          "xp": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "tier": {
-            "enum": [
-              "Noob",
-              "Winner",
-              "VIP"
-            ]
-          },
-          "streak_days": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "checkin_open": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "true while today’s daily check-in (the wheel) still has a spin left."
-          },
-          "holdings_count": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 64
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "How many different meme coins the person holds."
-          },
-          "top_winner": {
-            "description": "The held coin that is up the most against the person’s own average YEET price, or null.",
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "symbol": {
-                    "$ref": "#/$defs/symbol"
-                  },
-                  "pct": {
-                    "type": "number",
-                    "minimum": 0,
-                    "maximum": 1000000
-                  },
-                  "since": {
-                    "const": "buy"
-                  }
-                },
-                "required": [
-                  "symbol",
-                  "pct",
-                  "since"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "trading": {
-            "enum": [
-              "live",
-              "paused"
-            ]
-          },
-          "needs_card_sign_in": {
-            "const": "unknown",
-            "description": "The server cannot see whether this device is signed in. The card checks, shows the sign-in when needed and reports back."
-          },
-          "suggestions": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 5,
-            "description": "Next actions, most useful first.",
-            "items": {
-              "type": "object",
-              "properties": {
-                "id": {
-                  "enum": [
-                    "checkin",
-                    "holdings",
-                    "discover",
-                    "fund",
-                    "others"
-                  ]
-                },
-                "label": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 48
-                },
-                "say": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 80,
-                  "description": "What the person would say to pick it."
-                }
-              },
-              "required": [
-                "id",
-                "label",
-                "say"
-              ],
-              "additionalProperties": false
-            }
-          },
-          "app_refresh": {
-            "type": "object",
-            "description": "Present when the person’s YEET app in ChatGPT is out of date: where they refresh it and how.",
-            "properties": {
-              "url": {
-                "$ref": "#/$defs/https_url"
-              },
-              "steps": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 200
-              }
-            },
-            "required": [
-              "url",
-              "steps"
-            ],
-            "additionalProperties": false
-          },
-          "guidance": {
-            "$ref": "#/$defs/guidance"
+          "card_build": {
+            "$ref": "#/$defs/card_build"
           }
         },
-        "required": [
-          "username",
-          "usdc",
-          "xp",
-          "tier",
-          "streak_days",
-          "checkin_open",
-          "holdings_count",
-          "top_winner",
-          "trading",
-          "needs_card_sign_in",
-          "suggestions"
-        ],
+        "required": [],
         "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/overview"
       },
       "annotations": {
         "readOnlyHint": true,
@@ -1552,10 +1740,202 @@
       "visible": true,
       "widgetAccessible": true,
       "errors": [
+        "REAUTH_REQUIRED",
+        "TEMPORARILY_UNAVAILABLE",
+        "WALLET_NOT_READY",
+        "TERMS_REQUIRED"
+      ]
+    },
+    "yeet_terms": {
+      "priority": "P0",
+      "title": "YEET terms",
+      "description": "Returns the current YEET terms statements with their links and whether the person accepted this version.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "terms": {
+            "$ref": "#/$defs/terms"
+          },
+          "guidance": {
+            "$ref": "#/$defs/guidance"
+          }
+        },
+        "required": [
+          "terms"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "scope": "yeet:read",
+      "card": null,
+      "visible": true,
+      "widgetAccessible": false,
+      "errors": [
+        "REAUTH_REQUIRED",
+        "TEMPORARILY_UNAVAILABLE"
+      ]
+    },
+    "yeet_accept_terms": {
+      "priority": "P0",
+      "title": "Accept the YEET terms",
+      "description": "Records the person's acceptance of the current YEET terms version.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+            "description": "terms.version as shown to the person."
+          },
+          "confirmed": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 12,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]{1,40}$"
+            },
+            "description": "Ids of the statements the person confirmed."
+          }
+        },
+        "required": [
+          "version",
+          "confirmed"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "terms": {
+            "$ref": "#/$defs/terms"
+          },
+          "overview": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/overview"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The overview, so the conversation continues. null: it could not be read just now."
+          },
+          "guidance": {
+            "$ref": "#/$defs/guidance"
+          }
+        },
+        "required": [
+          "terms",
+          "overview"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "scope": "yeet:write",
+      "card": null,
+      "visible": true,
+      "widgetAccessible": false,
+      "errors": [
         "INVALID_ARGUMENT",
         "REAUTH_REQUIRED",
         "TEMPORARILY_UNAVAILABLE",
-        "WALLET_NOT_READY"
+        "TERMS_REQUIRED"
+      ]
+    },
+    "yeet_referral": {
+      "priority": "P1",
+      "title": "Win code",
+      "description": "Shows the win code card: one input that starts with WIN, Apply and Skip.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "card_build": {
+            "$ref": "#/$defs/card_build"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/referral"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "scope": "yeet:read",
+      "card": "referral",
+      "visible": true,
+      "widgetAccessible": true,
+      "errors": [
+        "REAUTH_REQUIRED",
+        "TEMPORARILY_UNAVAILABLE",
+        "TERMS_REQUIRED"
+      ]
+    },
+    "apply_referral": {
+      "priority": "P1",
+      "title": "Apply win code",
+      "description": "Card only: apply the win code the person typed, or record that they skipped it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16,
+            "pattern": "^[A-Za-z0-9]{1,16}$",
+            "description": "The code to apply. Leave out with skip."
+          },
+          "skip": {
+            "type": "boolean",
+            "description": "true: the person skipped the code."
+          },
+          "card_build": {
+            "$ref": "#/$defs/card_build"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/referral"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "scope": "yeet:write",
+      "card": "referral",
+      "visible": false,
+      "widgetAccessible": true,
+      "errors": [
+        "INVALID_ARGUMENT",
+        "REAUTH_REQUIRED",
+        "TEMPORARILY_UNAVAILABLE",
+        "TERMS_REQUIRED"
       ]
     },
     "yeet_home": {
@@ -1700,7 +2080,8 @@
       "errors": [
         "INVALID_ARGUMENT",
         "REAUTH_REQUIRED",
-        "TEMPORARILY_UNAVAILABLE"
+        "TEMPORARILY_UNAVAILABLE",
+        "TERMS_REQUIRED"
       ]
     },
     "yeet_coins": {
@@ -1803,7 +2184,8 @@
       "errors": [
         "INVALID_ARGUMENT",
         "REAUTH_REQUIRED",
-        "TEMPORARILY_UNAVAILABLE"
+        "TEMPORARILY_UNAVAILABLE",
+        "TERMS_REQUIRED"
       ]
     },
     "yeet_propose": {
@@ -1877,7 +2259,8 @@
         "LIMIT_EXCEEDED",
         "BALANCE_LOW",
         "WALLET_NOT_READY",
-        "TRADING_PAUSED"
+        "TRADING_PAUSED",
+        "TERMS_REQUIRED"
       ]
     },
     "yeet_quote": {
@@ -1939,7 +2322,8 @@
         "LIMIT_EXCEEDED",
         "BALANCE_LOW",
         "WALLET_NOT_READY",
-        "TRADING_PAUSED"
+        "TRADING_PAUSED",
+        "TERMS_REQUIRED"
       ]
     },
     "execute_trade": {
@@ -2076,7 +2460,7 @@
         "idempotentHint": true,
         "openWorldHint": true
       },
-      "scope": "yeet:trade",
+      "scope": "yeet:prepare",
       "card": "receipt",
       "visible": false,
       "widgetAccessible": true,
@@ -2090,7 +2474,8 @@
         "LIMIT_EXCEEDED",
         "BALANCE_LOW",
         "WALLET_NOT_READY",
-        "TRADING_PAUSED"
+        "TRADING_PAUSED",
+        "TERMS_REQUIRED"
       ]
     },
     "submit_trade_signature": {
@@ -2213,7 +2598,7 @@
         "idempotentHint": true,
         "openWorldHint": true
       },
-      "scope": "yeet:trade",
+      "scope": "yeet:prepare",
       "card": "receipt",
       "visible": false,
       "widgetAccessible": true,
@@ -2222,7 +2607,8 @@
         "REAUTH_REQUIRED",
         "TEMPORARILY_UNAVAILABLE",
         "LIMIT_EXCEEDED",
-        "TRADING_PAUSED"
+        "TRADING_PAUSED",
+        "TERMS_REQUIRED"
       ]
     },
     "trade_status": {
@@ -2420,7 +2806,8 @@
       "errors": [
         "INVALID_ARGUMENT",
         "REAUTH_REQUIRED",
-        "TEMPORARILY_UNAVAILABLE"
+        "TEMPORARILY_UNAVAILABLE",
+        "TERMS_REQUIRED"
       ]
     },
     "yeet_portfolio": {
@@ -2546,7 +2933,8 @@
       "errors": [
         "INVALID_ARGUMENT",
         "REAUTH_REQUIRED",
-        "TEMPORARILY_UNAVAILABLE"
+        "TEMPORARILY_UNAVAILABLE",
+        "TERMS_REQUIRED"
       ]
     },
     "yeet_fund": {
@@ -2615,7 +3003,8 @@
         "INVALID_ARGUMENT",
         "REAUTH_REQUIRED",
         "TEMPORARILY_UNAVAILABLE",
-        "WALLET_NOT_READY"
+        "WALLET_NOT_READY",
+        "TERMS_REQUIRED"
       ]
     },
     "skeet_propose": {
@@ -2688,7 +3077,8 @@
         "COST_TOO_HIGH",
         "BALANCE_LOW",
         "WALLET_NOT_READY",
-        "TRADING_PAUSED"
+        "TRADING_PAUSED",
+        "TERMS_REQUIRED"
       ]
     },
     "yeet_leaderboard": {
@@ -2867,7 +3257,8 @@
       "errors": [
         "INVALID_ARGUMENT",
         "REAUTH_REQUIRED",
-        "TEMPORARILY_UNAVAILABLE"
+        "TEMPORARILY_UNAVAILABLE",
+        "TERMS_REQUIRED"
       ]
     },
     "yeet_checkin": {
@@ -2912,7 +3303,8 @@
       "errors": [
         "INVALID_ARGUMENT",
         "REAUTH_REQUIRED",
-        "TEMPORARILY_UNAVAILABLE"
+        "TEMPORARILY_UNAVAILABLE",
+        "TERMS_REQUIRED"
       ]
     },
     "daily_spin": {
@@ -3088,7 +3480,8 @@
       "errors": [
         "INVALID_ARGUMENT",
         "REAUTH_REQUIRED",
-        "TEMPORARILY_UNAVAILABLE"
+        "TEMPORARILY_UNAVAILABLE",
+        "TERMS_REQUIRED"
       ]
     },
     "yeet_set_username": {
@@ -3142,7 +3535,8 @@
         "REAUTH_REQUIRED",
         "TEMPORARILY_UNAVAILABLE",
         "USERNAME_TAKEN",
-        "USERNAME_NOT_ALLOWED"
+        "USERNAME_NOT_ALLOWED",
+        "TERMS_REQUIRED"
       ]
     },
     "lucky_wheel": {
@@ -3187,7 +3581,8 @@
       "errors": [
         "INVALID_ARGUMENT",
         "REAUTH_REQUIRED",
-        "TEMPORARILY_UNAVAILABLE"
+        "TEMPORARILY_UNAVAILABLE",
+        "TERMS_REQUIRED"
       ]
     },
     "lucky_spin": {
@@ -3237,15 +3632,16 @@
       "errors": [
         "INVALID_ARGUMENT",
         "REAUTH_REQUIRED",
-        "TEMPORARILY_UNAVAILABLE"
+        "TEMPORARILY_UNAVAILABLE",
+        "TERMS_REQUIRED"
       ]
     }
   },
   "x-yeet-cards": {
     "overview": {
       "uri": "ui://yeet/overview-v1.html",
-      "title": "YEET",
-      "description": "The person’s name, USDC, XP, tier and streak. On a device that is not signed in yet it is the sign-in: email, then a code."
+      "title": "Unlock your wallet",
+      "description": "The one-time step that unlocks the person’s wallet on this device: a 6-digit code to the account’s email. On a device that is already unlocked it is one line."
     },
     "home": {
       "uri": "ui://yeet/home-v1.html",
@@ -3286,12 +3682,18 @@
       "uri": "ui://yeet/fund-v1.html",
       "title": "Add funds",
       "description": "The person’s USDC as one number, amount presets and one button that opens the YEET funding page."
+    },
+    "referral": {
+      "uri": "ui://yeet/referral-v1.html",
+      "title": "Win code",
+      "description": "One input for a win code, starting with WIN, with Apply and Skip."
     }
   },
   "x-yeet-meta": {
     "confirm": "yeet/confirm",
     "card": "yeet/card",
-    "build": "yeet/build"
+    "build": "yeet/build",
+    "account": "yeet/account"
   },
   "x-yeet-app": {
     "manage_url": "https://chatgpt.com/plugins",
@@ -3318,9 +3720,12 @@
     ]
   },
   "x-yeet-scopes": {
-    "yeet:read": "See wallets, coins, trades and XP.",
-    "yeet:write": "Create quotes and spin.",
-    "yeet:trade": "Trade from your own wallet, inside the card."
+    "yeet:read": "See your YEET balance, coins, trades and XP.",
+    "yeet:write": "Get quotes, spin the daily wheel and record what you confirm in the chat.",
+    "yeet:prepare": "Prepare trades for you to confirm yourself."
+  },
+  "x-yeet-scope-aliases": {
+    "yeet:trade": "yeet:prepare"
   },
   "x-yeet-errors": {
     "INVALID_ARGUMENT": {
@@ -3396,6 +3801,11 @@
     "USERNAME_NOT_ALLOWED": {
       "title": "Username reserved",
       "message": "That username is reserved, so pick another one.",
+      "retryable": false
+    },
+    "TERMS_REQUIRED": {
+      "title": "Accept the YEET terms",
+      "message": "Accept the YEET terms in the chat to continue.",
       "retryable": false
     }
   }

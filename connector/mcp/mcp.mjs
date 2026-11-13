@@ -40,8 +40,8 @@ app.post(resourcePath,async(req,res)=>{
    const r=await fetch(CORE+route,{method,redirect:'error',headers:{authorization:`Bearer ${secret('core-mcp')}`,'x-delegated-bearer':bearer,'content-type':'application/json'},
     ...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(coreTimeout(route,method))});
    const raw=await r.text();if(Buffer.byteLength(raw)>128*1024)throw Error('Bound');
-   const result=JSON.parse(raw);if(!r.ok)throw {error:result.error??(r.status===401?'REAUTH_REQUIRED':'TEMPORARILY_UNAVAILABLE'),fund_url:result.fund_url,message:result.message};return result;
-  }catch(e){throw {error:e.error??'TEMPORARILY_UNAVAILABLE',fund_url:e.fund_url,message:e.error?e.message:undefined}}
+   const result=JSON.parse(raw);if(!r.ok)throw {error:result.error??(r.status===401?'REAUTH_REQUIRED':'TEMPORARILY_UNAVAILABLE'),fund_url:result.fund_url,message:result.message,terms:result.terms,missing:result.missing,reason:result.reason};return result;
+  }catch(e){throw {error:e.error??'TEMPORARILY_UNAVAILABLE',fund_url:e.fund_url,message:e.error?e.message:undefined,terms:e.terms,missing:e.missing,reason:e.reason}}
  }
  const server=createMcpServer({token,callCore});
  const transport=new StreamableHTTPServerTransport({sessionIdGenerator:undefined,enableJsonResponse:true});

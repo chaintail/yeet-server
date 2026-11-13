@@ -6,8 +6,29 @@ const APP=contract['x-yeet-app'];
 
 export const COPY=Object.freeze({
 
+ terms:{
+  due_chat:"YEET terms.due_chat.",
+  due_page:"YEET terms.due_page.",
+  missing:"YEET terms.missing.",
+  version:"YEET terms.version.",
+  accepted:"YEET terms.accepted.",
+  recorded:"YEET terms.recorded.",
+ },
+ referral:{
+  open:"YEET referral.open.",
+  applied:"YEET referral.applied: {code}.",
+  skipped:"YEET referral.skipped.",
+ },
+ yeet_unlock:{
+  card:"YEET yeet_unlock.card.",
+ },
+
  yeet_overview:{
   base:"YEET yeet_overview.base: {username} {lead}.",
+
+  terms_chat:"YEET yeet_overview.terms_chat: {username}.",
+  terms_page:"YEET yeet_overview.terms_page: {username}.",
+  lead_referral:", YEET yeet_overview.lead_referral.",
   lead_none:" YEET yeet_overview.lead_none.",
   lead_fund:", YEET yeet_overview.lead_fund.",
   lead_checkin:", YEET yeet_overview.lead_checkin.",
@@ -240,11 +261,24 @@ function lucky(r){
 }
 function overviewGuidance(r){
  const c=COPY.yeet_overview,first=r.suggestions?.[0]?.id;
- const lead=r.trading==='paused'?c.lead_paused:first==='fund'?c.lead_fund:first==='checkin'?c.lead_checkin:c.lead_none;
+ if(r.terms&&r.terms.accepted===false)return fill(r.terms.mode==='page'?c.terms_page:c.terms_chat,{username:r.username});
+ const lead=r.trading==='paused'?c.lead_paused:first==='referral'?c.lead_referral:first==='fund'?c.lead_fund:first==='checkin'?c.lead_checkin:c.lead_none;
  return fill(c.base,{username:r.username,lead});
+}
+
+export function termsGuidance(terms,reason){
+ const c=COPY.terms;
+ if(reason==='missing')return c.missing;
+ if(reason==='version')return terms?.mode==='page'?c.due_page:c.version;
+ return terms?.mode==='page'?c.due_page:c.due_chat;
 }
 const BY_TOOL={
  yeet_overview:overviewGuidance,
+ yeet_unlock:()=>COPY.yeet_unlock.card,
+ yeet_terms:r=>r.terms?.accepted?COPY.terms.accepted:termsGuidance(r.terms),
+ yeet_accept_terms:()=>COPY.terms.recorded,
+ yeet_referral:r=>r.status==='applied'?fill(COPY.referral.applied,{code:r.code}):r.status==='skipped'?COPY.referral.skipped:COPY.referral.open,
+ apply_referral:r=>r.status==='applied'?fill(COPY.referral.applied,{code:r.code}):COPY.referral.skipped,
  yeet_home:home,
  yeet_coins:()=>COPY.yeet_coins.list,
  yeet_propose:proposal,yeet_quote:proposal,skeet_propose:proposal,
@@ -271,8 +305,9 @@ export function guidanceFor(name,result,ctx){
  try{return f(result,ctx)}catch{return undefined}
 }
 
-export function refusalGuidance(code,message,ctx){
+export function refusalGuidance(code,message,ctx,{terms,reason}={}){
  const e=COPY.errors;
+ if(code==='TERMS_REQUIRED')return termsGuidance(terms,reason);
  if(code==='LIMIT_EXCEEDED'){
   const tier=typeof message==='string'?message.match(/\bas a (Noob|Winner|VIP)\b/)?.[1]:undefined;
   return fill(tier?e[`LIMIT_EXCEEDED_${tier}`]:e.LIMIT_EXCEEDED,TIER_XP);

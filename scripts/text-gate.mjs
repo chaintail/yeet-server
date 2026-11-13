@@ -46,12 +46,15 @@ for(const [k,v] of Object.entries(descriptions))check(`rendered:description:${k}
 for(const [code,e] of Object.entries(TOOL_ERRORS)){check(`rendered:error:${code}`,e.message);check(`rendered:card:${code}`,e.title);check(`rendered:tool-error:${code}`,toolError({error:code}).content[0].text)}
 for(const view of WIDGET_VIEWS){check(`rendered:card-html:${view}`,widgetHtml(view));check(`rendered:card-meta:${view}`,JSON.stringify(resourceMeta(view)))}
 const prior=process.env.PRIVY_LOGIN;
-for(const mode of ['1','0']){process.env.PRIVY_LOGIN=mode;for(const p of ['login','consent'])check(`rendered:page-title:${p}:${mode}`,pages.promptTitle(p))}
+for(const mode of ['1','0']){process.env.PRIVY_LOGIN=mode;for(const p of ['login','connect-login','consent'])check(`rendered:page-title:${p}:${mode}`,pages.promptTitle(p))}
 if(prior===undefined)delete process.env.PRIVY_LOGIN;else process.env.PRIVY_LOGIN=prior;
 check('rendered:expired-page',pages.expiredAuthorizationBody);
-check('rendered:renewal',pages.renewableConsentCopy(3600));
+{const {connectedFor,legalLine}=await import(new URL('as/consent-selection.mjs',C));check('rendered:connected-for',connectedFor(7*86400));check('rendered:legal-line',legalLine())}
 check('rendered:credentials',pages.credentials());
-check('rendered:consent',consentForm({csrf:'x',accountId:'yeet-privy-a',clientId:'https://chatgpt.com/oauth/client.json',resource:'https://chatgpt.yeet.win',requested:['openid','offline_access','yeet:read','yeet:write','yeet:trade']}));
+check('rendered:consent',consentForm({csrf:'x',name:'Nimble Tapir 88',connectedSeconds:7*86400}));
+// The YEET terms page and the statements themselves (core/terms.mjs).
+{const {termsBody}=await import(new URL('as/terms-page.mjs',C));const {termsObject}=await import(new URL('core/terms.mjs',C));
+ check('rendered:terms-page',termsBody({csrf:'x',terms:termsObject(null,{mode:'page',pageUrl:'https://chatgpt.yeet.win/account/terms'})}));}
 const contract=JSON.parse(readFileSync(new URL('vendor/yeet-win/contracts/yeet-tools.json',C),'utf8'));
 check('rendered:contract-title',contract.title);
 for(const [card,c] of Object.entries(contract['x-yeet-cards']))check(`rendered:card-spec:${card}`,c.title+'\n'+c.description);

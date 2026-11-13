@@ -5,11 +5,9 @@
 
 /** Every method the page can offer, in the order it shows them. `key` is the AppResponse flag that turns it on. */
 export const METHODS = Object.freeze([
-  { id: "email", label: "email", key: "email_auth" },
   { id: "google", label: "Google", key: "google_oauth", oauth: true },
   { id: "apple", label: "Apple", key: "apple_oauth", oauth: true },
-  { id: "twitter", label: "X", key: "twitter_oauth", oauth: true },
-  { id: "telegram", label: "Telegram", key: "telegram_auth" },
+  { id: "email", label: "email", key: "email_auth" },
 ]);
 
 /** PrivyClientConfig.loginMethods names (LoginMethod in the 3.47.0 types) for every method the page can offer. */

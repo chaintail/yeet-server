@@ -22,7 +22,7 @@ const consent=(requested,body)=>{
 };
 
 test('consent loop: a consent without offline_access satisfies the provider consent prompt (no op_scopes_missing re-prompt)',()=>{
- const requested=['openid','yeet:write','yeet:read','yeet:trade'];
+ const requested=['openid','yeet:write','yeet:read','yeet:prepare'];
  const grant=consent(requested,{consent:'yes'});
  assert.deepEqual(missing(grant,requested),{op:[],rs:[]});
  assert.deepEqual(grant.getResourceScope(RESOURCE).split(' ').sort(),[...baseScopes].sort());

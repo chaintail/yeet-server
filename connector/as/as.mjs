@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
-import {applyConsentScopes,consentSelection,consentForm,submittedScopes,ignoreRefreshScope,requireAgreements,referralForm,referralCode,REFERRAL_TITLE} from './consent-selection.mjs';
+import {applyConsentScopes,consentSelection,consentForm,submittedScopes,ignoreRefreshScope,skipsConnectPage,legalLine} from './consent-selection.mjs';
+import {termsRoutes} from './terms-page.mjs';
 import {
   observeAuthorization,
   observeAuthorizationRejected,
@@ -9,7 +10,7 @@ import {
   diagnostic,
   observeServerError,
 } from "./diagnostics.mjs";
-import { document, credentials, html, renewableConsentCopy, expiredAuthorizationBody, promptTitle, providerErrorPage } from "./auth-pages.mjs";
+import { document, credentials, html, expiredAuthorizationBody, promptTitle, providerErrorPage } from "./auth-pages.mjs";
 import express from "express";
 import { providerCsp } from "./provider-csp.mjs";
 import { fundRoutes, privyPageCsp, afterSignIn, nextField } from "./fund-page.mjs";
@@ -458,7 +459,8 @@ function saveBinding(uid, binding) {
   db[uid] = binding;
   write("interaction-bindings.json", db);
 }
-// Per-account consent extras, next to the grant id they came with: product-email choice, referral code, screen shown.
+// Per-account record of the last grant id. (The product-email choice and the win code moved into the chat: core
+// terms_acceptances and referrals; older rows here are left as they are and no longer read.)
 function accountConsent(accountId, patch) {
   const db = read("account-consents.json");
   if (patch) {
@@ -467,9 +469,57 @@ function accountConsent(accountId, patch) {
   }
   return db[accountId];
 }
-// The referral screen shows once: for an account that has not seen it and holds no grant for this client.
-const referralDue = (accountId, clientId) =>
-  !accountConsent(accountId)?.referral_shown && Adapter.grantsFor(accountId, clientId).length === 0;
+// The sign-in that happened inside an authorization. The provider gives the consent step a new interaction id, so the
+// record is keyed by the authorization request itself: the client and its PKCE challenge (one per authorization).
+// Kept in this process for the life of an authorization (10 minutes) and used once; after a restart the connect
+// page is shown instead.
+const signedInHere = new Map();
+const authorizationKey = (d) =>
+  typeof d.params.code_challenge === "string" && d.params.code_challenge.length >= 43
+    ? createHmac("sha256", secret("csrf")).update(`${d.params.client_id}|${d.params.code_challenge}|${d.params.state ?? ""}`).digest("base64url")
+    : null;
+function noteSignIn(d, account) {
+  const key = authorizationKey(d);
+  if (!key) return;
+  for (const [k, v] of signedInHere) if (Date.now() - v.signedIn > INTERACTION_TTL * 1000) signedInHere.delete(k);
+  if (signedInHere.size < 5000) signedInHere.set(key, { account, signedIn: Date.now() });
+}
+function takeSignIn(d) {
+  const key = authorizationKey(d);
+  const v = key ? signedInHere.get(key) : undefined;
+  if (key) signedInHere.delete(key);
+  return v && Date.now() - v.signedIn <= INTERACTION_TTL * 1000 ? v : undefined;
+}
+/** The client is ChatGPT: its redirect URI is one of ChatGPT's connector redirects (security-policy.mjs). */
+async function chatgptClient(d) {
+  let uri = d.params.redirect_uri;
+  if (!uri) {
+    const c = await provider.Client.find(d.params.client_id);
+    uri = c?.redirectUris?.length === 1 ? c.redirectUris[0] : undefined;
+  }
+  return chatgptRedirect(uri);
+}
+/** Makes the grant for this authorization (the advertised and accepted scope names only) and returns to the client. */
+async function finishConnect(q, r, d) {
+  if ((d.params.resource || RESOURCE) !== RESOURCE) throw Error("Invalid resource");
+  const requested = (d.params.scope || "").split(" ").filter(Boolean);
+  const granted = submittedScopes(requested, { consent: "yes" });
+  // Every authorization gets a new grant: a second ChatGPT login never inherits an older one.
+  const grant = new provider.Grant({ accountId: d.session.accountId, clientId: d.params.client_id });
+  applyConsentScopes(grant, { requested, granted, resource: RESOURCE, opScopes: ["openid", "offline_access", ...issuableScopes], resourceScopes: issuableScopes });
+  const grantId = await grant.save();
+  // ChatGPT stays connected for the refresh window (REFRESH_FAMILY_TTL); the connect page says so in one line.
+  if (compatibilityClient(d.params.client_id))
+    recordConsent({
+      grantId,
+      accountId: d.session.accountId,
+      clientId: d.params.client_id,
+      resource: d.params.resource || RESOURCE,
+      scopes: [...grant.getOIDCScope().split(" "), ...grant.getResourceScope(RESOURCE).split(" ")].filter(Boolean),
+    });
+  accountConsent(d.session.accountId, { grantId });
+  await provider.interactionFinished(q, r, { consent: { grantId } }, { mergeWithLastSubmission: true });
+}
 app.get("/account/login", (q, r) => {
   const next = nextField(q.query.next);
   const c = randomBytes(24).toString("hex");
@@ -596,6 +646,8 @@ app.post(USERNAME_PATH, formBody, async (q, r) => {
 // Add funds: a direct USDC transfer on Base or on Solana (address, QR code, wallet links), or USDC on Base by card
 // through Privy funding (Coinbase Onramp). Needs a YEET sign-in session and the Privy sign-in.
 fundRoutes(app, { enabled: () => process.env.PRIVY_LOGIN === "1", session });
+// The YEET terms as a first-party page with checkboxes (terms-page.mjs): the same record as yeet_accept_terms.
+termsRoutes(app, { session, originOK, equal, formBody, core: (route, account, body) => coreSend(route, account, secret("core-as"), body), document: authDocument });
 // Card signing (sign-page.mjs): the signer script the trade card loads, and the first-party signing page with its two
 // routes. The page's caller is the Privy user signed in on the page, matched to the account already linked to it.
 signRoutes(app, {
@@ -628,10 +680,11 @@ app.get("/interaction/:uid", async (q, r, next) => {
     const binding = interactionBinding(d, s);
     if (s && !(await eligible(s.id, d.params.client_id)))
       throw Error("Account unavailable");
-    // Consent was submitted for this interaction; the referral screen comes next (also on reload).
-    if (d.prompt.name === "consent" && binding.pendingConsent) {
-      if (TEST) return r.json({ uid: d.uid, prompt: "referral", csrf: csrf(d.uid), referral_code: "WIN" });
-      return r.type("html").send(authDocument(r, REFERRAL_TITLE, referralForm({ csrf: csrf(d.uid) })));
+    // One screen: the person signed in on our page inside this authorization and the client is ChatGPT, so the
+    // browser goes straight back to ChatGPT (consent-selection.mjs skipsConnectPage).
+    if (d.prompt.name === "consent" && skipsConnectPage({ chatgpt: await chatgptClient(d), binding: takeSignIn(d), accountId: d.session?.accountId })) {
+      if (!boundBrowser(binding, s, d.session.accountId)) throw Error("Browser identity changed");
+      return await finishConnect(q, r, d);
     }
     if (process.env.REFRESH_DIAGNOSTICS === "1")
       observeAccepted(d, await provider.Client.find(d.params.client_id));
@@ -653,26 +706,25 @@ app.get("/interaction/:uid", async (q, r, next) => {
     }
     const login = d.prompt.name === "login";
     if (!login) {
-      const renewal = compatibilityClient(d.params.client_id)
-        ? renewableConsentCopy(configuredRefreshWindow())
-        : "";
+      const who = await currentUsername(d.session.accountId);
       r.type("html").send(
         authDocument(r, promptTitle(d.prompt.name), consentForm({
-          csrf: data.csrf, accountId: d.session.accountId, clientId: d.params.client_id,
-          resource: d.params.resource || RESOURCE, requested: requestedScopes, priorGranted: priorScopes, renewal,
+          csrf: data.csrf, name: who.name || who.username || "",
+          connectedSeconds: compatibilityClient(d.params.client_id) ? configuredRefreshWindow() : 0,
         })),
       );
       return;
     }
     const identity = s && !recoveringAccount(d)
-      ? `<input type="hidden" name="session_login" value="yes"><p>You are signed in to YEET.</p>`
+      ? `<input type="hidden" name="session_login" value="yes">`
       : loginFields();
-    const action = s && !recoveringAccount(d) ? "Continue" : "Sign in";
+    const known = s && !recoveringAccount(d) ? await currentUsername(s.id) : null;
+    const action = known ? `Continue as ${html(known.name || known.username || "your YEET account")}` : "Sign in";
     r.type("html").send(
       authDocument(
         r,
-        promptTitle(d.prompt.name),
-        `<form method="POST" data-yeet-prompt="login"><input type="hidden" name="csrf" value="${data.csrf}">${identity}${(!s || recoveringAccount(d)) && process.env.PRIVY_LOGIN === "1" ? "" : `<button type="submit">${action}</button>`}</form>`,
+        promptTitle("connect-login"),
+        `<form method="POST" data-yeet-prompt="login"><input type="hidden" name="csrf" value="${data.csrf}">${identity}${(!s || recoveringAccount(d)) && process.env.PRIVY_LOGIN === "1" ? "" : `<button type="submit">${action}</button>`}${legalLine()}</form>`,
       ),
     );
   } catch (e) {
@@ -691,6 +743,8 @@ app.post("/interaction/:uid", formBody, async (q, r, next) => {
       const binding = requireFreshBinding(read("interaction-bindings.json")[d.uid]);
       const id = await verifiedInteractionLogin(d,s,binding,q.body,{verifyIdentity,eligible});
       binding.account = id;
+      binding.signedIn = Date.now();
+      noteSignIn(d, id);
       const bindings = read("interaction-bindings.json");
       bindings[d.uid] = binding;
       write("interaction-bindings.json", bindings);
@@ -702,7 +756,11 @@ app.post("/interaction/:uid", formBody, async (q, r, next) => {
       );
       return;
     }
-    if (d.prompt.name === "consent" && (q.body.consent === "yes" || q.body.step === "referral")) {
+    if (d.prompt.name === "consent" && q.body.decision === "cancel") {
+      await provider.interactionFinished(q, r, { error: "access_denied", error_description: "The person cancelled" }, { mergeWithLastSubmission: false });
+      return;
+    }
+    if (d.prompt.name === "consent" && q.body.consent === "yes") {
       const s = session(q);
       const binding = requireFreshBinding(read("interaction-bindings.json")[d.uid]);
       if (
@@ -712,55 +770,7 @@ app.post("/interaction/:uid", formBody, async (q, r, next) => {
         !(await eligible(d.session.accountId, d.params.client_id))
       )
         throw Error("Browser identity or eligibility changed");
-      if ((d.params.resource || RESOURCE) !== RESOURCE) throw Error("Invalid resource");
-      const requested = (d.params.scope || "").split(" ").filter(Boolean);
-      let pending = binding.pendingConsent, referral = null;
-      if (q.body.step === "referral") {
-        if (!pending) return r.sendStatus(400);
-        referral = referralCode(q.body);
-      } else {
-        // A repeated consent submit while the referral screen is due goes back to that screen.
-        if (pending) return r.redirect(303, `/interaction/${d.uid}`);
-        const granted = submittedScopes(requested, q.body);
-        let agreed;
-        try { agreed = requireAgreements(q.body); } catch { return r.sendStatus(400); }
-        pending = { granted, renewable: q.body.renewable_consent === "yes", product_email: agreed.product_email };
-        if (referralDue(d.session.accountId, d.params.client_id)) {
-          saveBinding(d.uid, { ...binding, pendingConsent: pending });
-          return r.redirect(303, `/interaction/${d.uid}`);
-        }
-      }
-      // Every authorization gets a new grant: a second ChatGPT login never inherits an older one.
-      const grant = new provider.Grant({ accountId: d.session.accountId, clientId: d.params.client_id });
-      applyConsentScopes(grant, { requested, granted: pending.granted, resource: RESOURCE, opScopes: ["openid", "offline_access", ...issuableScopes], resourceScopes: issuableScopes });
-      const grantId = await grant.save();
-      if (
-        compatibilityClient(d.params.client_id) &&
-        pending.renewable
-      )
-        recordConsent({
-          grantId,
-          accountId: d.session.accountId,
-          clientId: d.params.client_id,
-          resource: d.params.resource || RESOURCE,
-          scopes: [...grant.getOIDCScope().split(" "), ...grant.getResourceScope(RESOURCE).split(" ")].filter(Boolean),
-        });
-      accountConsent(d.session.accountId, {
-        grantId,
-        product_email: pending.product_email,
-        ...(q.body.step === "referral" ? { referral_shown: true } : {}),
-        ...(referral ? { referral } : {}),
-      });
-      if (binding.pendingConsent) {
-        const { pendingConsent: _done, ...rest } = binding;
-        saveBinding(d.uid, rest);
-      }
-      await provider.interactionFinished(
-        q,
-        r,
-        { consent: { grantId } },
-        { mergeWithLastSubmission: true },
-      );
+      await finishConnect(q, r, d);
       return;
     }
     r.sendStatus(400);

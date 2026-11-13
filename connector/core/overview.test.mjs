@@ -17,7 +17,10 @@ test('totalUsdc: one number over every network; null only when nothing could be 
 });
 
 test('suggestions: the owner’s five, ordered by state (no USDC: fund first; check-in open: check-in first)',()=>{
- assert.deepEqual(Object.values(SUGGESTIONS).map(s=>s.label),['Do your daily check-in','Review your meme holdings','Discover a new coin to yeet','Fund my account','See what other people are yeeting']);
+ assert.deepEqual(Object.values(SUGGESTIONS).map(s=>s.label),['Do your daily check-in','Review your meme holdings','Discover a new coin to yeet','Fund my account','See what other people are yeeting','Review and accept the YEET terms','Got a win code?']);
+ // The terms come first while the current version is not accepted; then, once, the win code.
+ assert.deepEqual(ids(suggestionsFor({usdc:'20',checkinOpen:true,holdings:2,termsDue:true,referralOpen:true})),['terms','checkin','holdings','discover','fund']);
+ assert.deepEqual(ids(suggestionsFor({usdc:'20',checkinOpen:false,holdings:0,referralOpen:true})),['referral','discover','holdings','fund','others']);
  assert.deepEqual(ids(suggestionsFor({usdc:'20',checkinOpen:true,holdings:2})),['checkin','holdings','discover','fund','others']);
  assert.deepEqual(ids(suggestionsFor({usdc:'0',checkinOpen:true,holdings:0})),['fund','checkin','discover','holdings','others']);
  assert.deepEqual(ids(suggestionsFor({usdc:'0',checkinOpen:false,holdings:0})),['fund','discover','holdings','others']);
