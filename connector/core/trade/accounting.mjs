@@ -4,9 +4,12 @@
 // injectable chain reader: USDC on Base for YEET, each sold coin's mint on Solana for SKEET. Once the trade is final
 // (receipt complete, stale, or success/refunded/failed) it is read again and the debit is compared with what the
 // legs say moved: a SUCCESS leg is a certain debit, any other sent or sending leg may have come back as a refund, so
-// the debit must fall in [certain - tolerance, certain + uncertain + tolerance]. Outside that range the trade gets a
-// 'needs_review' row in trade_events and a balance_mismatch alert; the person's receipt and status are not touched.
-// A failed read is retried on later ticks, then the check is 'unavailable'.
+// the debit must fall in [certain - tolerance, certain + uncertain + tolerance]. Other trades of the same account and
+// direction that overlap the window move the same balance: each widens the range by its own possible movement (up to
+// its sent amount out, or back as a refund). A debit above the range gets a 'needs_review' row in trade_events and a
+// balance_mismatch alert; the person's receipt and status are not touched. A debit below the range is an inflow (a
+// deposit or a refund) and is inconclusive: the check is 'unavailable'. Only an 'ok' check with no overlapping trade
+// writes the observed source movement into the receipt. A failed read is retried on later ticks, then 'unavailable'.
 //
 // Alerts. trade_alerts is an outbox keyed by a dedup string, one row per (kind, trade): 'stuck' (not final after
 // YEET_STUCK_AFTER_MINUTES), 'stale' (tracking stopped), 'partial' (a final partial trade), 'balance_mismatch'.
@@ -59,17 +62,20 @@ export function expectedDebit(legs,legAssets){
  return out;
 }
 
-/** Compares before/after balances with the expected debit range; tolerance in bps of the upper bound (rounded up). */
+/** Compares before/after balances with the expected debit range; tolerance in bps of the upper bound (rounded up).
+ * `over`: some asset lost more than the range explains; `under`: some asset lost less (an inflow). */
 export function compareDebit({before,after,expected,toleranceBps=BALANCE_TOLERANCE_BPS}){
- const assets={};let ok=true;
+ const assets={};let ok=true,over=false,under=false;
  for(const [asset,{low,high}] of Object.entries(expected)){
   const b=before[asset]??0n,a=after[asset]??0n,debit=b-a;
   const tolerance=(high*BigInt(toleranceBps)+9_999n)/10_000n;
-  const within=debit>=low-tolerance&&debit<=high+tolerance;
+  const isOver=debit>high+tolerance,isUnder=debit<low-tolerance,within=!isOver&&!isUnder;
   if(!within)ok=false;
+  if(isOver)over=true;
+  if(isUnder)under=true;
   assets[asset]={before:String(b),after:String(a),debit:String(debit),low:String(low),high:String(high),tolerance:String(tolerance),ok:within};
  }
- return {ok,assets};
+ return {ok,over,under,assets};
 }
 
 /** Destination amounts per leg for the receipt: quoted, minimum and settled (from 1Click /status) amounts. */
@@ -153,18 +159,34 @@ export function createAccounting({db,chain,now=Date.now,toleranceBps=BALANCE_TOL
     continue;
    }
    const at=now(),legs=legsOf(c.trade_id);
-   const result=compareDebit({before,after,expected:expectedDebit(legs,legAssets),toleranceBps});
-   // Other trades of the same account and direction that overlap this one also move the balance; listed for review.
+   const expected=expectedDebit(legs,legAssets);
+   // Other trades of the same account and direction that overlap this one also move the balance: each may have debited
+   // up to its sent amount inside the window, or had it refunded into the window, so it widens the range both ways.
    const overlapping=db.prepare("SELECT id FROM trades WHERE account_id=? AND direction=? AND id<>? AND status<>'requote_required' AND created_at<=? AND updated_at>=? ORDER BY created_at")
     .all(c.account_id,c.direction,c.trade_id,at,c.before_at).map(r=>r.id);
-   const detail={...result,overlapping,toleranceBps};
+   let unknownOverlap=false;
+   for(const id of overlapping){
+    const o=db.prepare('SELECT address,legs_json FROM trade_balance_checks WHERE trade_id=?').get(id);
+    if(!o||o.address!==c.address){unknownOverlap=true;continue}
+    for(const [asset,{high}] of Object.entries(expectedDebit(legsOf(id),JSON.parse(o.legs_json)))){
+     if(!expected[asset])continue;// does not touch the assets checked here
+     expected[asset].low-=high;expected[asset].high+=high;
+    }
+   }
+   const result=compareDebit({before,after,expected,toleranceBps});
+   // Over the range: an unexplained debit. Under it: an inflow (deposit or refund), inconclusive, as is an overlapping
+   // trade whose own legs cannot be attributed.
+   const verdict=result.over?'needs_review':result.ok&&!unknownOverlap?'ok':'unavailable';
+   const reason=verdict==='unavailable'?(result.under?'inflow during the trade (deposit or refund)':'overlapping movement'):undefined;
+   const detail={...result,overlapping,toleranceBps,...(reason?{reason}:{})};
    const applied=atomic(db,()=>{
     if(db.prepare("UPDATE trade_balance_checks SET after_json=?,after_at=?,verdict=?,detail_json=?,attempts=attempts+1 WHERE trade_id=? AND verdict='pending'")
-     .run(JSON.stringify(str(after)),at,result.ok?'ok':'needs_review',JSON.stringify(detail),c.trade_id).changes!==1)return false;
-    appendEvent(db,{tradeId:c.trade_id,kind:'review',from:c.status,to:result.ok?'balance_ok':'needs_review',evidence:detail,at});
-    if(!result.ok)raiseAlert(db,{key:`balance_mismatch:${c.trade_id}`,tradeId:c.trade_id,kind:'balance_mismatch',detail,at});
-    // The observed source movement goes into the receipt beside the destination amounts; the verdict stays internal.
-    const receipt=c.receipt_json?JSON.parse(c.receipt_json):null;
+     .run(JSON.stringify(str(after)),at,verdict,JSON.stringify(detail),c.trade_id).changes!==1)return false;
+    appendEvent(db,{tradeId:c.trade_id,kind:'review',from:c.status,to:verdict==='ok'?'balance_ok':verdict==='needs_review'?'needs_review':'balance_unavailable',evidence:detail,at});
+    if(verdict==='needs_review')raiseAlert(db,{key:`balance_mismatch:${c.trade_id}`,tradeId:c.trade_id,kind:'balance_mismatch',detail,at});
+    // The observed source movement goes into the receipt beside the destination amounts, only when it is this trade's
+    // alone (ok, no overlapping trade); the verdict stays internal.
+    const receipt=verdict==='ok'&&!overlapping.length&&c.receipt_json?JSON.parse(c.receipt_json):null;
     if(receipt){
      receipt.accounting={...receipt.accounting,source:Object.fromEntries(Object.entries(result.assets).map(([k,v])=>[k,{before:v.before,after:v.after,debit:v.debit}]))};
      db.prepare('UPDATE trades SET receipt_json=? WHERE id=?').run(JSON.stringify(receipt),c.trade_id);
@@ -173,7 +195,7 @@ export function createAccounting({db,chain,now=Date.now,toleranceBps=BALANCE_TOL
    });
    if(applied){
     done++;
-    if(!result.ok)log(JSON.stringify({event:'trade_needs_review',trade:c.trade_id,reason:'balance_mismatch'}));
+    if(verdict==='needs_review')log(JSON.stringify({event:'trade_needs_review',trade:c.trade_id,reason:'balance_mismatch'}));
    }
   }
   return done;

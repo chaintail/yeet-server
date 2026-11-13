@@ -161,6 +161,44 @@ test('balance: an unexplained debit flags needs_review and an alert, and leaves 
  assert.equal(listAlerts(db).length,1,'checked once');
 });
 
+test('balance: overlapping trades of one account are each ok; nothing is flagged on normal use',async()=>{
+ const {engine,db}=await fakeEngine({env:{YEET_LIVE:'1',YEET_DAILY_CAP_USDC:'100'}});
+ const ids=[];
+ for(let i=0;i<5;i++)ids.push((await exec(engine,alice,await engine.propose(alice,{...one,request_id:`o${i}`}))).trade_id);
+ await engine.tracker.pollOnce();await engine.tracker.pollOnce();
+ for(const id of ids)assert.equal(engine.accounting.check(id).verdict,'ok',id);
+ assert.equal(listAlerts(db).length,0);
+ assert.equal(tradeEvents(db,ids[0]).filter(e=>e.to_status==='needs_review').length,0);
+ const receipt=JSON.parse(tradeRow(db,ids[0]).receipt_json);
+ assert.equal(receipt.accounting?.source,undefined,'a debit shared with other trades is not written into this receipt');
+});
+
+test('balance: with overlapping trades, a debit beyond all of them is still flagged',async()=>{
+ const balances=fakeBalances(),signer=fakeSigner();
+ const chain=fakeChain({balances,signer});
+ const {engine,db}=await fakeEngine({balances,signer,chain});
+ const a=await exec(engine,alice,await engine.propose(alice,{...one,request_id:'x1'}));
+ const b=await exec(engine,alice,await engine.propose(alice,{...one,request_id:'x2'}));
+ chain.adjust[USDC_KEY]=-30_000_000;// more than both trades together could explain
+ await engine.tracker.pollOnce();await engine.tracker.pollOnce();
+ assert.equal(engine.accounting.check(a.trade_id).verdict,'needs_review');
+ assert.equal(engine.accounting.check(b.trade_id).verdict,'needs_review');
+ assert.equal(listAlerts(db).filter(x=>x.kind==='balance_mismatch').length,2);
+});
+
+test('balance: a deposit while a trade settles is inconclusive, not needs_review',async()=>{
+ const balances=fakeBalances(),signer=fakeSigner();
+ const chain=fakeChain({balances,signer});
+ const {engine,db}=await fakeEngine({balances,signer,chain,hooks:{afterCommit:()=>{chain.adjust[USDC_KEY]=50_000_000}}});
+ const r=await exec(engine,alice,await engine.propose(alice,one));
+ await engine.tracker.pollOnce();await engine.tracker.pollOnce();
+ const c=engine.accounting.check(r.trade_id);
+ assert.equal(c.verdict,'unavailable');
+ assert.match(JSON.parse(c.detail_json).reason,/inflow/);
+ assert.equal(listAlerts(db).length,0);
+ assert.equal(JSON.parse(tradeRow(db,r.trade_id).receipt_json).accounting?.source,undefined);
+});
+
 test('balance: a refunded leg may come back or not; SKEET checks the sold mint',async()=>{
  const oneclick=fakeOneClick({statuses:['status-refunded.json']});
  const {engine}=await fakeEngine({oneclick});
