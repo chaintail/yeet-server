@@ -18,7 +18,8 @@ import {statusTolerantFetch} from './oneclick-status.mjs';
 export const PRICE_TTL_MS=5*60_000;
 
 export async function createEngine({db,env=process.env,client,signer,balances,chain,didFor,now=Date.now,onSettled,trackerIntervalMs=5000,budgetMs,hooks,catalog=CATALOG,fetch=globalThis.fetch,log}){
- const limits=limitsFromEnv(env);
+ // The old engine (no caller since the pipeline; removed in STATUS step 7) keeps its flat 25 / 50 USDC caps.
+ const limits=limitsFromEnv({YEET_MAX_TRADE_USDC:'25',YEET_DAILY_CAP_USDC:'50',...env});
  // statusTolerantFetch: 1Click answers null for not-yet-known status fields (oneclick-status.mjs).
  client??=new OneClickClient({jwt:env.ONECLICK_JWT||undefined,timeoutMs:6000,retryDelayMs:500,fetch:statusTolerantFetch(fetch)});
  balances??=createRpcBalances({baseRpcUrl:env.BASE_RPC_URL,solanaRpcUrl:env.SOLANA_RPC_URL,fetch});

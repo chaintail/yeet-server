@@ -3,7 +3,7 @@
 // returns the same proposal, a different payload under the same request_id is INVALID_ARGUMENT. Every answer carries
 // a new one-time confirm code that the connector moves to the card-only `_meta`.
 import {buildYeetPlan,buildSkeetPlan,PlanValidationError,PlanQuoteError,CATALOG,findToken,parseUnits,formatUnits,splitByParts,MAX_PARTS} from './router.mjs';
-import {checkKillSwitch,checkLegCount,checkBasket,checkCost,checkDaily,costBps,COST_WARN_BPS} from './limits.mjs';
+import {checkKillSwitch,checkLegCount,checkBasket,checkCost,checkDaily,costBps,COST_WARN_BPS,capsFor,capsView} from './limits.mjs';
 import {refuse,sha256,newId,iso,usd,usdRaw,TradeError} from './util.mjs';
 import {tx} from './db.mjs';
 
@@ -27,7 +27,12 @@ export async function routed(fn){
 /** Hash of what a confirm code approves: proposal, revision and each leg's coin, exact input and minimum output. */
 export const quoteHash=(proposalId,revision,legs)=>sha256({proposalId,revision,legs:legs.map(l=>({symbol:l.symbol,asset:l.asset_id,in:l.amount_in_raw,min:l.dry_min_out_raw}))});
 
-export function createProposals({db,client,limits,wallets,codes,now=Date.now,catalog=CATALOG}){
+export function createProposals({db,client,limits,wallets,codes,now=Date.now,catalog=CATALOG,xpOf}){
+ // XP tier caps (limits.mjs TIER_DEFAULTS) when an XP reader is given (the pipeline); without one (old engine) the
+ // account-blind ceiling applies. BUY only: SKEET is never capped.
+ const xp=accountId=>{if(!xpOf)return undefined;try{const n=Number(xpOf(accountId));return Number.isFinite(n)?n:0}catch{return 0}};
+ const capsOf=accountId=>{const n=xp(accountId);return n===undefined?undefined:capsFor(db,limits,accountId,now(),n)};
+ const withLimits=(out,accountId)=>{const c=capsOf(accountId);return c?{...out,limits:capsView(c)}:out};
  const coin=symbol=>{const t=findToken(symbol,'solana',catalog);if(!t||t.kind==='funding')refuse('COIN_NOT_SUPPORTED',symbol);return t};
  const legsOf=(id,revision)=>db.prepare('SELECT * FROM proposal_legs WHERE proposal_id=? AND revision=? ORDER BY idx').all(id,revision);
  const row=id=>db.prepare('SELECT * FROM proposals WHERE id=?').get(id);
@@ -98,7 +103,7 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
   return codes.mint({accountId,clientId,proposalId:p.id,revision,quoteSha:quoteHash(p.id,revision,legsOf(p.id,revision))},opts);
  }
  async function present(p,revision,ctx,w){
-  const out=view(p,revision,await walletWarnings(w,p.direction,BigInt(p.amount_in_raw)));
+  const out=withLimits(view(p,revision,await walletWarnings(w,p.direction,BigInt(p.amount_in_raw))),ctx.accountId);
   return p.status==='proposed'&&p.revision===revision?{...out,confirm:mint(p,revision,ctx.accountId,ctx.clientId)}:out;
  }
  /** Same request again: the stored proposal (latest revision). Another payload under the same id: INVALID_ARGUMENT. */
@@ -161,8 +166,8 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
    if(existing)return present(existing,existing.revision,ctx,await wallets.resolve(ctx.accountId));
    validateYeetLegs(legs);
    const total=amountRaw(amount_usdc);
-   checkBasket(limits,legShares(total,legs));
-   checkDaily(db,limits,ctx.accountId,now(),total);
+   checkBasket(limits,legShares(total,legs),capsOf(ctx.accountId));
+   checkDaily(db,limits,ctx.accountId,now(),total,xp(ctx.accountId));
    const w=await wallets.require(ctx.accountId);
    const plan=await yeetPlan(w,amount_usdc,legs,slippage);
    const rows=legRows(plan);
@@ -199,8 +204,8 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
     validateYeetLegs(nextLegs);
     const amount=amount_usdc??formatUnits(total,6);
     total=amountRaw(amount);
-    checkBasket(limits,legShares(total,nextLegs));
-    checkDaily(db,limits,ctx.accountId,now(),total);
+    checkBasket(limits,legShares(total,nextLegs),capsOf(ctx.accountId));
+    checkDaily(db,limits,ctx.accountId,now(),total,xp(ctx.accountId));
     rows=legRows(await yeetPlan(w,amount,nextLegs,p.slippage_bps));
    }else{
     if(legs!==undefined||amount_usdc!==undefined)refuse('INVALID_ARGUMENT','a SKEET quote takes no new legs or amount');

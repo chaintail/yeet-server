@@ -17,7 +17,7 @@
 // Recovery (tracker tick): attempts are resolved by the driver; legs left unsigned past SIGN_WINDOW_MS, past the
 // deposit deadline margin or while trading is paused become not_sent with the amount back to the daily cap; landed
 // legs are reported to 1Click (/deposit/submit) and tracked.
-import {limitsFromEnv,accountLive,checkKillSwitch,checkBasket,checkDaily,checkCost,recordSpend} from '../trade/limits.mjs';
+import {limitsFromEnv,accountLive,checkKillSwitch,checkBasket,checkDaily,checkCost,recordSpend,capsFor,capsView} from '../trade/limits.mjs';
 import {createConfirmCodes} from '../trade/nonce.mjs';
 import {createProposals,quoteHash} from '../trade/proposals.mjs';
 import {createWallets,createRpcBalances} from '../trade/wallets.mjs';
@@ -32,6 +32,7 @@ import {createDrivers} from './drivers.mjs';
 import {walletDirectoryFromEnv} from './wallet-directory.mjs';
 import {readSponsorshipLimits} from './solana/sponsorship.mjs';
 import {WALLET_CHAIN,CHAINS} from './driver-interface.mjs';
+import {xpRuntime} from '../xp/xp.mjs';
 
 export const PREVIEW_STALE_MS=60_000;
 export const PRICE_TTL_MS=5*60_000;
@@ -56,8 +57,11 @@ const chainEnv=(env,name)=>{const v=env[name]?.trim()||'sol';if(!CHAINS.includes
 
 export function createPipeline({db,env=process.env,client,wallets,directory,balances,drivers,ledger,catalog=CATALOG,now=Date.now,fetch=globalThis.fetch,didFor,
  onSettled,trackerIntervalMs=5000,log=line=>console.log(line),driverOverrides,liveBroadcast=true,
- landingPollMs=1000,landingWatchMs=60_000,sleep=ms=>new Promise(r=>{const h=setTimeout(r,ms);h.unref?.()})}){
+ landingPollMs=1000,landingWatchMs=60_000,sleep=ms=>new Promise(r=>{const h=setTimeout(r,ms);h.unref?.()}),
+ xpOf=id=>xpRuntime(env).total(id)}){
  const limits=limitsFromEnv(env);
+ /** The account's XP for the tier caps (limits.mjs); an unreadable XP store counts as 0 XP (Noob, the lowest caps). */
+ const xpTotal=id=>{try{const n=Number(xpOf(id));return Number.isFinite(n)?n:0}catch{return 0}};
  const gateFor=liveGate(env);
  const buyChain=chainEnv(env,'YEET_BUY_CHAIN'),sellChain=chainEnv(env,'YEET_SELL_CHAIN');
  const event=e=>{try{log(JSON.stringify(e))}catch{}};
@@ -68,7 +72,7 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
  ledger??=createLedger({db,now,sponsorLimits:readSponsorshipLimits(env),log:l=>event(JSON.parse(l))});
  drivers??=createDrivers({env,db,ledger,fetch,now,log:event,gateFor,liveBroadcast,overrides:driverOverrides});
  const codes=createConfirmCodes({db,now,mintLimit:limits.codeMintLimit});
- const proposals=createProposals({db,client,limits,wallets,codes,now,catalog});
+ const proposals=createProposals({db,client,limits,wallets,codes,now,catalog,xpOf:xpTotal});
  const tracker=createTracker({db,client,now,onSettled,intervalMs:trackerIntervalMs,trackMaxHours:limits.trackMaxHours,accounting:{raiseAlert:a=>ledger.raiseAlert(a),
   // Review finding 2: held BUY amounts return to the daily cap only after the deposit deadline, on 1Click's word.
   async tick(){await ledger.releaseDue((addr,memo)=>client.status(addr,memo))}}});
@@ -212,8 +216,8 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   const total=legs.reduce((a,l)=>a+BigInt(l.amount_in_raw),0n);
   let held;
   if(p.direction==='yeet'){
-   checkBasket(limits,legs.map(l=>BigInt(l.amount_in_raw)));
-   checkDaily(db,limits,ctx.accountId,now(),total);
+   const xp=xpTotal(ctx.accountId);checkBasket(limits,legs.map(l=>BigInt(l.amount_in_raw)),capsFor(db,limits,ctx.accountId,now(),xp));
+   checkDaily(db,limits,ctx.accountId,now(),total,xp);
    const usdc=usdcOn(chain,catalog);
    const have=chain==='sol'?(await wallets.holdings(w.solana.address)).filter(h=>h.mint===usdc.address).reduce((a,h)=>a+h.raw,0n):await wallets.usdc(w.base.address);
    if(have<total)refuse('BALANCE_LOW');
@@ -235,7 +239,7 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   const committed=tx(db,()=>{
    if(!codes.consume({code:confirm,tradeId}))return false;
    if(db.prepare("UPDATE proposals SET status='executing',updated_at=? WHERE id=? AND revision=? AND status='proposed'").run(t,p.id,revision).changes!==1)refuse('CONFIRMATION_REQUIRED','proposal changed meanwhile');
-   if(p.direction==='yeet'){checkDaily(db,limits,ctx.accountId,t,total);recordSpend(db,ctx.accountId,t,total)}
+   if(p.direction==='yeet'){checkDaily(db,limits,ctx.accountId,t,total,xpTotal(ctx.accountId));recordSpend(db,ctx.accountId,t,total)}
    const receipt={version:1,planId:live.id,direction:live.direction,recipient:live.recipient,refundTo:live.refundTo,planCreatedAt:live.createdAt,
     trackingStartedAt:iso(t),writtenAt:iso(t),complete:false,timedOut:false,legs:[]};
    db.prepare('INSERT INTO trades(id,proposal_id,revision,account_id,direction,status,created_at,updated_at,receipt_json,result_json,origin_chain) VALUES(?,?,?,?,?,?,?,?,?,NULL,?)')
@@ -334,7 +338,7 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
    try{funding=buyChain==='sol'?await solUsdc(w.solana.address):usdc}catch{}
    const r=drivers[buyChain]?.readiness?.()??{ok:false};
    const ready=limits.killSwitch||!limits.live||!accountLive(limits,ctx.accountId)||!r.ok?'paused':funding!==null&&funding<limits.minLegRaw?'needs_funds':'ready';
-   return {wallets:{base:{address:w.base.address,usdc:usdc===null?null:usd(formatUnits(usdc,6))},solana:{address:w.solana.address}},ready,xp:null,recent_wins:[]};
+   return {wallets:{base:{address:w.base.address,usdc:usdc===null?null:usd(formatUnits(usdc,6))},solana:{address:w.solana.address}},ready,xp:null,recent_wins:[],limits:capsView(capsFor(db,limits,ctx.accountId,now(),xpTotal(ctx.accountId)))};
   },
   /** yeet_portfolio: catalogue coins held on Solana (USDC on Solana included), USDC on Base. */
   async portfolio(ctx){

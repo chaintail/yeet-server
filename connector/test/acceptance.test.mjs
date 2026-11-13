@@ -111,7 +111,8 @@ test('GET /version: public deployment facts, cached 60 s, no secret or internal 
  assert.deepEqual(Object.keys(v),['service','server_commit','yeet_win_commit','trading','limits','catalog_coins']);
  assert.equal(v.service,'yeet');assert.equal(v.yeet_win_commit,vendoredPin());assert.match(v.yeet_win_commit,/^[0-9a-f]{40}$/);
  assert.equal(v.trading,'paused');
- assert.deepEqual(v.limits,{max_trade_usdc:'25',daily_cap_usdc:'50',min_leg_usdc:'3'});
+ // max_trade / daily_cap are the global ceilings (the VIP caps by default); tiers are the BUY caps by XP (trade/limits.mjs).
+ assert.deepEqual(v.limits,{max_trade_usdc:'500',daily_cap_usdc:'6767',min_leg_usdc:'3',tiers:[{name:'Noob',min_xp:0,max_trade_usdc:'25',daily_cap_usdc:'100'},{name:'Winner',min_xp:69,max_trade_usdc:'100',daily_cap_usdc:'420'},{name:'VIP',min_xp:1001,max_trade_usdc:'500',daily_cap_usdc:'6767'}]});
  assert.ok(Number.isInteger(v.catalog_coins)&&v.catalog_coins>0);
  assert.doesNotMatch(raw,/127\.0\.0\.1|localhost|core:|as:|http:/);
  assert.equal((await fetch(CONNECTOR+'/version',{headers:{authorization:'Bearer x'}})).status,200);

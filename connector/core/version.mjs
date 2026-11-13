@@ -23,7 +23,8 @@ export function versionInfo(env=process.env){
   server_commit:SHA.test(commit)?commit:null,
   yeet_win_commit:vendoredPin(),
   trading:limits.live&&!limits.killSwitch?'live':'paused',
-  limits:{max_trade_usdc:formatUnits(limits.maxTradeRaw,6),daily_cap_usdc:formatUnits(limits.dailyCapRaw,6),min_leg_usdc:formatUnits(limits.minLegRaw,6)},
+  limits:{max_trade_usdc:formatUnits(limits.maxTradeRaw,6),daily_cap_usdc:formatUnits(limits.dailyCapRaw,6),min_leg_usdc:formatUnits(limits.minLegRaw,6),
+   tiers:limits.tiers.map(t=>({name:t.name,min_xp:t.minXp,max_trade_usdc:formatUnits(t.maxTradeRaw,6),daily_cap_usdc:formatUnits(t.dailyCapRaw,6)}))},
   catalog_coins:tradable().length,
  };
 }

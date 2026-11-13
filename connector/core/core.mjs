@@ -6,7 +6,7 @@ import express from 'express';
 import {introspectBearer,validatePrincipal} from '#shared/introspection.mjs';
 import {secret,equal,read,write,port,TEST,DEV_APP_ID} from '#shared/common.mjs';
 import {coins} from './coins.mjs';
-import {unavailable,failure} from './failure.mjs';
+import {unavailable,failure,withUserMessage} from './failure.mjs';
 import {tradeEngine,onTradeSettled} from './trade/runtime.mjs';
 import {xpRuntime,p2On,homeXp,homeXpKeys,checkSpinTable} from './xp/xp.mjs';
 import {z} from 'zod';
@@ -135,7 +135,7 @@ function trade(tool,fn){
   if(!args.success)return r.status(400).json(failure('INVALID_ARGUMENT'));
   try{r.json(await fn(await tradeEngine(),ctx,args.data,q))}
   catch(e){
-   if(e?.name==='TradeError'){console.error(JSON.stringify({event:'trade_refused',route:q.route?.path,code:e.code,detail:String(e.detail??'').slice(0,200)}));return r.status(CODE_STATUS[e.code]??409).json(failureWithFundUrl(failure(e.code)))}
+   if(e?.name==='TradeError'){console.error(JSON.stringify({event:'trade_refused',route:q.route?.path,code:e.code,detail:String(e.detail??'').slice(0,200)}));return r.status(CODE_STATUS[e.code]??409).json(failureWithFundUrl(withUserMessage(failure(e.code),e)))}
    console.error(JSON.stringify({event:'trade_route_failed',route:q.route?.path,error:String(e?.message??e).slice(0,200)}));
    unavailable(r);
   }

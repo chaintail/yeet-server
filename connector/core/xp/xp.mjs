@@ -85,6 +85,8 @@ export function openXp({file=':memory:',secret,now=Date.now,coins}={}){
   /** yeet_home's recent_wins. The contract asks for {symbol, pct}; the stored data has what a leg paid and received
    * but no later price, so no gain since the buy can be stated truthfully. An empty list until a price history exists. */
   recentWins:()=>[],
+  /** The account's XP total (trade caps by tier, trade/limits.mjs). */
+  total:who=>ledger.total(who),
   doSpin:who=>spin.spin(who),
   /** Internal: one extra spin for `who` on `day` (spin.mjs grantSpin). Kept for a future trade bonus; no caller yet. */
   grantSpin:(who,day,reason,uniqueRef)=>spin.grantSpin(who,day,reason,uniqueRef),

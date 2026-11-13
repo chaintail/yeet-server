@@ -32,7 +32,8 @@ export function spinText(r){
 }
 /** Tools whose core result may carry fields the pinned contract does not list yet (stamps): cut to the contract's
  * top-level properties so the closed output schema still passes; the fields flow through once the contract lists them. */
-const CUT_TO_CONTRACT=new Set(['daily_spin']);
+// yeet_home and the proposals carry `limits` (XP tier caps: tier, per_trade_usdc, daily_limit_usdc, left_today_usdc).
+const CUT_TO_CONTRACT=new Set(['daily_spin','yeet_home','yeet_propose','yeet_quote','skeet_propose']);
 const TEXT={daily_spin:spinText};
 /** P0 and P1 are always registered; P2 (leaderboard, spin) only with YEET_P2=1. */
 export const registeredTools=(env=process.env)=>Object.values(toolSpecs).filter(t=>t.priority!=='P2'||env.YEET_P2==='1');

@@ -1,7 +1,8 @@
 // Server-side trade limits (port plan 2.3 item 4 and risk 3). Every refusal is one catalogue code.
 //   YEET_MIN_LEG_USDC    minimum USDC per coin (default 3)         -> AMOUNT_TOO_SMALL
-//   YEET_MAX_TRADE_USDC  maximum USDC per trade (default 25)       -> LIMIT_EXCEEDED
-//   YEET_DAILY_CAP_USDC  USDC per account per UTC day (default 50) -> LIMIT_EXCEEDED
+//   BUY caps by XP tier (TIER_DEFAULTS below; per trade and per UTC day)  -> LIMIT_EXCEEDED
+//   YEET_MAX_TRADE_USDC / YEET_DAILY_CAP_USDC  optional global ceilings over every tier (default: the VIP caps).
+//                        Set to the old 25 / 50 they would clamp Winner and VIP: leave them unset in production.
 //   YEET_MAX_COST_BPS    swap cost ceiling in bps (default 800)    -> COST_TOO_HIGH
 //   YEET_KILL_SWITCH     1/true: no new proposals or trades        -> TRADING_PAUSED
 //   YEET_LIVE_ACCOUNTS   comma list of account ids (yeet-privy-...). When set, only these accounts may execute while
@@ -15,7 +16,7 @@
 // The daily cap is enforced here only: Privy's aggregation does not count eth_sendTransaction (PRIVY-SETUP-REVIEW).
 //   at most 5 legs                                                 -> INVALID_ARGUMENT
 import {parseUnits} from './router.mjs';
-import {refuse,utcDay} from './util.mjs';
+import {refuse,utcDay,TradeError} from './util.mjs';
 
 export const MAX_LEGS=5;
 export const COST_WARN_BPS=300;
@@ -42,12 +43,34 @@ export function liveAccountsFromEnv(env=process.env){
 }
 /** True when the account may execute under the allowlist (always true without one). Does not look at YEET_LIVE. */
 export const accountLive=(limits,accountId)=>!limits.liveAccounts||limits.liveAccounts.includes(accountId);
-/** Reads and validates the limits; throws at startup on a malformed value. */
+/** BUY caps by XP tier (owner ruling 2026-11-13): Noob under 69 XP, Winner 69 to 1000 XP inclusive, VIP over 1000 XP.
+ * A basket is one trade: the per-trade cap applies to its total. SELLs are never capped and never counted.
+ * Env overrides: YEET_TIER_{NOOB,WINNER,VIP}_{TRADE,DAILY}_USDC. */
+export const TIER_DEFAULTS=Object.freeze([
+ Object.freeze({name:'Noob',minXp:0,trade:'25',daily:'100'}),
+ Object.freeze({name:'Winner',minXp:69,trade:'100',daily:'420'}),
+ Object.freeze({name:'VIP',minXp:1001,trade:'500',daily:'6767'}),
+]);
+function tiersFromEnv(env){
+ return Object.freeze(TIER_DEFAULTS.map(t=>{const k=t.name.toUpperCase();
+  return Object.freeze({name:t.name,minXp:t.minXp,maxTradeRaw:usdcEnv(env,`YEET_TIER_${k}_TRADE_USDC`,t.trade),dailyCapRaw:usdcEnv(env,`YEET_TIER_${k}_DAILY_USDC`,t.daily)})}));
+}
+/** The tier for an XP total (anything that is not a finite number counts as 0 XP: the lowest caps). */
+export function tierFor(limits,xp){
+ const n=Number.isFinite(Number(xp))?Number(xp):0;
+ return [...limits.tiers].reverse().find(t=>n>=t.minXp)??limits.tiers[0];
+}
+const big=a=>a.reduce((m,x)=>x>m?x:m,0n);
+/** Reads and validates the limits; throws at startup on a malformed value. maxTradeRaw and dailyCapRaw are the highest
+ * tier's caps: the account-blind ceiling the drivers re-check (the tiered check is checkBasket/checkDaily with caps). */
 export function limitsFromEnv(env=process.env){
+ const tiers=tiersFromEnv(env);
  return Object.freeze({
   minLegRaw:usdcEnv(env,'YEET_MIN_LEG_USDC','3'),
-  maxTradeRaw:usdcEnv(env,'YEET_MAX_TRADE_USDC','25'),
-  dailyCapRaw:usdcEnv(env,'YEET_DAILY_CAP_USDC','50'),
+  tiers,
+  // Optional global ceilings (the old flat caps): when set they also clamp every tier (capsFor).
+  maxTradeRaw:usdcEnv(env,'YEET_MAX_TRADE_USDC',fmt(big(tiers.map(t=>t.maxTradeRaw)))),
+  dailyCapRaw:usdcEnv(env,'YEET_DAILY_CAP_USDC',fmt(big(tiers.map(t=>t.dailyCapRaw)))),
   maxCostBps:intEnv(env,'YEET_MAX_COST_BPS',800,10_000),
   requoteToleranceBps:intEnv(env,'YEET_REQUOTE_TOLERANCE_BPS',50,1000),
   codeMintLimit:intEnv(env,'YEET_CODE_MINT_LIMIT',20,10_000),
@@ -63,12 +86,33 @@ export function limitsFromEnv(env=process.env){
 
 export function checkKillSwitch(limits){if(limits.killSwitch)refuse('TRADING_PAUSED','kill switch')}
 export function checkLegCount(limits,n){if(!Number.isInteger(n)||n<1||n>limits.maxLegs)refuse('INVALID_ARGUMENT','leg count')}
-/** YEET: every leg at least the minimum, the total at most the per-trade cap. */
-export function checkBasket(limits,legRaws){
+const fmt=raw=>{const s=(raw/1_000_000n).toString(),f=(raw%1_000_000n).toString().padStart(6,'0').replace(/0+$/,'');return f?`${s}.${f}`:s};
+/** One account's BUY caps today: {tier, xp, maxTradeRaw, dailyCapRaw, spentRaw, leftRaw}. */
+export function capsFor(db,limits,accountId,ms,xp){
+ const t=tierFor(limits,xp),spentRaw=spentToday(db,accountId,ms);
+ const min=(a,b)=>a<b?a:b,maxTradeRaw=min(t.maxTradeRaw,limits.maxTradeRaw),dailyCapRaw=min(t.dailyCapRaw,limits.dailyCapRaw);
+ return {tier:t.name,xp:Number.isFinite(Number(xp))?Number(xp):0,maxTradeRaw,dailyCapRaw,spentRaw,leftRaw:spentRaw>=dailyCapRaw?0n:dailyCapRaw-spentRaw};
+}
+/** The card's view of capsFor (yeet_home.limits, proposal.limits). */
+export const capsView=c=>({tier:c.tier,per_trade_usdc:fmt(c.maxTradeRaw),daily_limit_usdc:fmt(c.dailyCapRaw),left_today_usdc:fmt(c.leftRaw)});
+const nextTier=(limits,c)=>limits.tiers.find(t=>t.dailyCapRaw>c.dailyCapRaw||t.maxTradeRaw>c.maxTradeRaw);
+const upsell=(limits,c,what)=>{const n=nextTier(limits,c);return n?` Earn XP to reach ${n.name} at ${n.minXp} XP for ${fmt(what==='trade'?n.maxTradeRaw:n.dailyCapRaw)} USDC ${what==='trade'?'per trade':'a day'}.`:''};
+/** LIMIT_EXCEEDED in product voice, with the tier and the numbers (contract failure.message, max 500 characters). */
+function overCap(limits,c,what){
+ const msg=what==='trade'
+  ?`That's over your ${fmt(c.maxTradeRaw)} USDC per-trade limit as a ${c.tier} (${c.xp} XP), so lower the amount.${upsell(limits,c,'trade')}`
+  :`That would go over your ${fmt(c.dailyCapRaw)} USDC daily limit as a ${c.tier} (${c.xp} XP): you have ${fmt(c.leftRaw)} USDC left today, so lower the amount or come back tomorrow.${upsell(limits,c,'daily')}`;
+ const e=new TradeError('LIMIT_EXCEEDED',what==='trade'?'over per-trade cap':'over daily cap');
+ e.userMessage=msg.slice(0,500);e.caps=capsView(c);throw e;
+}
+/** YEET: every leg at least the minimum, the total (the whole basket) at most the per-trade cap: the account's tier
+ * cap when `caps` (capsFor) is given, else the account-blind ceiling. */
+export function checkBasket(limits,legRaws,caps){
  checkLegCount(limits,legRaws.length);
  if(legRaws.some(raw=>raw<limits.minLegRaw))refuse('AMOUNT_TOO_SMALL','leg under minimum');
  const total=legRaws.reduce((a,b)=>a+b,0n);
- if(total>limits.maxTradeRaw)refuse('LIMIT_EXCEEDED','over per-trade cap');
+ if(caps){if(total>caps.maxTradeRaw)overCap(limits,caps,'trade')}
+ else if(total>limits.maxTradeRaw)refuse('LIMIT_EXCEEDED','over per-trade cap');
  return total;
 }
 /** cost_bps = (in - out) / in, both in USD fixed point. */
@@ -83,8 +127,10 @@ export function spentToday(db,accountId,ms){
  const row=db.prepare('SELECT usdc_raw FROM daily_spend WHERE account_id=? AND day=?').get(accountId,utcDay(ms));
  return row?BigInt(row.usdc_raw):0n;
 }
-/** Today's spend plus `addRaw` must stay within the daily cap. */
-export function checkDaily(db,limits,accountId,ms,addRaw){
+/** Today's BUY spend plus `addRaw` must stay within the daily cap: the tier's when `xp` is given (a number), else the
+ * account-blind ceiling. Re-reads today's spend, so it is safe inside the commit transaction. */
+export function checkDaily(db,limits,accountId,ms,addRaw,xp){
+ if(xp!==undefined){const c=capsFor(db,limits,accountId,ms,xp);if(c.spentRaw+addRaw>c.dailyCapRaw)overCap(limits,c,'daily');return}
  if(spentToday(db,accountId,ms)+addRaw>limits.dailyCapRaw)refuse('LIMIT_EXCEEDED','over daily cap');
 }
 /** Adds to today's spend; call inside the transaction that commits the trade. */
