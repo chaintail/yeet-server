@@ -57,7 +57,7 @@ const chainEnv=(env,name)=>{const v=env[name]?.trim()||'sol';if(!CHAINS.includes
 
 export function createPipeline({db,env=process.env,client,wallets,directory,balances,drivers,ledger,catalog=CATALOG,now=Date.now,fetch=globalThis.fetch,didFor,
  onSettled,trackerIntervalMs=5000,log=line=>console.log(line),driverOverrides,liveBroadcast=true,
- landingPollMs=1000,landingWatchMs=60_000,sleep=ms=>new Promise(r=>{const h=setTimeout(r,ms);h.unref?.()}),
+ landingPollMs=1000,landingWatchMs=60_000,landingWatchMax=200,sleep=ms=>new Promise(r=>{const h=setTimeout(r,ms);h.unref?.()}),
  xpOf=id=>xpRuntime(env).total(id)}){
  const limits=limitsFromEnv(env);
  /** The account's XP for the tier caps (limits.mjs); an unreadable XP store counts as 0 XP (Noob, the lowest caps). */
@@ -79,7 +79,19 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
  const trade=id=>db.prepare('SELECT * FROM trades WHERE id=?').get(id);
  const legsOf=id=>db.prepare('SELECT * FROM trade_legs WHERE trade_id=? ORDER BY idx').all(id);
  const legOf=(id,idx)=>db.prepare('SELECT * FROM trade_legs WHERE trade_id=? AND idx=?').get(id,idx);
- const inFlight=new Set();
+ // Per-trade work counter (execute, submit, recovery, the landing notice). `has` is what recovery and cancel check;
+ // `exclusive` waits until the trade is free and runs fn holding it (the landing watcher's deposit notice).
+ const busy=new Map();
+ const inFlight={
+  has:id=>busy.has(id),
+  add(id){const b=busy.get(id);if(b)b.n++;else busy.set(id,{n:1,waiters:[]})},
+  delete(id){const b=busy.get(id);if(!b||--b.n>0)return;busy.delete(id);for(const w of b.waiters)w()},
+ };
+ async function exclusive(id,fn){
+  while(busy.has(id))await new Promise(r=>busy.get(id).waiters.push(r));
+  inFlight.add(id);
+  try{return await fn()}finally{inFlight.delete(id)}
+ }
  const driverOf=chain=>{const d=drivers[chain];if(!d)refuse('TEMPORARILY_UNAVAILABLE',`no driver for chain ${chain}`);return d};
  const walletOf=async(t,chain)=>(await wallets.require(t.account_id))[WALLET_CHAIN[chain]].address;
  const owned=(ctx,tradeId)=>{const t=trade(tradeId);if(!t||t.account_id!==ctx.accountId||t.status==='requote_required')refuse('INVALID_ARGUMENT','unknown trade');return t};
@@ -123,29 +135,40 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   db.prepare("UPDATE proposals SET status=?,updated_at=? WHERE id=? AND status='executing'").run(anySent?'executed':'failed',now(),t.proposal_id);
   if(!anySent&&!t.result_json)db.prepare('UPDATE trades SET result_json=? WHERE id=?').run(JSON.stringify({error:lastError??'TEMPORARILY_UNAVAILABLE'}),tradeId);
  }
- /** 1Click /deposit/submit for a landed leg, until accepted (executor.mjs, unchanged). */
+ /** 1Click /deposit/submit for a landed leg, until accepted. Callers hold the trade (inFlight / exclusive). Single
+  * flight per leg (review int-v2 finding 1): deposit_submitted is claimed in the database before the await and given
+  * back only if the call fails, so a second caller never sends a second notice; the answer is folded monotonically
+  * (tracker.apply), so a slow answer never moves the leg back. */
  async function depositSubmit(t,idx){
   const l=legOf(t.id,idx);
-  if(l.send_status!=='sent'||l.deposit_submitted||!l.tx_hash)return;
-  const done=()=>db.prepare('UPDATE trade_legs SET deposit_submitted=1 WHERE trade_id=? AND idx=?').run(t.id,idx);
-  if(l.oneclick_status&&l.oneclick_status!=='PENDING_DEPOSIT'){done();return}
-  try{tracker.apply(t.id,idx,await client.submitDeposit(l.deposit_address,l.tx_hash,l.deposit_memo??undefined));done()}
-  catch(e){ledger.note(t.id,`leg ${idx}: deposit/submit: ${e?.message}`)}
+  if(l.send_status!=='sent'||l.deposit_submitted||!l.tx_hash)return false;
+  if(db.prepare("UPDATE trade_legs SET deposit_submitted=1 WHERE trade_id=? AND idx=? AND deposit_submitted=0 AND send_status='sent'").run(t.id,idx).changes!==1)return false;
+  if(l.oneclick_status&&l.oneclick_status!=='PENDING_DEPOSIT')return false;
+  try{tracker.apply(t.id,idx,await client.submitDeposit(l.deposit_address,l.tx_hash,l.deposit_memo??undefined));return true}
+  catch(e){db.prepare('UPDATE trade_legs SET deposit_submitted=0 WHERE trade_id=? AND idx=?').run(t.id,idx);ledger.note(t.id,`leg ${idx}: deposit/submit: ${e?.message}`);return false}
  }
  /** Polls one sent attempt every landingPollMs for up to landingWatchMs; /deposit/submit as soon as it has landed.
-  * Not awaited by submit; the tracker pass stays the fallback. `landings()` awaits the open watches (tests, ops). */
- const watches=new Set();
+  * Not awaited by submit; the tracker pass stays the fallback. `landings()` awaits the open watches (tests, ops).
+  * One watch per attempt (a resubmitted signature joins the open one) and at most landingWatchMax at once; beyond the
+  * cap the tracker pass sends the notice (review int-v2 finding 2). */
+ const watches=new Map();
  function watchLanding(t,idx,attemptId,d){
-  if(!(landingWatchMs>0))return;
+  if(!(landingWatchMs>0)||watches.has(attemptId))return;
+  if(watches.size>=landingWatchMax){event({event:'landing_watch_capped',trade:t.id,leg:idx,open:watches.size});return}
   const run=(async()=>{
    for(let i=0,n=Math.ceil(landingWatchMs/Math.max(1,landingPollMs));i<n;i++){
     await sleep(landingPollMs);
     let r;try{r=await d.recoverAttempt(attemptId)}catch{continue}
-    if(r?.state==='sent'){await depositSubmit(t,idx);event({event:'deposit_submitted_on_landing',trade:t.id,leg:idx});return}
+    if(r?.state==='sent'){
+     // Under the trade's lock, like recovery: the notice and the tracker's recovery pass never overlap.
+     const sent=await exclusive(t.id,()=>depositSubmit(t,idx));
+     if(sent)event({event:'deposit_submitted_on_landing',trade:t.id,leg:idx});
+     return;
+    }
     if(!['pending','confirming'].includes(r?.state))return;
    }
-  })().catch(e=>ledger.note(t.id,`leg ${idx}: landing watch: ${e?.message}`));
-  watches.add(run);run.finally(()=>watches.delete(run));
+  })().catch(e=>ledger.note(t.id,`leg ${idx}: landing watch: ${e?.message}`)).finally(()=>watches.delete(attemptId));
+  watches.set(attemptId,run);
  }
  const pausedReason=(t)=>{try{gateFor(t.origin_chain??'sol')(t.account_id);return null}catch(e){return e?.detail??'paused'}};
 
@@ -279,12 +302,12 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   if(wallet!==a.wallet)refuse('INVALID_ARGUMENT','the attempt is for another wallet');
   let r;
   inFlight.add(t.id);
-  try{r=await d.submit({trade:t,leg:l,wallet,attemptId:attempt_id,signed,dryRun,now:now()})}
+  try{r=await d.submit({trade:t,leg:l,wallet,attemptId:attempt_id,signed,dryRun,now:now()});
+   if(r.state==='sent')await depositSubmit(t,leg)}
   finally{inFlight.delete(t.id)}
-  if(r.state==='sent')await depositSubmit(t,leg);
   // Sent but not yet landed (Solana answers `pending` after the broadcast): watch this attempt and tell 1Click the
   // moment it lands, instead of on the next tracker pass.
-  else if(!dryRun&&r.state==='pending'&&r.txHash&&d.recoverAttempt)watchLanding(t,leg,attempt_id,d);
+  if(!dryRun&&r.state==='pending'&&r.txHash&&d.recoverAttempt)watchLanding(t,leg,attempt_id,d);
   if(!dryRun){settle(t.id);try{tracker.refresh(t.id)}catch(e){ledger.note(t.id,`refresh: ${e?.message}`)}}
   event({event:'signature_submitted',trade:t.id,leg,attempt:attempt_id.slice(0,12),state:r.state,dry_run:dryRun});
   const fresh=r.state==='expired'?await signRequests(trade(t.id)):[];
@@ -327,7 +350,7 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   client,
   /** The proposal a trade of the account came from (the lucky wheel's claim, core.mjs). */
   proposalOf:(ctx,id)=>owned(ctx,id).proposal_id,
-  execute,submit,cancel,landings:()=>Promise.allSettled([...watches]),signRequests:async(ctx,id)=>signRequests(owned(ctx,id)),recoverTrade,
+  execute,submit,cancel,landings:()=>Promise.allSettled([...watches.values()]),landingWatches:()=>watches.size,signRequests:async(ctx,id)=>signRequests(owned(ctx,id)),recoverTrade,
   /** The first-party signing page: the trade's legs and its open sign requests, for the account's own trade only.
    * Recovery runs first (as a replayed code does), so a paused system, a closed sign window or a near deadline ends
    * the leg as not_sent instead of issuing a request. */

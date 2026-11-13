@@ -48,6 +48,17 @@ export function legFinal(l,nowMs){
  return s==='INCOMPLETE_DEPOSIT'&&nowMs>legDeadline(l);
 }
 
+/** Stage of a 1Click status: PENDING_DEPOSIT < KNOWN_DEPOSIT_TX = INCOMPLETE_DEPOSIT < PROCESSING < terminal. */
+export const STATUS_STAGE=Object.freeze({PENDING_DEPOSIT:0,KNOWN_DEPOSIT_TX:1,INCOMPLETE_DEPOSIT:1,PROCESSING:2,SUCCESS:3,REFUNDED:3,FAILED:3});
+/** Whether a leg at `cur` may take the answer `next`: never backwards, and a terminal status only repeats itself. */
+export function statusAdvances(cur,next){
+ if(!cur)return true;
+ if(isTerminal(cur))return next===cur;
+ const a=STATUS_STAGE[cur],b=STATUS_STAGE[next];
+ if(b===undefined)return false;
+ return a===undefined||b>=a;
+}
+
 /** Trade status from its legs (contract trade_status enum). Unsent or failed sends never settle. */
 export function foldStatus(legs,nowMs=Date.now()){
  // A leg awaiting its signature, being signed or sent, or waiting for gas keeps the trade in `signing`.
@@ -103,12 +114,16 @@ export function createTracker({db,client,now=Date.now,onSettled=()=>{},intervalM
   return tradeRow(tradeId);
  }
 
- /** Folds one /status (or /deposit/submit) answer into a leg. */
+ /** Folds one /status (or /deposit/submit) answer into a leg. Monotonic (review int-v2 finding 1): an answer that is
+  * older than what the leg already holds (a slow /deposit/submit landing after /status said SUCCESS) is dropped, so a
+  * terminal status is never replaced and settled amounts are never cleared. Returns whether the answer was folded. */
  function apply(tradeId,idx,res){
   const leg=db.prepare('SELECT * FROM trade_legs WHERE trade_id=? AND idx=?').get(tradeId,idx);
+  if(!statusAdvances(leg.oneclick_status,res?.status))return false;
   const r=applyStatus(JSON.parse(leg.receipt_leg_json),res,iso(now()));
-  db.prepare('UPDATE trade_legs SET oneclick_status=?,settled_out_raw=?,refund_reason=?,receipt_leg_json=?,updated_at=? WHERE trade_id=? AND idx=?')
+  db.prepare('UPDATE trade_legs SET oneclick_status=?,settled_out_raw=COALESCE(?,settled_out_raw),refund_reason=COALESCE(?,refund_reason),receipt_leg_json=?,updated_at=? WHERE trade_id=? AND idx=?')
    .run(r.status,r.settled.amountOut??null,r.settled.refundReason??null,JSON.stringify(r),now(),tradeId,idx);
+  return true;
  }
  const noteTrade=(tradeId,message)=>db.prepare('UPDATE trades SET last_error=? WHERE id=?').run(String(message).slice(0,300),tradeId);
 
