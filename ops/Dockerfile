@@ -9,7 +9,7 @@ FROM node:24-slim AS login
 WORKDIR /app/connector/login
 COPY connector/login/package.json connector/login/package-lock.json ./
 RUN npm ci --no-audit --no-fund
-COPY connector/login/src.jsx connector/login/build.mjs ./
+COPY connector/login/src.jsx connector/login/fund.jsx connector/login/privy-app.jsx connector/login/fund-balance.js connector/login/build.mjs ./
 RUN node build.mjs
 
 FROM node:24-slim
