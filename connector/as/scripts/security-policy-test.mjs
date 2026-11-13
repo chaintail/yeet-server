@@ -7,7 +7,33 @@ import {
   refreshFamilyTTL,
   operatorClient,
   chatgptRedirect,
+  bindInteraction,
+  rateLimiter,
 } from "../security-policy.mjs";
+{
+  // Anonymous interactions cannot lock out sign-in: at capacity the oldest anonymous binding makes room.
+  const db = {}, t0 = 1_000_000;
+  const ix = (uid, accountId) => ({ uid, exp: (t0 + 3600000) / 1000, prompt: { name: "login" }, session: accountId ? { accountId } : undefined });
+  bindInteraction(db, ix("signed", "acct-1"), { token: "tok", id: "acct-1" }, t0, 3);
+  bindInteraction(db, ix("anon-1"), null, t0 + 1, 3);
+  bindInteraction(db, ix("anon-2"), null, t0 + 2, 3);
+  bindInteraction(db, ix("next"), null, t0 + 3, 3);
+  assert.deepEqual(Object.keys(db).sort(), ["anon-2", "next", "signed"]);
+  // Bindings that carry an identity are never evicted.
+  const full = {};
+  bindInteraction(full, ix("a", "x"), { token: "t1", id: "x" }, t0, 2);
+  bindInteraction(full, ix("b", "y"), { token: "t2", id: "y" }, t0, 2);
+  assert.throws(() => bindInteraction(full, ix("c"), null, t0, 2), /Interaction capacity/);
+}
+{
+  let t = 0;
+  const allow = rateLimiter({ perClient: 2, global: 5, now: () => t });
+  assert.deepEqual([allow("a"), allow("a"), allow("a")], [true, true, false]);
+  assert.ok(allow("b") && allow("b") && allow("c"));
+  assert.equal(allow("d"), false, "global ceiling");
+  t = 60000;
+  assert.ok(allow("a"), "new window");
+}
 assert.ok(chatgptRedirect("https://chatgpt.com/connector_platform_oauth_redirect"));
 for (const uri of [
   undefined,

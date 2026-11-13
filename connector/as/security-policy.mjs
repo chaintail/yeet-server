@@ -53,14 +53,25 @@ export function requireFreshBinding(binding, now = Date.now()) {
     throw new AuthorizationExpired("Authorization expired");
   return binding;
 }
-export function bindInteraction(db, interaction, session, now = Date.now()) {
+export const BINDING_CAPACITY = 2000;
+const anonymous = (row) => !row.token && !row.account;
+export function bindInteraction(db, interaction, session, now = Date.now(), capacity = BINDING_CAPACITY) {
   if (db[interaction.uid]) requireFreshBinding(db[interaction.uid], now);
   // Retain expired bindings until their provider interaction is gone: a reload
   // must not turn a ten-minute authorization into a fresh authorization.
   for (const [key, row] of Object.entries(db))
     if ((row.retainUntil ?? row.expires + 3600000) <= now) delete db[key];
   if (!db[interaction.uid]) {
-    if (Object.keys(db).length >= 200) throw Error("Interaction capacity");
+    // At capacity, the oldest binding with no browser session and no account
+    // makes room (an unauthenticated GET must not lock everyone out); bindings
+    // that carry an identity are never evicted.
+    while (Object.keys(db).length >= capacity) {
+      const oldest = Object.entries(db)
+        .filter(([, row]) => anonymous(row))
+        .sort(([, a], [, b]) => a.expires - b.expires)[0];
+      if (!oldest) throw Error("Interaction capacity");
+      delete db[oldest[0]];
+    }
     db[interaction.uid] = {
       token: session?.token || null,
       account: interaction.prompt?.name === 'login' &&
@@ -93,4 +104,22 @@ export function operatorClient(value, { privy = false, test = false } = {}) {
     return undefined;
   if (privy && !test && client === "local-chatgpt-fixture") return undefined;
   return client;
+}
+
+// Fixed-window rate limit keyed by client address, under a process-wide
+// ceiling. Returns true when the request may proceed.
+export function rateLimiter({ perClient, global, windowMs = 60000, now = Date.now }) {
+  let start = now(), total = 0, byClient = new Map();
+  return (key) => {
+    if (now() - start >= windowMs) {
+      start = now();
+      total = 0;
+      byClient = new Map();
+    }
+    const n = (byClient.get(key) ?? 0) + 1;
+    if (n > perClient || total + 1 > global) return false;
+    byClient.set(key, n);
+    total++;
+    return true;
+  };
 }

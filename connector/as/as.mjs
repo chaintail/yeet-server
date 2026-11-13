@@ -32,6 +32,7 @@ import {
   requireFreshBinding,
   bindInteraction,
   chatgptRedirect,
+  rateLimiter,
 } from "./security-policy.mjs";
 import { SQLiteAdapter as Adapter } from "./adapter.mjs";
 import Provider, { errors } from "oidc-provider";
@@ -271,15 +272,11 @@ if (PUBLIC)
     if (q.headers.host !== new URL(publicBase).host) return r.sendStatus(421);
     next();
   });
+// Per client address (req.ip; trust proxy above), under a global ceiling ten times higher.
 function limit(max) {
-  let start = Date.now(),
-    count = 0;
-  return (_q, r, next) => {
-    if (Date.now() - start >= 60000) {
-      start = Date.now();
-      count = 0;
-    }
-    if (++count > max)
+  const allow = rateLimiter({ perClient: max, global: max * 10 });
+  return (q, r, next) => {
+    if (!allow(q.ip ?? "unknown"))
       return r
         .set("Retry-After", "60")
         .status(429)
