@@ -451,6 +451,14 @@ h1{margin:0}
 }
 /* Signing: the inline email-code sign-in, the trade clock, each coin's state (motion on transform and opacity only). */
 
+.btn.hold{touch-action:manipulation;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+.btn .hold-fill{position:absolute;inset:0;border-radius:inherit;background:rgba(255,255,255,.6);mix-blend-mode:overlay;transform-origin:0 50%;transform:scaleX(0);z-index:2;pointer-events:none;transition:transform .2s ease-out}
+.btn.holding .hold-fill{transform:scaleX(1);transition:transform var(--hold,800ms) linear}
+.btn.holding{animation:none}
+.hold-hint{margin:8px 0 0;text-align:center;font:600 12.5px var(--mono);color:var(--yc-mute)}
+.hold-hint.nudge{color:var(--yc-accent);animation:holdnudge .45s var(--spring,ease-out)}
+.hold-hint.warn{color:var(--rose)}
+@keyframes holdnudge{0%{transform:scale(1)}40%{transform:scale(1.08)}100%{transform:scale(1)}}
 .signin{display:grid;gap:8px;margin:0 0 12px;padding:14px;border-radius:18px;background:var(--yc-raise);box-shadow:inset 0 0 0 1px var(--yc-line)}
 .signin strong{font:700 15px var(--disp);color:var(--yc-fg)}.signin .next{text-align:left}.signin .reason{color:var(--rose);font:600 12.5px var(--mono)}
 .signin-row{display:flex;gap:8px}.signin-row input{flex:1;min-width:0;height:40px;padding:0 12px;border:0;border-radius:12px;background:var(--yc-bg);color:var(--yc-fg);font:600 15px var(--mono);box-shadow:inset 0 0 0 1px var(--yc-line)}
@@ -1021,8 +1029,8 @@ function createWheelCard(deps,cb){
   if(!d.offer){offer.hidden=true;offer.replaceChildren();return}
   offer.hidden=false;
   const b=button('yeet md wide run cta',d.offer.label,null,'i-bolt');b.dataset.role='lucky-yeet';b.disabled=!cb.canCall();
-  b.onclick=()=>cb.yeet(d.offer,b);
-  offer.replaceChildren(el('p','wx-offer-l',d.offer.line),b,el('p','fine','Meme coins can go to zero.'));
+  if(typeof cb.holdable==='function')cb.holdable(b,()=>cb.yeet(d.offer,b),'YEET');else b.onclick=()=>cb.yeet(d.offer,b);
+  offer.replaceChildren(el('p','wx-offer-l',d.offer.line),b,...(b.hint?[b.hint]:[]),el('p','fine','Meme coins can go to zero.'));
  }
  function paintFoot(){
   if(model.mode==='lucky'){foot.hidden=true;return}
@@ -1572,8 +1580,8 @@ async function openPage(url){
 let trading=null;            // the running trade's state from the signing machine
 let signin=null;           // {stage:'email'|'code',email,code,error,wait,s,resolve,reject}: the inline email-code sign-in
 const firstSeen=new Map(); // trade_id -> when this card first showed it (elapsed time for trades it did not start)
-const FAIL_NOTE={inline:'Your wallet couldn’t sign in this card. Nothing was sent.',page_timeout:'No signature came back from the signing page. Ask in the chat for your trade status.',
- expired:'The signing window closed. Nothing was sent. Refresh for a new quote.',not_sent:'Nothing was sent. Your funds are still in your wallet.',
+const FAIL_NOTE={inline:'This card couldn’t send your trade. Nothing was sent.',page_timeout:'The YEET page didn’t finish the trade. Ask in the chat for your trade status.',
+ expired:'Time ran out before the trade went out. Nothing was sent. Refresh for a new quote.',not_sent:'Nothing was sent. Your funds are still in your wallet.',
  wallet:'This sign-in has a different wallet than your YEET account. Nothing was sent.'};
 async function tap(){
  const p=current?.data;if(current?.kind!=='basket'||!canTap(p))return;
@@ -1802,7 +1810,7 @@ const spinsLeft=x=>Number.isInteger(x?.spins_available)?x.spins_available:x?.spi
 function wheelCard(){
  if(wcard)return wcard;
  wcard=WheelCard.createWheelCard({el,svg,cv,button,use,coinName,REDUCED,logo:s=>s&&Object.hasOwn(LOGOS,s)?LOGOS[s]:null},{
-  canCall,
+  canCall,holdable,
   busy(on){spinBusy=on;if(on)note=null;render()},
   async spin(mode){
    const lucky=mode==='lucky';
@@ -1911,17 +1919,42 @@ function windup(n,to,o={}){
  window.requestAnimationFrame(f);
 }
 
+const HOLD_MS=800,HOLD_MOVE=12,ARM_MS=6000;
+function holdable(b,run,what){
+ const fill=el('span','hold-fill');fill.setAttribute('aria-hidden','true');b.prepend(fill);b.classList.add('hold');b.style.setProperty('--hold',`${HOLD_MS}ms`);
+ const hint=el('p','hold-hint',`Press and hold to ${what}`);hint.dataset.role='hold-hint';b.hint=hint;
+ const label=`Press and hold to ${what}`;b.setAttribute('aria-label',label);
+ let timer=null,at=null,armed=0,fired=0;
+ const stop=()=>{window.clearTimeout(timer);timer=null;at=null;b.classList.remove('holding')};
+ const fire=()=>{stop();fired=now();armed=0;run()};
+ const start=p=>{if(b.disabled||timer!==null)return;at=p;hint.classList.remove('nudge');b.classList.add('holding');timer=window.setTimeout(fire,HOLD_MS)};
+ b.addEventListener('pointerdown',e=>{if(e.button>0)return;start({x:e.clientX||0,y:e.clientY||0})});
+ b.addEventListener('pointermove',e=>{if(at&&Math.hypot((e.clientX||0)-at.x,(e.clientY||0)-at.y)>HOLD_MOVE)stop()});
+ for(const ev of ['pointerup','pointercancel','pointerleave','blur'])b.addEventListener(ev,stop);
+ b.addEventListener('contextmenu',e=>e.preventDefault());
+ b.addEventListener('keydown',e=>{if(e.key!==' '&&e.key!=='Enter')return;e.preventDefault();if(!e.repeat)start(null)});
+ b.addEventListener('keyup',e=>{if(e.key!==' '&&e.key!=='Enter')return;e.preventDefault();stop()});
+ b.onclick=e=>{
+  e.preventDefault();if(b.disabled||now()-fired<1000)return;
+  if(e.detail>0){hint.classList.remove('nudge');void hint.offsetWidth;hint.classList.add('nudge');return}
+  if(now()-armed<ARM_MS){fire();return}
+  armed=now();hint.textContent=`Activate again to ${what}`;b.setAttribute('aria-label',`Activate again to ${what}`);hint.setAttribute('role','status');
+  window.setTimeout(()=>{if(now()-armed>=ARM_MS){hint.textContent=label;b.setAttribute('aria-label',label)}},ARM_MS);
+ };
+ return b;
+}
 const TRADE={phase:'idle',key:null};
-const TRADE_LABEL={preparing:'Getting it ready…',signing:'Signing…',sending:'Sending…',done:'Sent',failed:'No answer yet'};
+const TRADE_LABEL={preparing:'Getting it ready…',signing:'Sending…',sending:'On its way…',done:'Sent',failed:'No answer yet'};
 const IN_FLIGHT=new Set(['preparing','signing','sending']);
 function setTrade(phase,key=TRADE.key){TRADE.phase=phase;TRADE.key=key;busy=IN_FLIGHT.has(phase);render()}
 function tradeButton(p,live){
  const skeet=p.direction==='skeet',ph=TRADE.phase;
  const look={preparing:' charging',sending:' charging',signing:' signing',done:' okb',failed:' spent'}[ph]??'';
  const label=ph==='idle'?(skeet?'SKEET':'YEET'):ph==="failed"&&trading?.reason?'Didn’t go through':TRADE_LABEL[ph];
- const b=button(`${skeet?'skeet':'yeet'} lg wide run cta${look}`,label,()=>tap(),ph==='done'?'i-check':MARK_OF[skeet?'skeet':'yeet']);
+ const b=button(`${skeet?'skeet':'yeet'} lg wide run cta${look}`,label,null,ph==='done'?'i-check':MARK_OF[skeet?'skeet':'yeet']);
  if(look===' charging')b.prepend(el('span','chgbar'));
  b.disabled=ph==='idle'?!live:true;b.dataset.role='trade';b.dataset.phase=ph;
+ if(ph==='idle')holdable(b,()=>tap(),skeet?'SKEET':'YEET');
  return b;
 }
 
@@ -2083,7 +2116,7 @@ function renderBasket(p){
  {const e=mark(el('p','est-note',`Estimate. The live price is taken when you ${skeet?'SKEET':'YEET'}.`),'estimate',true);e.dataset.role='estimate';c.append(e)}
  if(signin&&TRADE.key===`${p.proposal_id}:${p.revision}`)c.append(signinBox());
  else if(live&&canCall()&&signerCfg.script&&!signerP)loadSigner().then(s=>s?.session()).catch(()=>{});
- const primary=tradeButton(p,live);ui.trade=primary;if(!signin)c.append(primary);
+ const primary=tradeButton(p,live);ui.trade=primary;if(!signin){c.append(primary);if(primary.hint&&live)c.append(primary.hint)}
  const expired=!busy&&!quoting&&!draft&&amountDraft===null&&!live&&TRADE.phase==='idle';
  const acts=el('div','acts-row');
  if(expired&&canCall()){const r=button('ghost sm','Refresh quote',()=>refresh(p.proposal_id));r.dataset.role='refresh';acts.append(r)}
@@ -2103,7 +2136,7 @@ function renderBasket(p){
  basketUi=skeet?null:ui;
  return c;
 }
-const TRADE_TITLE={signing:'Signing',submitted:'Sent',settling:'Swapping',success:'YEETED.',partial:'Partly done',refunded:'Refunded',failed:'Didn’t go through',requote_required:'Price moved'};
+const TRADE_TITLE={signing:'Sending',submitted:'Sent',settling:'Swapping',success:'YEETED.',partial:'Partly done',refunded:'Refunded',failed:'Didn’t go through',requote_required:'Price moved'};
 /** Where a leg's funds are at each status: [YEET, SKEET]. FAILED has no line; the refund reason covers it. */
 const FUNDS_AT={not_sent:['still in your {from} wallet','still in your {from} wallet'],sent:['on the way to the 1Click deposit address','on the way to the 1Click deposit address'],PENDING_DEPOSIT:['on the way to the 1Click deposit address','on the way to the 1Click deposit address'],KNOWN_DEPOSIT_TX:['at the 1Click deposit address','at the 1Click deposit address'],INCOMPLETE_DEPOSIT:['at the 1Click deposit address, short of the quote','at the 1Click deposit address, short of the quote'],PROCESSING:['being swapped on NEAR Intents','being swapped on NEAR Intents'],SUCCESS:['in your {to} wallet','in your {to} wallet'],REFUNDED:['refunded to your {from} wallet','refunded to your {from} wallet']};
 const ROUTE_STATE={success:'done',partial:'done',refunded:'off',failed:'off'};
@@ -2120,10 +2153,10 @@ function legState(t,l,i){
   case 'INCOMPLETE_DEPOSIT':return ['Deposit short','wait','swap'];
  }
  if(s==='expired'||s==='not_sent'||s==='failed')return ['Not sent','bad','failed'];
- if(s==='awaiting_signature')return [trading.step==='wallet'&&(trading.legs?.includes(i)??trading.leg===i)?'Signing…':'Waiting for signature','wait','sign'];
+ if(s==='awaiting_signature')return [trading.step==='wallet'&&(trading.legs?.includes(i)??trading.leg===i)?'Sending…':'Waiting to send','wait','sign'];
  if(s==='awaiting_gas')return ['Network fee on its way','wait','send'];
  if(s==='signing')return ['Sending','wait','send'];
- if(s===undefined&&!l.origin_tx&&t.status==='signing')return ['Waiting for signature','wait','sign'];
+ if(s===undefined&&!l.origin_tx&&t.status==='signing')return ['Waiting to send','wait','sign'];
  return ['Sent','wait','sent'];
 }
 function legRows(t){
@@ -2165,7 +2198,7 @@ function paintSettle(u){
  if(!u)return;const ms=(u.since.to??now())-u.since.from;
  u.meta.textContent=`${u.n} of ${u.total} landed · ${mmss(ms)}`;
  if(u.bar)u.bar.style.transform=`scaleX(${(0.04+0.92*Math.min(1,ms/SETTLE_MS)).toFixed(3)})`;
- if(u.say)u.say.textContent=u.page?'Sign on the YEET page in your browser, then come back here.':ms<SETTLE_MS?'Each coin is its own swap on NEAR Intents. Usually 2 to 3 minutes.':'Taking longer than usual. It keeps going, and this card follows it.';
+ if(u.say)u.say.textContent=u.page?'Finish on the YEET page in your browser, then come back here.':ms<SETTLE_MS?'Each coin is its own swap on NEAR Intents. Usually 2 to 3 minutes.':'Taking longer than usual. It keeps going, and this card follows it.';
 }
 function renderReceipt(t){
  const skeet=t.direction==='skeet';const final=FINAL.has(t.status);const legs=Array.isArray(t.legs)?t.legs.slice(0,5):[];
@@ -2186,15 +2219,15 @@ function renderReceipt(t){
   c.append(legRows(t));
  }else{
   const stopped=mine?.phase==='failed',page=!stopped&&mine?.step==='page';
-  const title=stopped?TRADE_TITLE.failed:page?'Finish in your browser':t.status==='partial'?`${landed} of ${legs.length} landed`:mine&&t.status==='signing'?(mine.phase==='sending'?'Sending':'Signing'):TRADE_TITLE[t.status]??'Your trade';
+  const title=stopped?TRADE_TITLE.failed:page?'Finish in your browser':t.status==='partial'?`${landed} of ${legs.length} landed`:mine&&t.status==='signing'?(mine.phase==='sending'?'On its way':'Sending'):TRADE_TITLE[t.status]??'Your trade';
   c=card('receipt',title,skeet?'SKEET':'YEET');
   if(!final&&!stopped&&legs.length){
    const m=c.querySelector('.meta');const bar=el('div','settle');bar.setAttribute('aria-hidden','true');const fill=el('i');bar.append(fill);
    const say=el('p','next settle-say');say.setAttribute('role','status');
    settleUi={meta:m,bar:fill,say,n:landed,total:legs.length,since:sinceOf(t),page};
    c.append(bar);paintSettle(settleUi);
-   if(page&&mine.page){const box=mark(el('div','yc-alert pagebox'),'page');box.append(el('strong',null,'A YEET page opened in your browser'),el('span',null,'Your wallet signs there. This card follows the trade.'));
-    const a=link('Open the signing page',mine.page);a.dataset.role='sign-page';box.append(a);c.append(box)}
+   if(page&&mine.page){const box=mark(el('div','yc-alert pagebox'),'page');box.append(el('strong',null,'A YEET page opened in your browser'),el('span',null,'Finish your trade there. This card follows it.'));
+    const a=link('Open the YEET page',mine.page);a.dataset.role='sign-page';box.append(a);c.append(box)}
   }
   if(syms.length)c.append(route(t.direction,syms,stopped?'off':ROUTE_STATE[t.status]??'run',skeet?netOf(t.lands_on,'Base'):netOf(t.funded_from,'Base')));
   if(legs.length)c.append(legRows(t));
@@ -2237,49 +2270,6 @@ function renderHome(h){
 }
 function renderSpin(){return wheelSection(null)}
 function renderLucky(){return wheelSection(null)}
-function renderPortfolio(d){
- const when=clock(d.priced_at);const c=card('portfolio','Your bag',when?`Prices ${when}`:'Live');
- const tot=el('div','bag-tot');tot.append(mark(el('span','v num',money(d.total_usd)??'—'),'total',true));c.append(tot);
- const list=el('div','rows');
- const base=mark(el('div','prow usdc'),'row:usdc');base.append(cv('USDC'));{const nm=el('div','nm');nm.append(el('div','tk','USDC'));const v=el('div','vline');v.append(mark(el('span','val num',money(d.base?.usdc)??'—'),'val:usdc',true),el('span','pct','On Base'));nm.append(v);base.append(nm,el('span'))}
- list.append(base);
- const rows=(Array.isArray(d.solana?.holdings)?d.solana.holdings:[]).filter(h=>safeSymbol(h?.symbol)).slice(0,25);
- rows.sort((a,b)=>(Number(b.usd)||0)-(Number(a.usd)||0));
- for(const h of rows){
-  const r=mark(el('div','prow'),`row:${h.symbol}`);r.append(cv(h.symbol));
-  const nm=el('div','nm');nm.append(el('div','tk',h.symbol));const v=el('div','vline');v.append(mark(el('span','val num',money(h.usd)??'—'),`val:${h.symbol}`,true),el('span','pct',amount(h.amount)??'—'));nm.append(v);r.append(nm);
-  const acts=el('div','acts');
-  if(canCall()){
-   const more=button('yeet xs','YEET more',null,'i-bolt');more.onclick=()=>yeetMore(h.symbol,more);more.setAttribute('aria-label',`YEET more ${h.symbol}`);
-   const sell=button('skeet xs','SKEET',null,'i-target');sell.onclick=()=>skeet(h.symbol,sell);sell.setAttribute('aria-label',`SKEET ${h.symbol}`);
-   acts.append(more,sell);
-  }
-  r.append(acts);list.append(r);
- }
- c.append(list);
- if(!rows.length)c.append(noteLine('No coins yet. Type @yeet me a win in the chat.'));
- const scene=shareScene();
- if(scene){const acts=mark(el('div','acts-row'),'actions');acts.append(shareButton());c.append(acts);if(shareOpen)c.append(sharePanel(scene))}
- if(note)c.append(noteLine(note));
- return c;
-}
-function renderLeaderboard(d){
- const c=el('section','yc leaderboard');
- const hd=mark(el('div','yc-h'),'head',true);const crown=use('i-crown');crown.style.cssText='width:24px;height:24px;color:var(--ember)';hd.append(crown,el('span','tt','Leaderboard'),el('span','meta','XP'));c.append(hd);
- const list=el('ol','lb');
- (Array.isArray(d.rows)?d.rows:[]).slice(0,50).forEach((r,i)=>{
-  const name=typeof r.name==='string'?r.name.slice(0,32):'—';
-  const li=mark(el('li','stag'),`lr:${i}`);const av=el('span','av ltr',name.slice(0,1).toUpperCase());av.style.background=coinFill(name);av.setAttribute('aria-hidden','true');
-  const xp=el('span','xp num',Number.isInteger(r.xp)?r.xp.toLocaleString('en-US'):'—');if(Number.isInteger(r.xp))xp.dataset.countTo=String(r.xp);
-  li.append(el('span','rk',Number.isInteger(r.rank)?String(r.rank):'—'),av,el('span','hn',name),xp);list.append(li);
- });
- const me=d.me||{};
- const li=mark(el('li','me stag'),'me');const av=el('span','av');av.append(use('c-volt'));
- const xp=el('span','xp num',Number.isInteger(me.xp)?me.xp.toLocaleString('en-US'):'0');if(Number.isInteger(me.xp))xp.dataset.countTo=String(me.xp);
- li.append(el('span','rk',Number.isInteger(me.rank)?String(me.rank):'—'),av,el('span','hn',Number.isInteger(me.rank)?'you':'you · not ranked yet'),xp);list.append(li);
- c.append(list);
- return c;
-}
 const REFRESHABLE=new Set(['REQUOTE_REQUIRED','CONFIRMATION_REQUIRED','COST_TOO_HIGH','TEMPORARILY_UNAVAILABLE']);
 function renderError(d,proposal_id){
  const code=typeof d?.error==='string'&&Object.hasOwn(ERRORS,d.error)?d.error:'TEMPORARILY_UNAVAILABLE';const [title,body,retryable]=ERRORS[code];

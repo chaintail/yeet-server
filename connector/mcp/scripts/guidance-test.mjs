@@ -26,6 +26,8 @@ function rules(label,text,{risk=false}={}){
  assert.ok(sentences(text).length>=1&&sentences(text).length<=3,`${label}: ${sentences(text).length} sentences: ${text}`);
  assert.doesNotMatch(text,/\btap|\bpress|\bclick|only your/i,`${label}: never stress a button`);
  assert.doesNotMatch(text,/\b(demo|mock|sample|placeholder|fake|test)\b/i,label);
+ // Owner, voice 39611: the person never thinks about what their wallet does in between. "signed in" and "sign-in" stay.
+ assert.doesNotMatch(text,/\bsign(s|ed|ing)?\b(?![ -]?(in|out|up)\b)|\bsignatures?\b/i,`${label}: never names the wallet's act`);
  assert.doesNotMatch(text,/\b(mcp|folio)\b/i,label);
  assert.doesNotMatch(text,/profit|guarantee|\breturns?\b|moon|sure thing|can't lose|will go up/i,`${label}: no claims of returns`);
  assert.doesNotMatch(text,/execute_trade|submit_trade_signature|daily_spin|lucky_spin/,`${label}: never tells the model to trade or spin by itself`);
@@ -127,7 +129,7 @@ test('proposals: the YEET button and the risk line on buys, cost only when high,
  assert.equal(g('yeet_quote',{...skeet,warnings:['COST_HIGH'],totals:{...skeet.totals,cost_pct:4.5}}),`${COPY.propose_skeet.base} Mention that swap costs are 4.5% of this sale right now.`);
 });
 
-test('execute_trade: the wallet signs in the card, on its way, price moved; never says it is done',()=>{
+test('execute_trade: going out from their wallet in the card, on its way, price moved; never says it is done',()=>{
  const t={trade_id:'t_abcdefghij0123456789',proposal_id:'p_abcdefghij0123456789',direction:'yeet',legs:[]};
  assert.equal(g('execute_trade',{...t,status:'awaiting_signature'}),COPY.execute_trade.awaiting_signature);
  assert.equal(g('execute_trade',{...t,status:'submitted'}),COPY.execute_trade.submitted);

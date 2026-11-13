@@ -12,7 +12,7 @@ const root = document.getElementById('yeet-sign');
 const body = document.getElementById('sign-body');
 const cfg = {appId: root.dataset.appId || '', tradeId: root.dataset.tradeId || '', back: root.dataset.back || ''};
 const STATE = {
-  awaiting_signature: ['Waiting for signature', ''], signing_now: ['Signing…', 'run'], signing: ['Sending', 'run'],
+  awaiting_signature: ['Waiting to send', ''], signing_now: ['Sending…', 'run'], signing: ['Sending', 'run'],
   awaiting_gas: ['Network fee on its way', 'run'], sent: ['Sent', 'ok'], not_sent: ['Not sent', 'bad'], failed: ['Not sent', 'bad'],
 };
 const SENT = new Set(['signing', 'awaiting_gas', 'sent']);
@@ -76,7 +76,7 @@ function signIn() {
         go.disabled = false;
       }
     };
-    show(line('Sign in with the email you use for YEET. Your wallet signs this trade, nobody else.'), eLabel, email, send, status, codeBox);
+    show(line('Sign in with the email you use for YEET. This trade goes out from your wallet, nobody else’s.'), eLabel, email, send, status, codeBox);
   });
 }
 
@@ -114,13 +114,13 @@ async function load() {
   const reqs = trade.sign_requests ?? [];
   if (!reqs.length) {
     const anySent = trade.legs.some((l) => SENT.has(l.send_status));
-    return show(...render(line(anySent ? 'Nothing left to sign. Head back to ChatGPT: your card shows each coin as it lands.' : 'Nothing was sent for this trade. Your funds are still in your wallet. Ask in ChatGPT for a new quote.', anySent ? 'ok' : 'bad')));
+    return show(...render(line(anySent ? 'Nothing left to send. Head back to ChatGPT: your card shows each coin as it lands.' : 'Nothing was sent for this trade. Your funds are still in your wallet. Ask in ChatGPT for a new quote.', anySent ? 'ok' : 'bad')));
   }
   const side = trade.direction === 'skeet' ? 'skeet' : 'yeet';
-  const btn = el('button', side, 'Sign with your wallet'); btn.id = 'sign-go';
+  const btn = el('button', side, 'Send with your wallet'); btn.id = 'sign-go';
   const status = line('');
   btn.onclick = () => signAll(btn, status);
-  show(...render(), btn, status, el('p', 'fine', 'Your own wallet signs. YEET never holds your keys and only adds the network fee.'));
+  show(...render(), btn, status, el('p', 'fine', 'It goes out from your own wallet. YEET never holds your keys and only adds the network fee.'));
 }
 
 function signOutButton() {
@@ -162,7 +162,7 @@ async function signAll(btn, status) {
       try { out = await api('signature', {leg: req.leg, attempt_id: req.attempt_id, signed}); }
       catch (e) {
         mark('awaiting_signature');
-        set(e.code === 'SIGN_EXPIRED' ? 'The signing window closed. Nothing was sent. Ask in ChatGPT for a new quote.' : e.message || 'Your signature didn’t go through. Tap to try again.', 'bad');
+        set(e.code === 'SIGN_EXPIRED' ? 'Time ran out before the trade went out. Nothing was sent. Ask in ChatGPT for a new quote.' : e.message || 'That didn’t go through. Tap to try again.', 'bad');
         btn.disabled = e.code === 'SIGN_EXPIRED'; return;
       }
       for (const l of out.legs ?? []) local.set(l.leg, l.send_status);
@@ -175,7 +175,7 @@ async function signAll(btn, status) {
         trade.sign_requests = [...trade.sign_requests.filter((r) => r !== req), ...mine];
         queue.unshift(...mine);
       } else if (again) {
-        if (retried.has(req.leg)) { set('The signing window closed. Nothing was sent. Ask in ChatGPT for a new quote.', 'bad'); refresh(); return; }
+        if (retried.has(req.leg)) { set('Time ran out before the trade went out. Nothing was sent. Ask in ChatGPT for a new quote.', 'bad'); refresh(); return; }
         retried.add(req.leg);
         const others = fresh.filter((r) => r !== again && legsOf(r).some((leg) => covered.includes(leg)));
         trade.sign_requests = [...trade.sign_requests.filter((r) => r !== req), again, ...others];

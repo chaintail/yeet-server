@@ -1892,7 +1892,7 @@
     "execute_trade": {
       "priority": "P0",
       "title": "Run a confirmed trade",
-      "description": "Starts a quoted basket from the card. Only the card can call this; it needs the one-time code the card holds. Answers one sign request per coin, which the person’s own wallet signs in the card.",
+      "description": "Starts a quoted basket from the card. Only the card can call this; it needs the one-time code the card holds. Answers one transfer request per coin, which the person’s own wallet approves in the card.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2039,8 +2039,8 @@
     },
     "submit_trade_signature": {
       "priority": "P0",
-      "title": "Send a signed trade transfer",
-      "description": "Takes the transfer the person's own wallet signed for one coin of a trade. Only the card calls this, once per sign request; YEET checks it, adds the network fee and sends it.",
+      "title": "Send a trade transfer",
+      "description": "Takes the transfer the person’s own wallet approved for one coin of a trade. Only the card calls this, once per request; YEET checks it, adds the network fee and sends it.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3024,7 +3024,7 @@
   "x-yeet-scopes": {
     "yeet:read": "See wallets, coins, trades and XP.",
     "yeet:write": "Create quotes and spin.",
-    "yeet:trade": "Trade with your own wallet's signature, inside the card."
+    "yeet:trade": "Trade from your own wallet, inside the card."
   },
   "x-yeet-errors": {
     "INVALID_ARGUMENT": {
