@@ -36,7 +36,7 @@ test('shared pieces follow plan 2.1',()=>{
  const exec=zodSchema(z,toolSchemas.execute_trade.input);
  assert.doesNotThrow(()=>exec.parse({proposal_id:'p_abcdefghij0123456789',revision:1,confirm:'A'.repeat(43)}));
  assert.throws(()=>exec.parse({proposal_id:'p_abcdefghij0123456789',revision:1,confirm:'A'.repeat(42)}));
- assert.deepEqual(contract.$defs.proposal.properties.next.enum,['Tap ⚡ YEET in the card','Tap SKEET in the card']);
+ assert.deepEqual(contract.$defs.proposal.properties.next.enum,['⚡ YEET is ready in the card.','⚡ SKEET is ready in the card.']);
 });
 test('the error enum and x-yeet-errors catalogue agree; every code has a card; retryable codes as the contract says',async()=>{
  const {TOOL_ERRORS}=await import('#contracts/errors');

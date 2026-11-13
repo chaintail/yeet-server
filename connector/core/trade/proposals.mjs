@@ -7,7 +7,7 @@ import {checkKillSwitch,checkLegCount,checkBasket,checkCost,checkDaily,costBps,C
 import {refuse,sha256,newId,iso,usd,usdRaw,TradeError} from './util.mjs';
 import {tx} from './db.mjs';
 
-export const NEXT={yeet:'Tap ⚡ YEET in the card',skeet:'Tap SKEET in the card'};
+export const NEXT={yeet:'⚡ YEET is ready in the card.',skeet:'⚡ SKEET is ready in the card.'};
 
 /** Router failures as catalogue codes. */
 export async function routed(fn){

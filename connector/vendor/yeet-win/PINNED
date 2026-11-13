@@ -1,10 +1,9 @@
 repo: chaintail/yeet-win
 branch: int/cards-signing
-commit: 404f3a5451eed5885b97579f34def530cb8a1452
+commit: 859365416a1de4f36ab91a5ee2e4c94cb09abb66
 built: router (tsc 7.0.2), widget (node build.mjs), signer (scripts/build-signer.mjs, esbuild 0.28.2, @privy-io/js-sdk-core 0.78.0, sha256 0a7eae048a25)
 files:
   contracts/yeet-tools.json
   widget/basket-v1.html home-v1.html leaderboard-v1.html portfolio-v1.html receipt-v1.html templates.json yeet-signer.js 
   router/dist/src/**
   router/test/fixtures/*.json
-local: contracts/yeet-tools.json adds $defs.guidance (optional `guidance` on every output schema, $defs.proposal and $defs.failure) and new yeet_propose, skeet_propose, execute_trade, lucky_wheel descriptions; pending upstream in yeet-win

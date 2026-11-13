@@ -227,8 +227,8 @@
         },
         "next": {
           "enum": [
-            "Tap ⚡ YEET in the card",
-            "Tap SKEET in the card"
+            "⚡ YEET is ready in the card.",
+            "⚡ SKEET is ready in the card."
           ]
         },
         "min_leg_usdc": {

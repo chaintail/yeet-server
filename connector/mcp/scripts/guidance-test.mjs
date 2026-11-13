@@ -81,7 +81,7 @@ test('yeet_coins: pick a few, do not read the list out',()=>{
  assert.equal(g('yeet_coins',{coins:[],limits:{}}),COPY.yeet_coins.list);
 });
 
-const proposal=(over={})=>({proposal_id:'p_abcdefghij0123456789',revision:1,direction:'yeet',amount_usdc:'20',legs:[{symbol:'WIF',parts:10,amount_in:'20',est_out:'7.1',est_out_usd:'19.4',min_out:'7'}],totals:{in_usd:'20',out_usd:'19.4',cost_pct:3,time_estimate_s:40},quoted_at:'2026-11-12T00:00:00Z',warnings:[],next:'Tap ⚡ YEET in the card',...over});
+const proposal=(over={})=>({proposal_id:'p_abcdefghij0123456789',revision:1,direction:'yeet',amount_usdc:'20',legs:[{symbol:'WIF',parts:10,amount_in:'20',est_out:'7.1',est_out_usd:'19.4',min_out:'7'}],totals:{in_usd:'20',out_usd:'19.4',cost_pct:3,time_estimate_s:40},quoted_at:'2026-11-12T00:00:00Z',warnings:[],next:'⚡ YEET is ready in the card.',...over});
 test('proposals: the YEET button and the risk line on buys, cost only when high, one note at most; SKEET without the risk line',()=>{
  const base=g('yeet_propose',proposal());
  assert.equal(base,`${COPY.propose_yeet.base} ${COPY.propose_yeet.risk}`);assert.doesNotMatch(base,/%|WIF/,'no cost, no coin list');
@@ -89,7 +89,7 @@ test('proposals: the YEET button and the risk line on buys, cost only when high,
  assert.match(high,/swap costs are 7% of this basket/);assert.match(high,/Meme coins can go to zero\.$/);
  assert.equal(g('yeet_quote',proposal({revision:2,warnings:['BALANCE_LOW','COST_HIGH']})),`${COPY.propose_yeet.base} ${COPY.propose_yeet.balance_low} ${COPY.propose_yeet.risk}`);
  assert.equal(g('yeet_propose',proposal({warnings:['SIGNER_MISSING','BALANCE_LOW']})),`${COPY.propose_yeet.base} ${COPY.propose_yeet.signer_missing} ${COPY.propose_yeet.risk}`);
- const skeet=proposal({direction:'skeet',next:'Tap SKEET in the card',legs:[{symbol:'WIF',parts:null,amount_in:'7',est_out:'19',est_out_usd:'19',min_out:'18.9'}]});
+ const skeet=proposal({direction:'skeet',next:'⚡ SKEET is ready in the card.',legs:[{symbol:'WIF',parts:null,amount_in:'7',est_out:'19',est_out_usd:'19',min_out:'18.9'}]});
  assert.equal(g('skeet_propose',skeet),COPY.propose_skeet.base);
  assert.equal(g('yeet_quote',{...skeet,warnings:['COST_HIGH'],totals:{...skeet.totals,cost_pct:4.5}}),`${COPY.propose_skeet.base} Mention that swap costs are 4.5% of this sale right now.`);
 });

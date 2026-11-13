@@ -18,7 +18,7 @@ test('propose: dry plan, contract-shaped proposal, confirm code beside it; idemp
  const {engine,oneclick}=await fakeEngine();
  const p=await engine.propose(alice,basket);
  out('yeet_propose').parse(strip(p));
- assert.match(p.proposal_id,/^p_[a-z0-9]{20}$/);assert.equal(p.revision,1);assert.equal(p.direction,'yeet');assert.equal(p.next,'Tap ⚡ YEET in the card');
+ assert.match(p.proposal_id,/^p_[a-z0-9]{20}$/);assert.equal(p.revision,1);assert.equal(p.direction,'yeet');assert.equal(p.next,'⚡ YEET is ready in the card.');
  assert.deepEqual(p.legs.map(l=>[l.symbol,l.parts,l.amount_in]),[['WIF',5,'10'],['BOME',3,'6'],['TRUMP',2,'4']]);
  assert.match(p.confirm.code,/^[A-Za-z0-9_-]{43}$/);assert.equal(Date.parse(p.confirm.expires_at)-Date.parse('2026-11-12T12:00:00Z'),120_000);
  assert.ok(oneclick.calls.quote.every(q=>q.dry===true&&q.recipient===SOL_WALLET&&q.refundTo===BASE_WALLET));
@@ -288,7 +288,7 @@ test('SKEET: percent of holdings, sold to USDC on Base through the same tap; por
  assert.deepEqual(port.solana.holdings.map(h=>[h.symbol,h.amount]),[['WIF','8']]);
  const p=await engine.skeet(alice,{request_id:'s1',legs:[{symbol:'WIF',percent:50}]});
  out('skeet_propose').parse(strip(p));
- assert.equal(p.direction,'skeet');assert.equal(p.next,'Tap SKEET in the card');assert.equal(p.legs[0].amount_in,'4');assert.equal(p.legs[0].parts,null);
+ assert.equal(p.direction,'skeet');assert.equal(p.next,'⚡ SKEET is ready in the card.');assert.equal(p.legs[0].amount_in,'4');assert.equal(p.legs[0].parts,null);
  await code(engine.skeet(alice,{request_id:'s2',legs:[{symbol:'BOME',percent:50}]}),'BALANCE_LOW');
  await code(engine.quote(alice,{proposal_id:p.proposal_id,amount_usdc:'5'}),'INVALID_ARGUMENT');
  const r=await exec(engine,alice,p);

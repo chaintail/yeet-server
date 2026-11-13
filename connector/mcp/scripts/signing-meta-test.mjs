@@ -15,7 +15,7 @@ const ORIGIN='https://chatgpt.yeet.win',APP='cmzyxwvutsrqponmlkjihgfed';
 const ENV={RESOURCE:ORIGIN,PRIVY_APP_ID:APP};
 const asset=signerAsset();
 const limits={tier:'Noob',per_trade_usdc:'25',daily_limit_usdc:'100',left_today_usdc:'75'};
-const proposal={proposal_id:'p_abcdefghij0123456789',revision:1,direction:'yeet',amount_usdc:'20',legs:[{symbol:'WIF',parts:10,amount_in:'20',est_out:'7.1',est_out_usd:'19.4',min_out:'7'}],totals:{in_usd:'20',out_usd:'19.4',cost_pct:3,time_estimate_s:40},quoted_at:'2026-11-12T00:00:00Z',warnings:[],next:'Tap ⚡ YEET in the card',limits};
+const proposal={proposal_id:'p_abcdefghij0123456789',revision:1,direction:'yeet',amount_usdc:'20',legs:[{symbol:'WIF',parts:10,amount_in:'20',est_out:'7.1',est_out_usd:'19.4',min_out:'7'}],totals:{in_usd:'20',out_usd:'19.4',cost_pct:3,time_estimate_s:40},quoted_at:'2026-11-12T00:00:00Z',warnings:[],next:'⚡ YEET is ready in the card.',limits};
 const confirm={code:'c'.repeat(43),expires_at:'2026-11-12T00:01:00Z'};
 const tradeAnswer={trade_id:'t_abcdefghij0123456789',proposal_id:proposal.proposal_id,direction:'yeet',status:'awaiting_signature',legs:[{symbol:'WIF',deposit_address:'D'.repeat(44),tx_hash:null,explorer_url:null,status:'awaiting_signature'}],sign_requests:[]};
 const statusAnswer={trade_id:tradeAnswer.trade_id,direction:'yeet',status:'signing',legs:[{symbol:'WIF',status:'PENDING_DEPOSIT',amount_in:'20',amount_out:null,origin_tx:null,destination_tx:null,refund_reason:null}],received:[],updated_at:'2026-11-12T00:00:05Z',xp_award:null};

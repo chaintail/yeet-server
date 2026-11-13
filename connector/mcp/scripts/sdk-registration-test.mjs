@@ -12,7 +12,7 @@ const LISTED=['execute_trade','skeet_propose','submit_trade_signature','trade_st
 const P2=['daily_spin','yeet_leaderboard','yeet_set_username','lucky_wheel','lucky_spin'];
 delete process.env.YEET_P2;
 const coins={coins:[{symbol:'WIF',name:'dogwifhat',kind:'meme',price_usd:null}],limits:{min_leg_usdc:'3',max_trade_usdc:'25',max_legs:5,default_usdc:'20'}};
-const proposal={proposal_id:'p_abcdefghij0123456789',revision:1,direction:'yeet',amount_usdc:'20',legs:[{symbol:'WIF',parts:10,amount_in:'20',est_out:'7.1',est_out_usd:'19.4',min_out:'7'}],totals:{in_usd:'20',out_usd:'19.4',cost_pct:3,time_estimate_s:40},quoted_at:'2026-11-12T00:00:00Z',warnings:[],next:'Tap ⚡ YEET in the card'};
+const proposal={proposal_id:'p_abcdefghij0123456789',revision:1,direction:'yeet',amount_usdc:'20',legs:[{symbol:'WIF',parts:10,amount_in:'20',est_out:'7.1',est_out_usd:'19.4',min_out:'7'}],totals:{in_usd:'20',out_usd:'19.4',cost_pct:3,time_estimate_s:40},quoted_at:'2026-11-12T00:00:00Z',warnings:[],next:'⚡ YEET is ready in the card.'};
 async function connect(token,callCore){
  const server=createMcpServer({token,callCore,env:{}});
  const client=new Client({name:'offline-contract-test',version:'1'});
