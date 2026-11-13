@@ -55,6 +55,8 @@ button{font:inherit;color:inherit}
 
 .actions{display:flex;gap:.5rem;align-items:stretch;flex-wrap:wrap}
 .btn{border:0;cursor:pointer}
+a.btn{display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
+.btn.primary.fund{font-size:1.0625rem}
 .btn.primary{flex:1 1 10rem;min-height:3rem;border-radius:999px;font-size:1.25rem;font-weight:900;letter-spacing:.02em;color:#0b0814;
  background:linear-gradient(90deg,var(--yellow),#ffb02e 50%,var(--pink));box-shadow:0 6px 22px rgba(255,61,139,.3);transition:transform .12s ease,box-shadow .2s,opacity .2s}
 .btn.primary.skeet{background:linear-gradient(90deg,var(--cyan),#b18cff);box-shadow:0 6px 22px rgba(62,232,255,.25)}
@@ -79,6 +81,7 @@ button{font:inherit;color:inherit}
 .xpbox{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:.625rem;background:var(--panel2);border-radius:.875rem;padding:.5rem .625rem}
 .xpnum{font-weight:900;color:var(--yellow)}
 .streak{color:var(--muted);font-size:.8125rem}
+.streak.next{color:var(--dim);font-size:.75rem}
 .xpbox .btn.quiet{min-height:2.25rem}
 .wheel{width:1.75rem;height:1.75rem;border-radius:50%;flex:none;background:conic-gradient(var(--yellow) 0 60deg,var(--pink) 0 120deg,var(--cyan) 0 180deg,var(--lime) 0 240deg,#b18cff 0 300deg,#ffb02e 0)}
 .spinning .wheel{animation:turn .6s linear infinite}
@@ -761,7 +764,7 @@ const ERROR_TEXT_MAX=4096;
 function errorEnvelope(r){
  const text=Array.isArray(r?.content)?r.content.find(c=>c&&c.type==='text'&&typeof c.text==='string')?.text:undefined;
  if(typeof text!=='string'||text.length>ERROR_TEXT_MAX)return null;
- try{const v=JSON.parse(text);return v&&typeof v==='object'&&typeof v.error==='string'&&/^[A-Z_]{1,40}$/.test(v.error)?{error:v.error}:null}catch{return null}
+ try{const v=JSON.parse(text);if(!v||typeof v!=='object'||typeof v.error!=='string'||!/^[A-Z_]{1,40}$/.test(v.error))return null;const fund=fundUrl(v.fund_url);return fund?{error:v.error,fund_url:fund}:{error:v.error}}catch{return null}
 }
 // A tool result from either bridge: {structuredContent,_meta,isError,content}. Returns {data,meta}.
 function unwrap(r){
@@ -801,7 +804,7 @@ function show(data,meta){
  }
  if(kind==='receipt'&&data.status==='requote_required'&&data.requote){note='The price moved. Check the new quote, then tap again.';return show(data.requote,meta)}
  if(kind==='receipt'&&TRADE_ID.test(data.trade_id)){if(state.trade_id!==data.trade_id){polls=0;pollFailures=0}saveState({trade_id:data.trade_id,...(PROPOSAL_ID.test(data.proposal_id??'')?{proposal_id:data.proposal_id}:{})});if(!FINAL.has(data.status))poll(POLL_MS);else window.clearTimeout(pollTimer)}
- if(kind==='spin'){spinWon=data;saveState({spin:spinToday(data)??undefined});if(current?.kind==='home'){const x=current.data.xp||{};current.data={...current.data,xp:{...x,total:data.total,streak_days:data.streak_days,spin_available:false}};render();return}}
+ if(kind==='spin'){spinWon=data;saveState({spin:spinToday(data)??undefined});if(current?.kind==='home'){const x=current.data.xp||{};const m=x.next_streak_milestone&&x.next_streak_milestone.days>data.streak_days?x.next_streak_milestone:null;current.data={...current.data,xp:{...x,total:data.total,streak_days:data.streak_days,spin_available:false,next_streak_milestone:m}};render();return}}
  if(kind!=='basket'&&kind!=='receipt'){confirm=null;window.clearTimeout(expiryTimer)}
  if(kind!=='receipt')note=kind==='basket'?note:null;
  current={kind:kind??'error',data:kind?data:{error:'TEMPORARILY_UNAVAILABLE'}};
@@ -966,6 +969,12 @@ function avatar(symbol){
 }
 function txUrl(hash,chain){if(chain==='base'&&EVM_TX.test(hash))return `https://basescan.org/tx/${hash}`;if(chain==='solana'&&SOL_TX.test(hash))return `https://solscan.io/tx/${hash}`;return null}
 function safeUrl(v){try{const u=new URL(v);return u.protocol==='https:'&&!u.username&&!u.password&&EXPLORERS.has(u.hostname)?u.href:null}catch{return null}}
+// Where to add funds: any https page without credentials (the server names it; the card only opens it on a tap).
+function fundUrl(v){if(typeof v!=='string'||v.length>2048||/\s/.test(v))return null;try{const u=new URL(v);return u.protocol==='https:'&&!u.username&&!u.password?u.href:null}catch{return null}}
+// Add funds: the host opens it (ui/open-link, then window.openai.openExternal); with neither, it is a plain link.
+function fundButton(url){const a=el('a','btn primary fund','Add funds');a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.dataset.role='fund';
+ a.onclick=async e=>{if(!host.canOpen&&typeof window.openai?.openExternal!=='function')return;e.preventDefault();try{await openLink(url)}catch{note='This link couldn’t open here.';render()}};
+ const box=el('div','actions');box.append(a);return box}
 function link(text,url){const a=el('a','tx',text);a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.onclick=async e=>{e.preventDefault();try{await openLink(url)}catch{note='This link couldn’t open here.';render()}};return a}
 function button(cls,text,onclick){const b=el('button',`btn ${cls}`,text);b.type='button';if(onclick)b.onclick=onclick;return b}
 function head(title,sub){const h=el('div','head');h.append(el('h1',null,title));if(sub)h.append(el('span','sub',sub));return h}
@@ -1065,9 +1074,13 @@ function renderHome(h){
   const xp=el('div','xpbox');const wheel=el('span','wheel');wheel.setAttribute('aria-hidden','true');
   const words=el('div','who');words.append(el('span','xpnum',`${h.xp.total.toLocaleString('en-US')} XP`));
   if(h.xp.streak_days>0)words.append(el('span','streak',`🔥 ${h.xp.streak_days}-day streak`));
+  const m=h.xp.next_streak_milestone;
+  if(m&&Number.isInteger(m.days)&&Number.isInteger(m.xp)&&m.days>h.xp.streak_days&&m.xp>0)words.append(el('span','streak next',`Day ${m.days}: +${m.xp} XP streak bonus`));
   xp.append(wheel,words);
   card.append(xp);
  }
+ const fund=h.ready==='needs_funds'?fundUrl(h.fund_url):null;
+ if(fund)card.append(fundButton(fund));
  let panel=null;
  if(h.xp&&Number.isInteger(h.xp.total)&&canWheel()&&(spinWon||spinBusy||(h.xp.spin_available&&canCall())))panel=spinPanel(h);
  if(panel)card.append(panel);else if(spinWon)card.append(el('p','xp',`+${spinWon.xp_won} XP from today’s spin`));
@@ -1121,6 +1134,8 @@ function renderError(d,proposal_id){
  const code=typeof d?.error==='string'&&Object.hasOwn(ERRORS,d.error)?d.error:'TEMPORARILY_UNAVAILABLE';const [title,body,retryable]=ERRORS[code];
  const card=el('section','card problem');card.dataset.code=code;card.setAttribute('role','alert');
  card.append(el('h1',null,title),el('p',null,body));
+ const fund=code==='BALANCE_LOW'?fundUrl(d.fund_url):null;
+ if(fund)card.append(fundButton(fund));
  const pid=proposal_id||state.proposal_id;
  if(retryable&&REFRESHABLE.has(code)&&pid&&canCall())card.append(button('quiet','Refresh quote',()=>refresh(pid)));
  if(note)card.append(noteLine(note));

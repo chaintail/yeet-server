@@ -4,3 +4,4 @@ export * from "./oneclick.js";
 export * from "./plan.js";
 export * from "./receipt.js";
 export * from "./units.js";
+export * from "./spin-table.js";

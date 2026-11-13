@@ -272,6 +272,10 @@
         },
         "retryable": {
           "type": "boolean"
+        },
+        "fund_url": {
+          "$ref": "#/$defs/https_url",
+          "description": "With BALANCE_LOW: where the person adds USDC. The card shows an Add funds button that opens it."
         }
       },
       "required": [
@@ -352,6 +356,10 @@
               "paused"
             ]
           },
+          "fund_url": {
+            "$ref": "#/$defs/https_url",
+            "description": "Where the person adds USDC on Base. The card opens it from its Add funds button while ready is needs_funds."
+          },
           "xp": {
             "anyOf": [
               {
@@ -367,6 +375,33 @@
                   },
                   "spin_available": {
                     "type": "boolean"
+                  },
+                  "next_streak_milestone": {
+                    "description": "The next streak length that pays a streak bonus and its fixed XP (the bonus draw comes on top); null when none is left.",
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "days": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "xp": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000
+                          }
+                        },
+                        "required": [
+                          "days",
+                          "xp"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
