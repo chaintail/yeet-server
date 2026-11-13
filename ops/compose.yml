@@ -112,6 +112,11 @@ services:
       YEET_BASE_GAS_FLOOR_RAW: ${YEET_BASE_GAS_FLOOR_RAW:-}
       YEET_BASE_MAX_FEE_WEI: ${YEET_BASE_MAX_FEE_WEI:-}
       YEET_BASE_TOPUP_REPLACE_MAX_FEE_WEI: ${YEET_BASE_TOPUP_REPLACE_MAX_FEE_WEI:-}
+      # Base basket mode: unset or legacy = one signed transfer per coin plus an ETH top-up; 7702 = one EIP-7702
+      # Calibur batch per basket that the gas wallet sends and pays (BASE-7702-PRODUCTION-PLAN.md). Off unless set.
+      YEET_BASE_MODE: ${YEET_BASE_MODE:-}
+      YEET_BASE_BATCH_MAX_COST_WEI: ${YEET_BASE_BATCH_MAX_COST_WEI:-}
+      YEET_BASE_DEPOSIT_SEEN_MS: ${YEET_BASE_DEPOSIT_SEEN_MS:-}
       BASE_RPC_URL: ${BASE_RPC_URL:-}
       SOLANA_RPC_URL: ${SOLANA_RPC_URL:-}
       SOLANA_BROADCAST_RPC_URL: ${SOLANA_BROADCAST_RPC_URL:-}

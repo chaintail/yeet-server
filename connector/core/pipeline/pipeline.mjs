@@ -13,7 +13,8 @@
 //   5. commit: code, proposal, trade (origin_chain), legs `awaiting_signature`, today's spend, in one transaction
 //   6. sign requests from the driver (`status: awaiting_signature`, `sign_requests`): on Solana ONE request (one
 //      transaction, one signature) pays every leg of the basket when it fits (`legs`, `leg_summaries`), else one per
-//      leg; on Base one per leg
+//      leg; on Base (YEET_BASE_MODE=7702) ONE Calibur batch request (evm_7702) the gas wallet sends and pays, else one
+//      per leg (legacy, the automatic fallback)
 // submit_trade_signature: the person's signed bytes for one attempt -> driver.submit (guards, sponsorship, persist,
 // send); every leg the attempt pays moves together. An expired attempt answers fresh sign requests instead of an error.
 // Recovery (tracker tick): attempts are resolved by the driver; legs left unsigned past SIGN_WINDOW_MS, past the
@@ -43,6 +44,8 @@ export const SIGN_WINDOW_MS=10*60_000;
 /** No sign request is issued when the leg's 1Click deposit deadline is closer than this. */
 export const SEND_MARGIN_MS=120_000;
 const TRUE=['1','true','on','yes'];
+/** batch_json.mode of an attempt (Base 7702 batches), or null. */
+const batchMode=a=>{if(!a?.batch_json)return null;try{return JSON.parse(a.batch_json).mode??null}catch{return null}};
 const explorer=(chain,hash)=>hash?(chain==='base'?`https://basescan.org/tx/${hash}`:`https://solscan.io/tx/${hash}`):null;
 
 /** The gate re-read on every call (design guard 1 / 9): kill switch, YEET_LIVE, YEET_LIVE_ACCOUNTS, the chain pause. */
@@ -77,7 +80,7 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
  const proposals=createProposals({db,client,limits,wallets,codes,now,catalog,xpOf:xpTotal});
  const tracker=createTracker({db,client,now,onSettled,intervalMs:trackerIntervalMs,trackMaxHours:limits.trackMaxHours,accounting:{raiseAlert:a=>ledger.raiseAlert(a),
   // Review finding 2: held BUY amounts return to the daily cap only after the deposit deadline, on 1Click's word.
-  async tick(){await ledger.releaseDue((addr,memo)=>client.status(addr,memo))}}});
+  async tick(){await ledger.releaseDue((addr,memo)=>client.status(addr,memo));for(const d of Object.values(drivers))try{await d.accountingTick?.()}catch(e){event({event:'accounting_tick_failed',chain:d.chain,error:String(e?.message??e).slice(0,120)})}}}});
  const trade=id=>db.prepare('SELECT * FROM trades WHERE id=?').get(id);
  const legsOf=id=>db.prepare('SELECT * FROM trade_legs WHERE trade_id=? ORDER BY idx').all(id);
  const legOf=(id,idx)=>db.prepare('SELECT * FROM trade_legs WHERE trade_id=? AND idx=?').get(id,idx);
@@ -99,14 +102,15 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
  const owned=(ctx,tradeId)=>{const t=trade(tradeId);if(!t||t.account_id!==ctx.accountId||t.status==='requote_required')refuse('INVALID_ARGUMENT','unknown trade');return t};
 
  /** The sign request for an open attempt (contract shape). A Solana request names every leg its one transaction pays
-  * (`legs`, `leg_summaries`); `leg` and `summary` are the anchor (legs[0]). Base requests carry neither. */
+  * (`legs`, `leg_summaries`); `leg` and `summary` are the anchor (legs[0]). A legacy Base request carries neither;
+  * a Base 7702 batch (batch_json mode 7702) is kind evm_7702 and names its legs the same way. */
  function signRequest(t,a){
   const side=t.direction==='yeet'?'buy':'sell';
   const summaryOf=l=>{const q=JSON.parse(l.live_quote_json);return {side,asset:q.origin.symbol,amount_raw:l.amount_in_raw,decimals:q.origin.decimals,to:l.deposit_address}};
   const legs=ledger.legsOfAttempt(a),rows=legs.map(i=>legOf(t.id,i));
-  return {trade_id:t.id,leg:a.leg_idx,attempt_id:a.attempt_id,kind:a.kind,chain:a.chain,wallet:a.wallet,payload:JSON.parse(a.payload_json),payload_sha256:a.payload_sha256,
+  return {trade_id:t.id,leg:a.leg_idx,attempt_id:a.attempt_id,kind:batchMode(a)==='7702'?'evm_7702':a.kind,chain:a.chain,wallet:a.wallet,payload:JSON.parse(a.payload_json),payload_sha256:a.payload_sha256,
    expires_at:iso(a.expires_at),summary:summaryOf(rows[0]),
-   ...(a.chain==='sol'?{legs,leg_summaries:rows.map(l=>({leg:l.idx,...summaryOf(l)}))}:{})};
+   ...(a.chain==='sol'||a.batch_json?{legs,leg_summaries:rows.map(l=>({leg:l.idx,...summaryOf(l)}))}:{})};
  }
  /** Prepares requests for `legs` (rows awaiting a signature, none covered by an open attempt): one driver call for
   * all of them when the driver can put several legs in one transaction, else one per leg. Returns
@@ -169,7 +173,7 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   if(db.prepare("UPDATE trade_legs SET deposit_submitted=1 WHERE trade_id=? AND idx=? AND deposit_submitted=0 AND send_status='sent'").run(t.id,idx).changes!==1)return false;
   if(l.oneclick_status&&l.oneclick_status!=='PENDING_DEPOSIT')return false;
   try{tracker.apply(t.id,idx,await client.submitDeposit(l.deposit_address,l.tx_hash,l.deposit_memo??undefined));return true}
-  catch(e){db.prepare('UPDATE trade_legs SET deposit_submitted=0 WHERE trade_id=? AND idx=?').run(t.id,idx);ledger.note(t.id,`leg ${idx}: deposit/submit: ${e?.message}`);return false}
+  catch(e){db.prepare('UPDATE trade_legs SET deposit_submitted=0 WHERE trade_id=? AND idx=?').run(t.id,idx);if(t.origin_chain==='base')try{drivers.base?.depositFailed?.({tradeId:t.id,idx,txHash:l.tx_hash,error:e})}catch{}ledger.note(t.id,`leg ${idx}: deposit/submit: ${e?.message}`);return false}
  }
  /** Polls one sent attempt every landingPollMs for up to landingWatchMs; /deposit/submit as soon as it has landed.
   * Not awaited by submit; the tracker pass stays the fallback. `landings()` awaits the open watches (tests, ops).
@@ -305,7 +309,7 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   if(!committed)return replay(codes.check({code:confirm,accountId:ctx.accountId,clientId:ctx.clientId,proposalId:proposal_id,revision}).trade_id);
   event({event:'trade_committed',trade:tradeId,direction:p.direction,chain,legs:live.legs.length});
   // Sign requests: on Solana one transaction for the whole basket when it fits (one signature), else one per leg; on
-  // Base one per leg. A leg whose request cannot be built never moved funds: not_sent, amount back to the cap.
+  // Base one 7702 batch when eligible, else one per leg. A leg whose request cannot be built never moved funds: not_sent, amount back to the cap.
   const tRow=trade(tradeId);let lastError;
   inFlight.add(tradeId);
   try{

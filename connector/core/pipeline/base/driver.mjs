@@ -18,7 +18,7 @@
 // point to POST /v0/deposit/submit. Refusals throw TradeError(code) and change nothing.
 import {limitsFromEnv,accountLive,spentToday} from '../../trade/limits.mjs';
 import {refuse,TradeError,sha256,utcDay} from '../../trade/util.mjs';
-import {readBaseConfig,BASE_CHAIN_ID,USDC_BASE,TOPUP_GAS,MAX_USER_GAS,SIGN_WINDOW_MS,DEADLINE_MARGIN_MS,MAX_FAILED_TOPUPS,
+import {readBaseConfig,BASE_CHAIN_ID,USDC_BASE,TOPUP_GAS,TOPUP_GAS_DELEGATED,MAX_USER_GAS,SIGN_WINDOW_MS,DEADLINE_MARGIN_MS,MAX_FAILED_TOPUPS,
  MAX_TOPUPS_PER_ACCOUNT_DAY,REBROADCAST_INTERVAL_MS,STUCK_TOPUP_ALERT_AFTER} from './config.mjs';
 import {safeError} from './safe-error.mjs';
 import {quoteTransfer,quoteTopup,replacementFees} from './fees.mjs';
@@ -26,6 +26,7 @@ import {prepareTopup} from './gas-ledger.mjs';
 import {loadGasWallet,assertTopupBytes} from './gas-wallet.mjs';
 import {buildTransfer,transferData,payloadOf,txJson,txFromJson,assertTransferPinned,validateSigned,transferLogMatches} from './source-executor.mjs';
 import {createBaseStore,OPEN} from './store.mjs';
+import {CALIBUR,delegationCode} from './calibur-7702.mjs';
 
 const ADDR=/^0x[0-9a-f]{40}$/;
 const UNBROADCAST=['prepared','signed','awaiting_gas'];
@@ -33,6 +34,11 @@ const SOFT=new Set(['TOPUP_PENDING','TRADING_PAUSED','SOURCE_PAUSED']);
 const s12=v=>v==null?undefined:String(v).slice(0,12);
 const success=rc=>rc.status==='success'||rc.status===1||rc.status==='0x1';
 const maxBig=(a,b)=>a>b?a:b;
+/** Guard 5 (plan 2.7): no code, or the Calibur designator a 7702 batch left on the wallet. Anything else is refused. */
+const CALIBUR_CODE=delegationCode(CALIBUR);
+const codeOk=code=>{const c=String(code??'0x').toLowerCase();return c==='0x'||c===CALIBUR_CODE};
+/** A top-up to a delegated wallet runs Calibur's receive(): 40000 gas, chosen by the wallet's code. */
+const topupGasFor=code=>String(code??'0x').toLowerCase()===CALIBUR_CODE?TOPUP_GAS_DELEGATED:TOPUP_GAS;
 
 /** attempt_id = sha256("yeet-attempt:" + trade_id + ":" + leg + ":" + n), design 1.2. */
 export const attemptIdFor=(tradeId,legIdx,attemptNo)=>sha256(`yeet-attempt:${tradeId}:${legIdx}:${attemptNo}`);
@@ -159,10 +165,10 @@ export function createBaseDriver({db,rpc,env=process.env,now=Date.now,alert=()=>
   const c=cfg(),legTopups=store.legTopups(a.trade_id,a.leg_idx);
   /*F7*/if(store.flag(`topup_blocked:${a.account_id}`)==='1'){decision('blocked');refuse('TOPUP_CAP_EXCEEDED','account blocked: an earlier top-up paid for another transaction')}
   /*G12*/if(legTopups.filter(x=>x.state==='failed'&&x.code!=='SUPERSEDED_SIBLING').length>=MAX_FAILED_TOPUPS){decision('exhausted');refuse('TOPUP_ATTEMPTS_EXHAUSTED')}
-  /*G12*/if(store.liveTopups().length){decision('pending');refuse('TOPUP_PENDING')}
+  /*G12*/if(store.gasInFlight()){decision('pending');refuse('TOPUP_PENDING')}
   /*G8*/const call=prepareTopup(a.wallet,c.gasWallet??undefined,shortfall);
   /*G8*/if(loadWallet(c).address!==call.from)refuse('GAS_WALLET_NOT_CONFIGURED','gas wallet address');
-  const q=await quoteTopup(rpc,{capWei:c.maxFeeWei});// G7 for the top-up: readFees refuses a price above the cap
+  const q=await quoteTopup(rpc,{capWei:c.maxFeeWei,gas:topupGasFor(await rpc.code(a.wallet))});// G7 for the top-up: readFees refuses a price above the cap
   const margin=maxBig((outstanding+3n)/4n,2n*q.gas*q.maxFeePerGas);
   const remaining=c.topupCapRaw-walletTopupSpent(a.wallet)-q.fee;
   /*G9*/if(remaining<shortfall){decision('cap_exceeded',{cap:'wallet'});refuse('TOPUP_CAP_EXCEEDED','per-wallet cap')}
@@ -178,8 +184,8 @@ export function createBaseDriver({db,rpc,env=process.env,now=Date.now,alert=()=>
  /** Folio ensureGas: sign, store before broadcast, broadcast. Returns the top-up hash. */
  async function ensureGas(a,plan,t){
   gate(a.account_id);
-  const nonce=Number(await rpc.nonce(plan.gasWallet,'pending'));
-  const tx={type:'eip1559',chainId:BASE_CHAIN_ID,to:a.wallet,value:plan.amount,data:'0x',nonce,gas:TOPUP_GAS,
+  const nonce=store.senderNonce(plan.gasWallet,Number(await rpc.nonce(plan.gasWallet,'pending')));
+  const tx={type:'eip1559',chainId:BASE_CHAIN_ID,to:a.wallet,value:plan.amount,data:'0x',nonce,gas:plan.quote.gas,
    maxFeePerGas:plan.quote.maxFeePerGas,maxPriorityFeePerGas:plan.quote.maxPriorityFeePerGas};
   const wallet=loadWallet(cfg());
   /*G8*/if(wallet.address!==plan.gasWallet||tx.to===wallet.address)refuse('GAS_WALLET_NOT_CONFIGURED','gas wallet changed');
@@ -189,7 +195,7 @@ export function createBaseDriver({db,rpc,env=process.env,now=Date.now,alert=()=>
   const seq=store.legTopups(a.trade_id,a.leg_idx).length,id=`topup:${a.trade_id}:${a.leg_idx}:${seq}`;
   const c=cfg();
   store.atomic(()=>{
-   /*G12*/if(store.liveTopups().length)refuse('TOPUP_PENDING');
+   /*G12*/if(store.gasInFlight())refuse('TOPUP_PENDING');
    /*G9*/if(walletTopupSpent(a.wallet)+plan.amount+plan.fee>c.topupCapRaw)refuse('TOPUP_CAP_EXCEEDED','per-wallet cap');
    /*G10*/if(store.day(plan.day,a.account_id).count>=MAX_TOPUPS_PER_ACCOUNT_DAY||store.dayTotal(plan.day)+plan.amount+plan.fee>c.globalDailyRaw)refuse('TOPUP_CAP_EXCEEDED','daily');
    store.insert({id,kind:'gas_topup',trade_id:a.trade_id,leg_idx:a.leg_idx,seq,account_id:a.account_id,wallet:a.wallet,sender:wallet.address,
@@ -274,7 +280,10 @@ export function createBaseDriver({db,rpc,env=process.env,now=Date.now,alert=()=>
   const expiresAt=Math.min(t+SIGN_WINDOW_MS,v.deadline-DEADLINE_MARGIN_MS);
   /*G4*/if(!(expiresAt>t))refuse('SIGN_EXPIRED','deposit deadline too close');
   capCheck(limits(),v.amountRaw);
-  /*G5*/if(String(await rpc.code(w)??'0x')!=='0x')refuse('WALLET_HAS_CODE');
+  /*G5*/if(!codeOk(await rpc.code(w)))refuse('WALLET_HAS_CODE');
+  // Plan 2.3 / 2.7: a leg a 7702 batch may still pay, or a wallet whose authorization is in flight, gets no transfer.
+  if(store.legBatches(v.tradeId,v.legIdx).some(b=>['signed','submitted','uncertain'].includes(b.state)))refuse('SOURCE_ATTEMPT_BLOCKED','a batch for this leg is in flight');
+  if(store.walletBatches(w,['signed','submitted','uncertain']).some(b=>b.auth_json&&b.auth_json!=='null'))refuse('SOURCE_ATTEMPT_BLOCKED','a 7702 authorization of this wallet is in flight');
   const q=await quoteTransfer(rpc,{wallet:w,data:transferData(v.depositAddress,v.amountRaw),capWei:c.maxFeeWei,maxGas:MAX_USER_GAS});
   const pending=Number(await rpc.nonce(w,'pending'));
   const fromBlock=String(await rpc.blockNumber());// where the finding-1 Transfer search starts
@@ -312,7 +321,7 @@ export function createBaseDriver({db,rpc,env=process.env,now=Date.now,alert=()=>
   /*G7*/if(tx.gas>MAX_USER_GAS||tx.maxFeePerGas>c.maxFeeWei)refuse('INVALID_TRANSACTION_BUDGET','transfer budget');
   const blocked=[],gateCode=gateRefusal(a.account_id);
   if(gateCode){if(!dry)gate(a.account_id);blocked.push(gateCode)}
-  /*G5*/if(String(await rpc.code(a.wallet)??'0x')!=='0x')refuse('WALLET_HAS_CODE');
+  /*G5*/if(!codeOk(await rpc.code(a.wallet)))refuse('WALLET_HAS_CODE');
   const ahead=store.walletTransfers(a.wallet,OPEN).filter(x=>x.id!==a.id&&x.nonce<a.nonce&&['signed','awaiting_gas','submitted','uncertain'].includes(x.state));
   /*G5*/if(BigInt(await rpc.tokenBalance(a.wallet))<ahead.reduce((s,x)=>s+BigInt(x.amount_raw),v.amountRaw))refuse('PRINCIPAL_SHORT');
   /*G5*/if(Number(await rpc.nonce(a.wallet,'latest'))>a.nonce){if(dry)return {state:'not_sent',code:'NONCE_CHANGED',dryRun:true};return (await nonceChanged(a))??resultOf(store.attempt(a.id))}

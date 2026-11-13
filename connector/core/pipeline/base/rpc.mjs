@@ -10,6 +10,9 @@ import {GAS_PRICE_ORACLE} from './fees.mjs';
 
 const ERC20=parseAbi(['function balanceOf(address) view returns (uint256)']);
 const ORACLE=parseAbi(['function getL1FeeUpperBound(uint256) view returns (uint256)']);
+const q=v=>'0x'+BigInt(v).toString(16);
+/** viem SignedAuthorization -> the JSON-RPC authorizationList entry. */
+const authJson=a=>({chainId:q(a.chainId),address:a.address,nonce:q(a.nonce),yParity:q(a.yParity),r:a.r,s:a.s});
 
 export function broadcastAllowed(env){
  try{const l=limitsFromEnv(env);return l.live&&!l.killSwitch&&!readBaseConfig(env).paused}catch{return false}
@@ -50,6 +53,22 @@ export function createBaseRpc({url,env=process.env,fetchFn}={}){
    const logs=await client.request({method:'eth_getLogs',params:[{address:USDC_BASE,fromBlock:'0x'+BigInt(fromBlock).toString(16),toBlock:'latest',topics:[TRANSFER_TOPIC,pad(from),pad(to)]}]});
    return (logs??[]).map(l=>({address:l.address,topics:l.topics,data:l.data,transactionHash:String(l.transactionHash).toLowerCase(),blockNumber:BigInt(l.blockNumber)}));
   },
+  /** eth_simulateV1 over `latest`, one block, validation off (batch-driver preflight and pre-send simulation). Each
+   * call {from,to,data,gas?,authorizationList?}; answers [{ok, gasUsed, logs, revertData}]. An RPC without the method
+   * throws (the batch path then falls back). */
+  async simulateCalls({calls,stateOverrides,blockOverrides}){
+   const block={calls:calls.map(c=>({from:c.from,to:c.to,data:c.data??'0x',gas:q(c.gas??3_000_000n),...(c.authorizationList?{authorizationList:c.authorizationList.map(authJson)}:{})}))};
+   if(stateOverrides)block.stateOverrides=stateOverrides;
+   if(blockOverrides)block.blockOverrides=blockOverrides;
+   const r=await client.request({method:'eth_simulateV1',params:[{blockStateCalls:[block],validation:false},'latest']});
+   const out=r?.[0]?.calls;
+   if(!Array.isArray(out)||out.length!==calls.length)throw Error('eth_simulateV1: unexpected answer');
+   return out.map(c=>({ok:c.status==='0x1',gasUsed:BigInt(c.gasUsed??0),logs:(c.logs??[]).map(l=>({address:l.address,topics:l.topics,data:l.data})),
+    revertData:c.status==='0x1'?null:(c.returnData&&c.returnData!=='0x'?c.returnData:c.error?.data??null)}));
+  },
+  /** eth_estimateGas with an authorization list (type 4) or without (type 2); the sender's balance is overridden. */
+  estimateGasAuth:async({from,to,data,authorizationList})=>BigInt(await client.request({method:'eth_estimateGas',
+   params:[{from,to,data,...(authorizationList?.length?{authorizationList:authorizationList.map(authJson)}:{})},'latest',{[from]:{balance:q(10n**30n)}}]})),
   broadcast(serializedTransaction){
    if(!broadcastAllowed(env))throw Error('SOURCE_EXECUTION_DISABLED');
    return client.sendRawTransaction({serializedTransaction});

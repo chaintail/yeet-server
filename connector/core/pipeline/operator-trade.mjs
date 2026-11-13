@@ -14,6 +14,22 @@ import {localSigner} from './solana/verify.mjs';
 import {isAddress} from './solana/message.mjs';
 import {privateKeyToAccount} from 'viem/accounts';
 import {txFromPayload} from './base/source-executor.mjs';
+import {typedDataForSigning} from './base/calibur-7702.mjs';
+import {privyRpcBodies,signedFromWallets} from './wallet-request.mjs';
+
+/** The evm_7702 signer (plan 2.10): the test key answers the same wallet calls the card makes (eth_sign7702Authorization
+ * when asked, then eth_signTypedData_v4) and the answers are joined by signedFromWallets, as the card does. The
+ * signatures are real but harmless: the executor is our gas wallet and the authorization only points at Calibur. */
+export async function sign7702(account,req){
+ const answers=[];
+ for(const body of privyRpcBodies(req)){
+  if(body.method==='eth_sign7702Authorization'){
+   const a=await account.signAuthorization({chainId:body.params.chain_id,contractAddress:body.params.contract,nonce:body.params.nonce});
+   answers.push({data:{authorization:{contract:body.params.contract,chain_id:body.params.chain_id,nonce:body.params.nonce,r:a.r,s:a.s,y_parity:a.yParity}}});
+  }else answers.push({data:{signature:await account.signTypedData(typedDataForSigning(body.params.typed_data))}});
+ }
+ return signedFromWallets(req,answers);
+}
 
 export const OPERATOR_ACCOUNT='yeet-privy-operator-test-wallet';
 export const OPERATOR_CLIENT='yeet-operator-tool';
@@ -106,7 +122,8 @@ export async function runUserSignedTrade({opts,wallet,env=process.env,emit=()=>{
  const p=createPipeline({db,env:runEnv,directory,now,trackerIntervalMs:0,liveBroadcast:opts.broadcast,log:l=>events.push(l),...overrides,driverOverrides});
  const sign={solana_tx:(w,r)=>Buffer.from(w.solana.signTransaction(Buffer.from(r.payload.transaction_base64,'base64'))).toString('base64'),
   // Base: the test wallet's secp256k1 key signs the payload exactly as given (sign only), like the card's Privy wallet.
-  evm_tx:async(w,r)=>privateKeyToAccount(`0x${Buffer.from(w.base.privateKey()).toString('hex')}`).signTransaction(txFromPayload(r.payload)),...signers};
+  evm_tx:async(w,r)=>privateKeyToAccount(`0x${Buffer.from(w.base.privateKey()).toString('hex')}`).signTransaction(txFromPayload(r.payload)),
+  evm_7702:async(w,r)=>sign7702(privateKeyToAccount(`0x${Buffer.from(w.base.privateKey()).toString('hex')}`),r),...signers};
  emit({step:'start',mode:opts.broadcast?'broadcast':'dry_run',chain:opts.chain,side:opts.side,account:accountId,solana_wallet:wallet.solana.address,base_wallet:wallet.base.address,
   drivers:Object.fromEntries(Object.entries(p.drivers).map(([c,d])=>[c,d.readiness()]))});
 
@@ -128,6 +145,7 @@ export async function runUserSignedTrade({opts,wallet,env=process.env,emit=()=>{
   const leg=s.legs.find(l=>l.leg===r.leg);
   const covered=r.legs??[r.leg];
   emit({step:'submitted',leg:r.leg,legs:covered,send_status:leg?.send_status??null,tx_hash:leg?.tx_hash??null,
+   ...(s.dry_run&&r.kind==='evm_7702'?{simulation:s.dry_run.simulation}:{}),
    ...(s.dry_run?{dry_run_state:s.dry_run.state,simulation_err:s.dry_run.simulation?.err??null,simulation_units:s.dry_run.simulation?.unitsConsumed??null,fee_lamports:s.dry_run.fee_lamports,rent_lamports:s.dry_run.rent_lamports,
     simulation_logs:(s.dry_run.simulation?.logs??[]).filter(l=>/invoke|success|failed|error|consumed/i.test(l)).slice(0,60).map(l=>String(l).slice(0,160))}:{})});
   results.push({leg:r.leg,legs:covered,state:leg?.send_status??null,tx_hash:leg?.tx_hash??null});

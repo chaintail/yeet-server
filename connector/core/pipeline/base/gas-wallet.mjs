@@ -9,7 +9,7 @@ import path from 'node:path';
 import {keccak256,parseTransaction,recoverTransactionAddress} from 'viem';
 import {privateKeyToAccount,privateKeyToAddress} from 'viem/accounts';
 import {refuse} from '../../trade/util.mjs';
-import {BASE_CHAIN_ID,TOPUP_GAS} from './config.mjs';
+import {BASE_CHAIN_ID,TOPUP_GAS,TOPUP_GAS_DELEGATED} from './config.mjs';
 
 const N=0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
 
@@ -54,13 +54,14 @@ export async function signGasTopup(account,expected,tx){
  const bytes=await account.signTransaction({...tx});
  return {bytes,hash:keccak256(bytes)};
 }
-/** Guard 8, second half: the signed top-up parses back to exactly the prepared top-up, signed by the gas wallet. */
+/** Guard 8, second half: the signed top-up parses back to exactly the prepared top-up, signed by the gas wallet. Gas is
+ * pinned to 21000, or 40000 for a Calibur-delegated wallet (plan 2.7). */
 export async function assertTopupBytes(bytes,tx,gasWallet){
  let p,from;
  try{p=parseTransaction(bytes);from=(await recoverTransactionAddress({serializedTransaction:bytes})).toLowerCase()}
  catch{refuse('GAS_WALLET_NOT_CONFIGURED','top-up bytes unparseable')}
  if(p.type!=='eip1559'||p.chainId!==BASE_CHAIN_ID||p.to?.toLowerCase()!==tx.to.toLowerCase()||p.to.toLowerCase()===gasWallet
-  ||(p.value??0n)!==tx.value||(p.data??'0x')!=='0x'||p.nonce!==tx.nonce||p.gas!==TOPUP_GAS||p.gas!==tx.gas
+  ||(p.value??0n)!==tx.value||(p.data??'0x')!=='0x'||p.nonce!==tx.nonce||(p.gas!==TOPUP_GAS&&p.gas!==TOPUP_GAS_DELEGATED)||p.gas!==tx.gas
   ||p.maxFeePerGas!==tx.maxFeePerGas||(p.maxPriorityFeePerGas??0n)!==tx.maxPriorityFeePerGas||(p.accessList?.length??0)!==0
   ||from!==gasWallet)refuse('GAS_WALLET_NOT_CONFIGURED','top-up bytes differ from the prepared top-up');
  return keccak256(bytes);

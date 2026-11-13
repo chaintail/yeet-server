@@ -5,7 +5,11 @@
 //                      hash, evidence; a signed row's identity is immutable, a replacement is a new row (replaced_by).
 //   base_gas_ledger    WalletGasLedger snapshot per user wallet (Folio saveLedger/readLedger).
 //   base_topup_day     top-ups and wei per account per UTC day (guard 10, new).
-//   base_driver_state  alert latches (gas_wallet_low) so an alert fires once per crossing.
+//   base_driver_state  alert latches (gas_wallet_low) so an alert fires once per crossing; flags
+//                      (7702_unsupported:<wallet>, base_mode_auto_legacy).
+//   base_batch         one row per EIP-7702 Calibur batch attempt (batch-driver.mjs, plan 2.9): every leg it pays,
+//                      the typed data the person signs, the outer transaction our gas wallet signs and every hash sent.
+//                      base_topup_day.count counts batches with top-ups; wei_raw reserves maxCost, then settles.
 import {TradeError} from '../../trade/util.mjs';
 import {WalletGasLedger} from './gas-ledger.mjs';
 
@@ -58,7 +62,40 @@ CREATE TABLE IF NOT EXISTS base_topup_day(
 CREATE TABLE IF NOT EXISTS base_driver_state(
  key TEXT PRIMARY KEY,
  value TEXT,
- updated_at INTEGER NOT NULL) STRICT;`;
+ updated_at INTEGER NOT NULL) STRICT;
+CREATE TABLE IF NOT EXISTS base_batch(
+ id TEXT PRIMARY KEY,
+ trade_id TEXT NOT NULL,
+ attempt_no INTEGER NOT NULL DEFAULT 0,
+ legs_json TEXT NOT NULL,
+ account_id TEXT NOT NULL,
+ wallet TEXT NOT NULL,
+ sender TEXT NOT NULL,
+ sender_nonce INTEGER,
+ nonce_key TEXT NOT NULL,
+ nonce_seq TEXT NOT NULL,
+ deadline INTEGER NOT NULL,
+ expires_at INTEGER NOT NULL,
+ auth_json TEXT,
+ typed_json TEXT NOT NULL,
+ payload_sha256 TEXT NOT NULL,
+ state TEXT NOT NULL CHECK(state IN('prepared','signed','submitted','uncertain','confirmed','failed','cancelled')),
+ batch_sig TEXT,
+ auth_sig TEXT,
+ tx_json TEXT,
+ signed_raw TEXT,
+ tx_hash TEXT,
+ code TEXT,
+ never_send INTEGER NOT NULL DEFAULT 0,
+ gas_paid_raw TEXT,
+ max_cost_raw TEXT,
+ broadcast_at INTEGER,
+ evidence_json TEXT NOT NULL DEFAULT '{}',
+ created_at INTEGER NOT NULL,
+ updated_at INTEGER NOT NULL) STRICT;
+CREATE UNIQUE INDEX IF NOT EXISTS base_batch_live_wallet ON base_batch(wallet) WHERE state IN('signed','submitted','uncertain');
+CREATE UNIQUE INDEX IF NOT EXISTS base_batch_hash ON base_batch(tx_hash) WHERE tx_hash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS base_batch_trade ON base_batch(trade_id,state);`;
 
 let savepoints=0;
 /** BEGIN IMMEDIATE, or a SAVEPOINT when the caller already holds a transaction on the shared handle. */
@@ -79,6 +116,9 @@ const COLS=['id','kind','trade_id','leg_idx','seq','account_id','wallet','sender
  'amount_raw','needed_raw','expires_at','deadline','state','signed_raw','tx_hash','code','replaces','replaced_by','sent_at','broadcast_at',
  'gas_paid_raw','evidence_json','created_at','updated_at'];
 const inList=list=>list.map(()=>'?').join(',');
+const BATCH_COLS=['id','trade_id','attempt_no','legs_json','account_id','wallet','sender','sender_nonce','nonce_key','nonce_seq','deadline',
+ 'expires_at','auth_json','typed_json','payload_sha256','state','batch_sig','auth_sig','tx_json','signed_raw','tx_hash','code','never_send',
+ 'gas_paid_raw','max_cost_raw','broadcast_at','evidence_json','created_at','updated_at'];
 
 export function createBaseStore(db,now=Date.now){
  db.exec(SCHEMA);
@@ -111,6 +151,34 @@ export function createBaseStore(db,now=Date.now){
   liveTopups:()=>all(`SELECT * FROM base_attempt WHERE ${LIVE_TOPUP} AND replaced_by IS NULL ORDER BY rowid`),
   /** Everything still waiting for a receipt, replaced rows included (whichever mines confirms). */
   unresolvedTopups:()=>all(`SELECT * FROM base_attempt WHERE ${LIVE_TOPUP} AND signed_raw IS NOT NULL ORDER BY rowid`),
+  // base_batch (EIP-7702 Calibur batch per basket, batch-driver.mjs).
+  batch:id=>get('SELECT * FROM base_batch WHERE id=?',id),
+  insertBatch(row){
+   const r={evidence_json:'{}',created_at:now(),updated_at:now(),...row};
+   const cols=BATCH_COLS.filter(c=>r[c]!==undefined);
+   db.prepare(`INSERT INTO base_batch(${cols.join(',')}) VALUES(${inList(cols)})`).run(...cols.map(c=>r[c]));
+   return this.batch(r.id);
+  },
+  updateBatch(id,patch,from){
+   const keys=Object.keys(patch).filter(k=>BATCH_COLS.includes(k)&&k!=='id');
+   const sets=[...keys.map(k=>`${k}=?`),'updated_at=?'],args=[...keys.map(k=>patch[k]),now(),id];
+   const where=from?` AND state IN(${inList(from)})`:'';
+   const r=db.prepare(`UPDATE base_batch SET ${sets.join(',')} WHERE id=?${where}`).run(...args,...(from??[]));
+   if(r.changes!==1)throw new TradeError('SOURCE_ATTEMPT_BLOCKED',`batch ${String(id).slice(0,12)} not in ${from}`);
+   return this.batch(id);
+  },
+  batchesIn:states=>all(`SELECT * FROM base_batch WHERE state IN(${inList(states)}) ORDER BY created_at,rowid`,...states),
+  walletBatches:(wallet,states)=>all(`SELECT * FROM base_batch WHERE wallet=? AND state IN(${inList(states)}) ORDER BY created_at,rowid`,wallet,...states),
+  /** Batches of a trade that cover leg `idx`. */
+  legBatches:(tradeId,idx)=>all("SELECT * FROM base_batch WHERE trade_id=? AND EXISTS(SELECT 1 FROM json_each(legs_json) WHERE json_extract(value,'$.idx')=?) ORDER BY created_at,rowid",tradeId,idx),
+  /** Guard 12 (plan 2.3): gas-wallet transactions in flight, top-ups and batches with a signed outer transaction. */
+  gasInFlight:()=>all(`SELECT id FROM base_attempt WHERE ${LIVE_TOPUP} AND replaced_by IS NULL`).length+all("SELECT id FROM base_batch WHERE state IN('signed','submitted','uncertain') AND signed_raw IS NOT NULL").length,
+  /** The next gas-wallet nonce no open row of ours holds: max(pending, highest open row + 1) (plan 2.3). */
+  senderNonce(sender,pending){
+   const t=get(`SELECT MAX(nonce) n FROM base_attempt WHERE ${LIVE_TOPUP} AND sender=?`,sender)?.n;
+   const b=get("SELECT MAX(sender_nonce) n FROM base_batch WHERE state IN('signed','submitted','uncertain') AND sender=? AND sender_nonce IS NOT NULL",sender)?.n;
+   return Math.max(Number(pending),t==null?0:Number(t)+1,b==null?0:Number(b)+1);
+  },
   day(day,accountId){const r=get('SELECT count,wei_raw FROM base_topup_day WHERE day=? AND account_id=?',day,accountId);return {count:r?Number(r.count):0,wei:r?BigInt(r.wei_raw):0n}},
   dayTotal:day=>all('SELECT wei_raw FROM base_topup_day WHERE day=?',day).reduce((s,r)=>s+BigInt(r.wei_raw),0n),
   bumpDay(day,accountId,count,wei){

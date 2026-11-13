@@ -395,6 +395,275 @@
       "additionalProperties": false,
       "description": "An EIP-1559 transaction for the person to sign (sign only, never send). Integers above 2^53 are decimal strings."
     },
+    "evm_7702_payload": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "calibur_batch"
+        },
+        "typed_data": {
+          "type": "object",
+          "properties": {
+            "domain": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "const": "Calibur"
+                },
+                "version": {
+                  "const": "1.0.0"
+                },
+                "chainId": {
+                  "const": 8453
+                },
+                "verifyingContract": {
+                  "type": "string",
+                  "pattern": "^0x[0-9a-fA-F]{40}$"
+                },
+                "salt": {
+                  "type": "string",
+                  "pattern": "^0x[0-9a-fA-F]{64}$"
+                }
+              },
+              "required": [
+                "name",
+                "version",
+                "chainId",
+                "verifyingContract",
+                "salt"
+              ],
+              "additionalProperties": false
+            },
+            "types": {
+              "type": "object",
+              "properties": {
+                "EIP712Domain": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 8,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "type": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "type"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "SignedBatchedCall": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 8,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "type": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "type"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "BatchedCall": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 8,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "type": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "type"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "Call": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 8,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "type": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "type"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "EIP712Domain",
+                "SignedBatchedCall",
+                "BatchedCall",
+                "Call"
+              ],
+              "additionalProperties": false
+            },
+            "primary_type": {
+              "const": "SignedBatchedCall"
+            },
+            "message": {
+              "type": "object",
+              "properties": {
+                "batchedCall": {
+                  "type": "object",
+                  "properties": {
+                    "calls": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 5,
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "to": {
+                            "type": "string",
+                            "pattern": "^0x[0-9a-fA-F]{40}$"
+                          },
+                          "value": {
+                            "const": "0"
+                          },
+                          "data": {
+                            "type": "string",
+                            "pattern": "^0x[0-9a-fA-F]{136}$"
+                          }
+                        },
+                        "required": [
+                          "to",
+                          "value",
+                          "data"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "revertOnFailure": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "calls",
+                    "revertOnFailure"
+                  ],
+                  "additionalProperties": false
+                },
+                "nonce": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]{0,77})$"
+                },
+                "keyHash": {
+                  "const": "0x0000000000000000000000000000000000000000000000000000000000000000"
+                },
+                "executor": {
+                  "type": "string",
+                  "pattern": "^0x[0-9a-fA-F]{40}$"
+                },
+                "deadline": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]{0,77})$"
+                }
+              },
+              "required": [
+                "batchedCall",
+                "nonce",
+                "keyHash",
+                "executor",
+                "deadline"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "domain",
+            "types",
+            "primary_type",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        "authorization": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "contract": {
+                  "type": "string",
+                  "pattern": "^0x[0-9a-fA-F]{40}$"
+                },
+                "chain_id": {
+                  "const": 8453
+                },
+                "nonce": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "contract",
+                "chain_id",
+                "nonce"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "typed_data",
+        "authorization"
+      ],
+      "additionalProperties": false,
+      "description": "A Uniswap Calibur batch for the person to sign with eth_signTypedData_v4 (sign only): one USDC transfer per leg, sent and paid by YEET. When authorization is set, first sign that EIP-7702 authorization (eth_sign7702Authorization)."
+    },
     "sign_request": {
       "type": "object",
       "properties": {
@@ -412,7 +681,8 @@
         "kind": {
           "enum": [
             "solana_tx",
-            "evm_tx"
+            "evm_tx",
+            "evm_7702"
           ]
         },
         "chain": {
@@ -434,6 +704,9 @@
             },
             {
               "$ref": "#/$defs/evm_tx_payload"
+            },
+            {
+              "$ref": "#/$defs/evm_7702_payload"
             }
           ]
         },
@@ -490,7 +763,7 @@
           "minItems": 1,
           "maxItems": 5,
           "uniqueItems": true,
-          "description": "Every leg this one transaction pays; legs[0] is leg."
+          "description": "Every leg this one transaction pays (Solana transaction or Base 7702 batch); legs[0] is leg."
         },
         "leg_summaries": {
           "type": "array",
@@ -1341,7 +1614,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 2048,
-            "description": "The signed transaction: base64 (Solana) or 0x02 hex (Base)."
+            "description": "base64 (Solana), 0x02 hex (Base evm_tx), 0x + 65-byte batch signature [+ 65-byte authorization signature] (Base evm_7702), or `unsupported`."
           }
         },
         "required": [

@@ -3,7 +3,7 @@
 // embedded wallet whose address equals the request's `wallet`, through the same Privy signer (window.YeetSigner, the
 // vendored yeet-signer.js), then submit_trade_signature. Sign only: the wallet never sends; YEET adds the network fee
 // and sends. The card polls trade_status meanwhile.
-import {privyRpcBody, signedFromWallet} from '/sign/wallet-request.mjs';
+import {privyRpcBodies, signedFromWallets, UNSUPPORTED_7702} from '/sign/wallet-request.mjs';
 
 const root = document.getElementById('yeet-sign');
 const body = document.getElementById('sign-body');
@@ -140,8 +140,20 @@ async function signAll(btn, status) {
       if (!w) { set('This sign-in has a different wallet than your YEET account. Nothing was sent.', 'bad'); body.append(signOutButton()); return; }
       const mark = (s) => { for (const leg of covered) local.set(leg, s); refresh(); };
       mark('signing_now');
+      // One or two wallet calls (a Base basket's first trade: the one-time authorization, then the batch), one submit.
+      // A wallet that refuses the authorization method answers `unsupported`; the answer carries per-coin requests.
       let signed;
-      try { signed = signedFromWallet(req, await signer.rpc(w.id, privyRpcBody(req))); }
+      try {
+        const answers = [];
+        for (const b of privyRpcBodies(req)) {
+          try { answers.push(await signer.rpc(w.id, b)); }
+          catch (e) {
+            if (b.method === 'eth_sign7702Authorization' && !/TIMEOUT|FRAME/i.test(String(e?.code ?? e?.message ?? ''))) { signed = UNSUPPORTED_7702; break; }
+            throw e;
+          }
+        }
+        signed ??= signedFromWallets(req, answers);
+      }
       catch { mark('awaiting_signature'); set('Your wallet didn’t answer. Tap to try again.', 'bad'); btn.disabled = false; return; }
       let out;
       try { out = await api('signature', {leg: req.leg, attempt_id: req.attempt_id, signed}); }
@@ -154,7 +166,12 @@ async function signAll(btn, status) {
       // Expired: the fresh request covering this request's anchor leg (it may cover fewer legs, or come per leg).
       const fresh = out.sign_requests ?? [];
       const again = requestFor(fresh, req.leg) ?? fresh.find((r) => legsOf(r).some((leg) => covered.includes(leg)));
-      if (again) {
+      if (again && signed === UNSUPPORTED_7702) {
+        // Per-coin requests for the same legs: sign each, the way the page always has.
+        const mine = fresh.filter((r) => legsOf(r).some((leg) => covered.includes(leg)));
+        trade.sign_requests = [...trade.sign_requests.filter((r) => r !== req), ...mine];
+        queue.unshift(...mine);
+      } else if (again) {
         if (retried.has(req.leg)) { set('The signing window closed. Nothing was sent. Ask in ChatGPT for a new quote.', 'bad'); refresh(); return; }
         retried.add(req.leg);
         const others = fresh.filter((r) => r !== again && legsOf(r).some((leg) => covered.includes(leg)));

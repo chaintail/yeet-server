@@ -11,7 +11,7 @@
 //   submit({trade, leg, wallet, attemptId, signed, dryRun, now})
 //                                                 -> {state: 'sent'|'pending'|'expired'|'not_sent', txHash?, simulation?}
 //   recover({now})                                -> [{tradeId, legIdx, state, txHash?}]
-//   prepareLegs({trade, legs, wallet})            OPTIONAL (Solana): one request may pay several legs (one signature)
+//   prepareLegs({trade, legs, wallet})            OPTIONAL (Solana, Base 7702): one request may pay several legs (one signature)
 //                                                 -> [{attemptId, legs:[idx], ...} | {legs:[idx], error}]
 // }
 // `trade` and `leg` are the stored rows (trades, trade_legs); `wallet` is the person's address on the driver's chain.

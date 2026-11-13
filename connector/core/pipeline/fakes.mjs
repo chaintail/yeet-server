@@ -63,5 +63,30 @@ export function fakeRuntime({env={},oneclick=fakeOneClick(),holdings,usdc,rpc=fa
  const confirmSent=()=>{for(const b64 of rpc.sent)rpc.statuses.set(base58Encode(decodeTransaction(Buffer.from(b64,'base64')).signatures[0]),{status:'confirmed',commitment:'confirmed',slot:5})};
  return {overrides,oneclick,rpc,feePayer,balances,wallet,confirmSent};
 }
+/** The Base pipeline on fakes (BUY on Base): the person's throwaway key, a throwaway gas wallet key file, the Base RPC
+ * double with the Calibur model (base/test-support.mjs), 1Click from fixtures. `env` adds settings (YEET_BASE_MODE=7702
+ * for the batch path). `sign(req)` signs any Base sign request as the card would (evm_tx or evm_7702). `restart()`
+ * builds a new pipeline on the same database, chain and clock (a process restart: watchers lost, state kept). */
+export async function fakeBasePipeline({env={},landing={landingWatchMs:0},usdc=20_000_000n,oneclick=fakeOneClick(),db=openTradeDb(':memory:'),loadWallet,userKey}={}){
+ const {fakeRpc,keyFile}=await import('./base/test-support.mjs');
+ const {txFromPayload}=await import('./base/source-executor.mjs');
+ const {sign7702}=await import('./operator-trade.mjs');
+ const {generatePrivateKey,privateKeyToAccount}=await import('viem/accounts');
+ const now=fakeClock(),user=privateKeyToAccount(userKey??generatePrivateKey()),wallet=user.address;
+ const gas=keyFile(),rpc=fakeRpc(),logs=[];
+ rpc.s.now=now;rpc.s.balance[gas.address]=2_000_000_000_000_000n;rpc.s.token[wallet.toLowerCase()]=usdc;
+ const fullEnv={YEET_LIVE:'1',YEET_KILL_SWITCH:'0',YEET_LIVE_ACCOUNTS:ALICE.accountId,YEET_BUY_CHAIN:'base',BASE_RPC_URL:'http://fake.invalid',
+  YEET_BASE_GAS_WALLET:gas.address,YEET_BASE_GAS_WALLET_KEY_FILE:gas.file,...env};
+ const directory=staticWalletDirectory({[ALICE.accountId]:{base:{address:wallet},solana:{address:aliceWallet.address}}});
+ const balances=fakeBalances({usdc:String(Number(usdc)/1e6),holdings:[]});
+ const build=()=>createPipeline({db,env:fullEnv,client:oneclick,directory,balances,now,trackerIntervalMs:0,log:l=>logs.push(l),...landing,
+  driverOverrides:{baseRpc:rpc,feePayer:null,...(loadWallet?{baseLoadWallet:loadWallet}:{})}});
+ const sign=req=>req.kind==='evm_7702'?sign7702(user,req):user.signTransaction(txFromPayload(req.payload));
+ const f={p:build(),db,now,rpc,oneclick,env:fullEnv,sign,wallet:wallet.toLowerCase(),user,gas,logs,
+  restart(){f.p.tracker.stop?.();f.p=build();return f.p},
+  async tick(id){now.advance(3_000);await f.p.recoverTrade(id)}};
+ return f;
+}
+
 /** The person's wallet signing a sign request (sign only). */
 export const signAs=(wallet,req)=>Buffer.from(wallet.signTransaction(Buffer.from(req.payload.transaction_base64,'base64'))).toString('base64');

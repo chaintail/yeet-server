@@ -5,7 +5,7 @@
 // price). YEET changes: both fee values are clamped to YEET_BASE_MAX_FEE_WEI (guard 7), and the user's transfer gets
 // the same non-zero tip as a top-up because we cannot re-price a transaction the user signed.
 import {refuse} from '../../trade/util.mjs';
-import {USDC_BASE,TOPUP_GAS} from './config.mjs';
+import {USDC_BASE,TOPUP_GAS,TOPUP_GAS_DELEGATED} from './config.mjs';
 import {safeError} from './safe-error.mjs';
 
 export const GAS_PRICE_ORACLE='0x420000000000000000000000000000000000000F';
@@ -43,8 +43,10 @@ export async function quoteTransfer(rpc,{wallet,data,capWei,maxGas}){
  const fees=await readFees(rpc,capWei),l1Fee=BigInt(await rpc.l1FeeUpperBound(TRANSFER_TX_BYTES));
  return {gas,...fees,l1Fee,needed:gas*fees.maxFeePerGas+l1Fee};
 }
-/** The top-up: exactly 21000 gas (the user wallet has no code, guard 5), fees, L1 upper bound; fee = what it costs us. */
-export async function quoteTopup(rpc,{capWei}){
+/** The top-up: exactly 21000 gas (the user wallet has no code, guard 5) or TOPUP_GAS_DELEGATED to a Calibur-delegated
+ * wallet (its receive() runs), fees, L1 upper bound; fee = what it costs us. */
+export async function quoteTopup(rpc,{capWei,gas=TOPUP_GAS}){
+ if(gas!==TOPUP_GAS&&gas!==TOPUP_GAS_DELEGATED)throw Error('top-up gas must be 21000 or 40000');
  const fees=await readFees(rpc,capWei),l1Fee=BigInt(await rpc.l1FeeUpperBound(TRANSFER_TX_BYTES));
- return {gas:TOPUP_GAS,...fees,l1Fee,fee:TOPUP_GAS*fees.maxFeePerGas+l1Fee};
+ return {gas,...fees,l1Fee,fee:gas*fees.maxFeePerGas+l1Fee};
 }

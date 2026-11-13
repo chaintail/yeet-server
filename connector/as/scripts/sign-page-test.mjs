@@ -172,3 +172,31 @@ test('a 3-leg Solana request (one transaction, one signature): legs and leg_summ
   assert.match(js, /legsOf\(r\)\.includes\(leg\)/);
   assert.match(js, /api\('signature', \{leg: req\.leg, attempt_id: req\.attempt_id, signed\}\)/);
 });
+
+test('a 2-leg Base evm_7702 request (one batch): reaches the page intact; one 262-character submit moves both rows; the page loops the wallet calls', async () => {
+  const summary = (leg, to) => ({leg, side: 'buy', asset: 'USDC', amount_raw: '3000000', decimals: 6, to});
+  const d0 = '0x' + '2'.repeat(40), d1 = '0x' + '3'.repeat(40), wallet = '0x' + 'a'.repeat(40);
+  const call = (to) => ({to: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', value: '0', data: '0xa9059cbb' + to.slice(2).padStart(64, '0') + (3000000).toString(16).padStart(64, '0')});
+  const req = {trade_id: TRADE, leg: 0, attempt_id: 'd'.repeat(64), kind: 'evm_7702', chain: 'base', wallet, legs: [0, 1],
+    payload: {type: 'calibur_batch', authorization: {contract: '0x000000005c84F8Fd50b21CAC312528A64437030e', chain_id: 8453, nonce: 0},
+      typed_data: {domain: {name: 'Calibur', version: '1.0.0', chainId: 8453, verifyingContract: wallet, salt: '0x' + '0'.repeat(32) + '000000005c84f8fd50b21cac312528a64437030e'},
+        types: {}, primary_type: 'SignedBatchedCall', message: {batchedCall: {calls: [call(d0), call(d1)], revertOnFailure: true}, nonce: '1', keyHash: '0x' + '0'.repeat(64), executor: '0x' + 'b'.repeat(40), deadline: '1800000000'}}},
+    summary: {side: 'buy', asset: 'USDC', amount_raw: '3000000', decimals: 6, to: d0}, leg_summaries: [summary(0, d0), summary(1, d1)]};
+  const legs = ['WIF', 'BOME'].map((symbol, leg) => ({leg, symbol, send_status: 'awaiting_signature'}));
+  coreAnswer = () => ({status: 200, body: {trade_id: TRADE, direction: 'yeet', status: 'signing', legs, sign_requests: [req]}});
+  const ok = {trade_id: TRADE, privy_access_token: 'tok-alice'};
+  const page = await (await post('/sign/api/requests', ok)).json();
+  assert.deepEqual(page.sign_requests[0], req);
+  const {privyRpcBodies} = await import('../../core/pipeline/wallet-request.mjs');
+  assert.deepEqual(privyRpcBodies(page.sign_requests[0]).map((b) => b.method), ['eth_sign7702Authorization', 'eth_signTypedData_v4']);
+  calls.length = 0;
+  const signed = '0x' + 'ab'.repeat(130);
+  coreAnswer = () => ({status: 200, body: {trade_id: TRADE, status: 'submitted', legs: legs.map((l) => ({...l, send_status: 'signing', tx_hash: '0x' + 'c'.repeat(64)}))}});
+  const out = await (await post('/sign/api/signature', {...ok, leg: 0, attempt_id: req.attempt_id, signed})).json();
+  assert.deepEqual(out.legs.map((l) => l.send_status), ['signing', 'signing'], 'both rows advance together');
+  assert.deepEqual(calls.map((c) => c.body), [{leg: 0, attempt_id: req.attempt_id, signed}]);
+  const js = await (await fetch(BASE + '/sign/sign.js')).text();
+  assert.match(js, /for \(const b of privyRpcBodies\(req\)\)/);
+  assert.match(js, /signedFromWallets\(req, answers\)/);
+  assert.match(js, /UNSUPPORTED_7702/);
+});

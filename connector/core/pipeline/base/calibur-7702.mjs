@@ -18,8 +18,8 @@
 //    hookData), signature at least 64 bytes. hookData is unused for the root key (no hook), so it is empty.
 //  - src/KeyManagement.sol getKey(0) = KeyLib.toRootKey() = Secp256k1 key of address(this): keyHash 0 = the EOA's key.
 //  - src/NonceManager.sol: nonce = (uint192 key << 64) | uint64 seq; the seq for a key must match exactly, then +1.
-import {encodeAbiParameters,encodeFunctionData,decodeFunctionData,hashTypedData,parseAbi,toFunctionSelector,
- keccak256,toHex,isAddress,getAddress,parseTransaction,recoverTransactionAddress,decodeAbiParameters} from 'viem';
+import {encodeAbiParameters,encodeFunctionData,decodeFunctionData,decodeFunctionResult,hashTypedData,parseAbi,toFunctionSelector,
+ keccak256,toHex,isAddress,getAddress,parseTransaction,recoverTransactionAddress,decodeAbiParameters,sha256} from 'viem';
 import {hashAuthorization,recoverAuthorizationAddress} from 'viem/utils';
 import {BASE_CHAIN_ID,USDC_BASE,TRANSFER_TOPIC} from './config.mjs';
 import {transferData} from './source-executor.mjs';
@@ -203,4 +203,43 @@ export function legEvidence(logs,{user,legs}){
 export function revertName(data){
  const s=lc(data??'').slice(0,10);
  return CALIBUR_ERRORS[s]??(s.length===10?s:'no-revert-data');
+}
+
+// Production helpers (batch-driver.mjs, BASE-7702-PRODUCTION-PLAN.md 2.1-2.2).
+
+/** Plan 2.1 step 4: the batch nonce key of a trade = the top 192 bits of sha256("yeet-7702:" + trade_id). Every attempt
+ * of the trade shares it, so at most one signed batch per trade can ever run on chain. */
+export const tradeNonceKey=tradeId=>BigInt(sha256(toHex('yeet-7702:'+String(tradeId))))>>64n;
+export const getSeqCalldata=key=>encodeFunctionData({abi:CALIBUR_ABI,functionName:'getSeq',args:[BigInt(key)]});
+export const decodeSeq=data=>BigInt(decodeFunctionResult({abi:CALIBUR_ABI,functionName:'getSeq',data}));
+export const EIP712_DOMAIN_CALLDATA=encodeFunctionData({abi:CALIBUR_ABI,functionName:'eip712Domain'});
+/** eip712Domain() of a delegated EOA -> {name, version, chainId, verifyingContract, salt, saltPrefix}. The salt must be
+ * pack(prefix, CALIBUR) (PrefixedSaltLib), else the domain is not Calibur's and the call throws. */
+export function decodeDomain(data){
+ const [,name,version,chainId,verifyingContract,salt]=decodeFunctionResult({abi:CALIBUR_ABI,functionName:'eip712Domain',data});
+ const v=BigInt(salt),impl=v&((1n<<160n)-1n);
+ if(impl!==BigInt(CALIBUR))throw Error('domain salt does not name Calibur');
+ return {name,version,chainId:Number(chainId),verifyingContract:getAddress(verifyingContract),salt:toHex(v,{size:32}),saltPrefix:v>>160n};
+}
+/** The Privy typed_data of a sign request -> the viem signTypedData argument (bigints back, EIP712Domain dropped). */
+export function typedDataForSigning(td){
+ const {EIP712Domain:_d,...types}=td.types;
+ const m=td.message;
+ return {domain:{...td.domain,chainId:Number(td.domain.chainId)},types,primaryType:td.primary_type,
+  message:{batchedCall:{calls:m.batchedCall.calls.map(c=>({to:c.to,value:BigInt(c.value),data:c.data})),revertOnFailure:m.batchedCall.revertOnFailure},
+   nonce:BigInt(m.nonce),keyHash:m.keyHash,executor:m.executor,deadline:BigInt(m.deadline)}};
+}
+/** The type-2 twin of buildType4 for an already delegated wallet (no authorization list). */
+export function buildType2({user,data,nonce,gas,maxFeePerGas,maxPriorityFeePerGas,chainId=BASE_CHAIN_ID}){
+ return {type:'eip1559',chainId,to:addr(user,'user'),value:0n,data,nonce,gas:BigInt(gas),
+  maxFeePerGas:BigInt(maxFeePerGas),maxPriorityFeePerGas:BigInt(maxPriorityFeePerGas)};
+}
+/** assertType4Bytes for the type-2 twin. Returns the hash. */
+export async function assertType2Bytes(bytes,tx,sender){
+ const p=parseTransaction(bytes),from=await recoverTransactionAddress({serializedTransaction:bytes});
+ const same=p.type==='eip1559'&&p.chainId===tx.chainId&&lc(p.to)===lc(tx.to)&&(p.value??0n)===0n&&lc(p.data??'0x')===lc(tx.data)
+  &&p.nonce===tx.nonce&&p.gas===tx.gas&&p.maxFeePerGas===tx.maxFeePerGas&&p.maxPriorityFeePerGas===tx.maxPriorityFeePerGas
+  &&(p.accessList?.length??0)===0&&lc(from)===lc(sender);
+ if(!same)throw Error('signed type-2 bytes differ from the prepared transaction');
+ return keccak256(bytes);
 }

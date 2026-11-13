@@ -305,33 +305,53 @@ export function createLedger({db,now=Date.now,sponsorLimits=DEFAULT_SPONSORSHIP_
    *   'failed' / 'not_sent'  signed but nothing landed for this leg: attempt -> failed, leg -> target, amount held
    * Earlier steps are applied first when a crash skipped them. False when the attempt is already final.
    */
-  evmProgress(id,target,{signedHex=null,txHash=null,reason=null,evidence={}}={}){
+  evmProgress(id,target,{signedHex=null,txHash=null,reason=null,evidence={},legsOk=null}={}){
    return tx(db,()=>{
     const a=attempt(id);
     if(!a||a.chain!=='base'||['confirmed','failed','abandoned'].includes(a.status))return false;
     const at=now(),t=trade(a.trade_id);
-    const legNow=()=>leg(a.trade_id,a.leg_idx).send_status;
-    const move=(to,ev,set={})=>{const from=legNow();if(from===to)return;
-     if(!transitionLeg(db,{tradeId:a.trade_id,idx:a.leg_idx,from,to,evidence:{attempt_id:id,...ev},set:{updated_at:at,...set},at}))throw new TransitionRefused(`leg left ${from}`)};
+    // BASE-7702-PRODUCTION-PLAN.md 2.5: every leg the attempt pays moves in this one DB transaction, one event per
+    // leg, the same tx_hash on each. A 7702 batch has no top-up, so its legs skip awaiting_gas.
+    const legs=legsOfAttempt(a),batch=!!a.batch_json;
+    const move=(idx,to,ev,set={})=>{const from=leg(a.trade_id,idx).send_status;if(from===to)return;
+     if(!transitionLeg(db,{tradeId:a.trade_id,idx,from,to,evidence:{attempt_id:id,...ev,...(legs.length>1?{legs}:{})},set:{updated_at:at,...set},at}))throw new TransitionRefused(`leg left ${from}`)};
+    const moveAll=(to,ev,set)=>{for(const i of legs)move(i,to,ev,set)};
     let st=a.status;
     if(st==='pending'&&signedHex){
      setAttempt(id,'pending','signing',{signed_base64:signedHex,signature:txHash});st='signing';
-     move('awaiting_gas',{tx_hash:txHash,stage:'signed',signed_bytes_persisted:true},{tx_hash:txHash});
+     moveAll(batch?'signing':'awaiting_gas',{tx_hash:txHash,stage:'signed',signed_bytes_persisted:true},{tx_hash:txHash});
     }
     if(target==='signed')return true;
     if(target==='broadcast'){
+     if(st==='confirming'&&batch&&txHash&&txHash!==a.signature){
+      // The outer transaction was re-signed (authorization dropped) or replaced (+12.5% fees): follow the new hash.
+      setAttempt(id,'confirming','confirming',{signature:txHash});
+      for(const i of legs){db.prepare('UPDATE trade_legs SET tx_hash=?,updated_at=? WHERE trade_id=? AND idx=?').run(txHash,at,a.trade_id,i);
+       recordLegEvent(db,{tradeId:a.trade_id,idx:i,status:leg(a.trade_id,i).send_status,evidence:{attempt_id:id,tx_hash:txHash,replaces:a.signature,stage:'resigned'},at})}
+      return true;
+     }
      if(st!=='signing')return st==='confirming';
-     setAttempt(id,'signing','confirming');move('signing',{tx_hash:a.signature??txHash,stage:'broadcast'});return true;
+     setAttempt(id,'signing','confirming',batch&&txHash&&txHash!==a.signature?{signature:txHash}:{});
+     moveAll('signing',{tx_hash:(batch?txHash:null)??a.signature??txHash,stage:'broadcast'},batch&&txHash?{tx_hash:txHash}:{});return true;
     }
     if(target==='confirmed'){
      setAttempt(id,st,'confirmed',{signature:txHash});
-     move('sent',{tx_hash:txHash,source:'base_receipt',...evidence},{tx_hash:txHash});return true;
+     for(const i of legs){
+      if(!legsOk||legsOk.includes(i)){move(i,'sent',{tx_hash:txHash,source:'base_receipt',...evidence},{tx_hash:txHash});continue}
+      // Only legs with their Transfer log count as sent (plan 2.4 partial logs); the others moved nothing.
+      const l=leg(a.trade_id,i);
+      move(i,'failed',{tx_hash:txHash,reason:'TRANSFER_LOG_MISSING',stage:'base',released_raw:null,held_raw:t.direction==='yeet'?l.amount_in_raw:null,...evidence});
+      releaseSpend(t,l);
+     }
+     return true;
     }
     if(st==='pending')throw new TransitionRefused('an unsigned Base attempt ends through endAttempt');
-    const l=leg(a.trade_id,a.leg_idx);
     setAttempt(id,st,'failed',{failure_reason:String(reason??target).slice(0,200)});
-    move(target,{reason,stage:'base',released_raw:null,held_raw:t.direction==='yeet'?l.amount_in_raw:null,...evidence});
-    releaseSpend(t,l);
+    for(const i of legs){
+     const l=leg(a.trade_id,i);
+     move(i,target,{reason,stage:'base',released_raw:null,held_raw:t.direction==='yeet'?l.amount_in_raw:null,...evidence});
+     releaseSpend(t,l);
+    }
     return true;
    });
   },

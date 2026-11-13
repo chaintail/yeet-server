@@ -2,7 +2,8 @@
 // watchers started by resubmitted signatures.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fakePipeline,signAs,ALICE,aliceWallet} from './fakes.mjs';
+import {fakePipeline,fakeBasePipeline,signAs,ALICE,aliceWallet} from './fakes.mjs';
+import {mine} from './base/test-support.mjs';
 import {decodeTransaction} from './solana/message.mjs';
 import {base58Encode} from '../trade/router.mjs';
 import {statusAdvances} from './tracker.mjs';
@@ -90,4 +91,24 @@ test('finding 2: concurrent watchers are capped; beyond the cap the tracker pass
  await p.tracker.pollOnce();
  assert.equal(oneclick.calls.submit.length,2,'the other leg through the tracker');
  assert.ok([0,1].every(i=>leg(db,x.trade_id,i).deposit_submitted===1));
+});
+
+test('Base 7702 basket: one landing watcher for the batch, 10 resubmissions, the tracker racing it: one notice per leg, the same hash',async()=>{
+ const gate=deferred();let f;
+ // The batch lands while the watcher sleeps; the fake clock moves past the recover throttle.
+ const sleep=async()=>{await gate.promise;f.now.advance(3_000);if(!f.rpc.s.receipts.size)await mine(f.rpc,f.rpc.s.broadcasts[0])};
+ f=await fakeBasePipeline({env:{YEET_BASE_MODE:'7702'},landing:{landingPollMs:1,landingWatchMs:10,sleep}});
+ const {p,db,oneclick}=f;
+ const x=await exec(p,ALICE,await p.propose(ALICE,{request_id:'race-base',amount_usdc:'9',legs:['WIF','BOME','TRUMP'].map(symbol=>({symbol,parts:1}))}));
+ const r=x.sign_requests[0];assert.equal(r.kind,'evm_7702');assert.deepEqual(r.legs,[0,1,2]);
+ const signed=await f.sign(r);
+ for(let i=0;i<10;i++){const s=await sub(p,ALICE,r,signed);assert.deepEqual(s.legs.map(l=>l.send_status),['signing','signing','signing'])}
+ assert.equal(p.landingWatches(),1,'one watcher per attempt');
+ gate.resolve();
+ await Promise.all([p.landings(),p.tracker.pollOnce(),p.tracker.pollOnce()]);
+ await p.tracker.pollOnce();
+ assert.deepEqual([0,1,2].map(i=>leg(db,x.trade_id,i).send_status),['sent','sent','sent']);
+ assert.equal(oneclick.calls.submit.length,3,'one notice per leg, never twice');
+ assert.equal(new Set(oneclick.calls.submit.map(c=>c.txHash)).size,1);
+ assert.equal(f.rpc.s.broadcasts.length,1);
 });

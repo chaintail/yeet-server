@@ -12,6 +12,8 @@ import {bootstrapFeePayer,bootstrapBody,policyHash} from './solana/fee-payer-boo
 import {fakeFeePayer,fakeSolanaRpc,aliceWallet,WIF_MINT} from './fakes.mjs';
 import {fakeOneClick,fakeBalances,BASE_WALLET} from '../trade/fakes.mjs';
 import {USDC_SOLANA} from './solana/message.mjs';
+import {privateKeyToAccount} from 'viem/accounts';
+import {fakeRpc,keyFile} from './base/test-support.mjs';
 
 const dir=mkdtempSync(join(tmpdir(),'yeet-optools-'));
 test.after(()=>rmSync(dir,{recursive:true,force:true}));
@@ -107,6 +109,28 @@ test('dry operator run of a 2-coin basket: one sign request for both legs, one s
  // --coin lists: 1 to 5 distinct coins.
  await assert.rejects(runUserSignedTrade({opts:parseArgs(['--coin','WIF,WIF','--usdc','6']),wallet:testWallet,env:{},overrides:fakes().overrides}),/twice/);
  await assert.rejects(runUserSignedTrade({opts:parseArgs(['--coin','WIF,BOME,TRUMP,PENGU,SPX,TURBO','--usdc','18']),wallet:testWallet,env:{},overrides:fakes().overrides}),/1 to 5 coins/);
+});
+
+test('dry operator run of a Base basket (plan 2.10): YEET_BASE_MODE=7702 gives one evm_7702 request, the test key signs it like the card, the simulation prints; legacy gives N evm_tx',async()=>{
+ const key=Uint8Array.from(Buffer.from('6b'.repeat(32),'hex')),acct=privateKeyToAccount('0x'+'6b'.repeat(32));
+ const wallet={solana:aliceWallet,base:{address:acct.address,privateKey:()=>Uint8Array.from(key)}};
+ const run=async mode=>{
+  const gas=keyFile(),rpc=fakeRpc();rpc.s.now=Date.now;rpc.s.token[acct.address.toLowerCase()]=50_000_000n;rpc.s.balance[gas.address]=10n**18n;
+  const env={YEET_BASE_MODE:mode,BASE_RPC_URL:'http://fake.invalid',YEET_BASE_GAS_WALLET:gas.address,YEET_BASE_GAS_WALLET_KEY_FILE:gas.file};
+  const lines=[];
+  await runUserSignedTrade({opts:parseArgs(['--chain','base','--coin','WIF,BOME','--usdc','6']),wallet,env,emit:l=>lines.push(l),
+   overrides:{client:fakeOneClick(),balances:fakeBalances({usdc:'50',holdings:[]}),driverOverrides:{baseRpc:rpc,feePayer:null}}});
+  return {lines,rpc};
+ };
+ const a=await run('7702');
+ const x=a.lines.find(l=>l.step==='executed');
+ assert.deepEqual(x.sign_requests.map(r=>[r.kind,r.legs]),[['evm_7702',[0,1]]]);
+ const s=a.lines.find(l=>l.step==='submitted');
+ assert.equal(s.dry_run_state,'not_sent');assert.equal(s.simulation.legs_transferred,2);assert.ok(BigInt(s.simulation.max_cost_wei)>0n);
+ assert.equal(a.rpc.s.broadcasts.length,0,'dry: nothing sent');
+ const b=await run('legacy');
+ assert.deepEqual(b.lines.find(l=>l.step==='executed').sign_requests.map(r=>[r.kind,r.legs]),[['evm_tx',[0]],['evm_tx',[1]]]);
+ assert.equal(b.rpc.s.broadcasts.length,0);
 });
 
 test('broadcast run is refused before anything is built when the operator env has trading off',async()=>{

@@ -12,6 +12,10 @@
 //   YEET_BASE_GAS_FLOOR_RAW            gas wallet balance kept after a top-up (0.0005 ETH)   -> TOPUP_UNAVAILABLE
 //   YEET_BASE_MAX_FEE_WEI              maxFeePerGas cap for both transactions (0.1 gwei)     -> INVALID_TRANSACTION_BUDGET
 //   YEET_BASE_TOPUP_REPLACE_MAX_FEE_WEI  maxFeePerGas ceiling for replacing a stuck top-up (1 gwei)
+//   YEET_BASE_MODE                     7702 | legacy (default legacy): 7702 = one Calibur batch per basket, sent and
+//                                      paid by the gas wallet (BASE-7702-PRODUCTION-PLAN.md); legacy = per-leg transfers
+//   YEET_BASE_BATCH_MAX_COST_WEI       max cost of one batch transaction, gas x maxFee + L1 bound (2e13 wei)
+//   YEET_BASE_DEPOSIT_SEEN_MS          a 7702 leg still PENDING_DEPOSIT this long after landing -> auto legacy (300000)
 export const STUCK_TOPUP_ALERT_AFTER=3;
 import os from 'node:os';
 import path from 'node:path';
@@ -22,6 +26,15 @@ export const USDC_BASE='0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 export const TRANSFER_SELECTOR='0xa9059cbb';// transfer(address,uint256)
 export const TRANSFER_TOPIC='0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';// Transfer(address,address,uint256)
 export const TOPUP_GAS=21_000n;
+/** A top-up to a Calibur-delegated wallet runs Calibur's receive(): 21000 is too little (plan 2.7). */
+export const TOPUP_GAS_DELEGATED=40_000n;
+/** 7702 batch gas ceiling after the +25% margin: 150000 + 45000 per leg. The plan said 120000 + 45000N; a mainnet
+ * eth_estimateGas of a first (type-4) trade to fresh deposit addresses gives 167859 for 1 leg and 207440 for 2, so the
+ * base is 150000 (plan "Deviations"). */
+export const BATCH_GAS_BASE=150_000n;
+export const BATCH_GAS_PER_LEG=45_000n;
+export const MAX_BATCH_LEGS=5;
+export const BASE_MODES=Object.freeze(['7702','legacy']);
 /** Guard 7: the user's transfer may carry at most this gas limit. */
 export const MAX_USER_GAS=100_000n;
 export const SIGN_WINDOW_MS=10*60_000;
@@ -45,7 +58,15 @@ function wei(env,name,fallback){
 export function readBaseConfig(env=process.env){
  const gw=String(env.YEET_BASE_GAS_WALLET??'').trim();
  if(gw&&!ADDR.test(gw))throw Error('Invalid YEET_BASE_GAS_WALLET');
+ // Unset = legacy: the 7702 batch path is switched on explicitly (deviation from the plan's code default, see plan).
+ const mode=String(env.YEET_BASE_MODE??'').trim().toLowerCase()||'legacy';
+ if(!BASE_MODES.includes(mode))throw Error('Invalid YEET_BASE_MODE (7702|legacy)');
+ const seen=String(env.YEET_BASE_DEPOSIT_SEEN_MS??'').trim()||'300000';
+ if(!/^[1-9][0-9]{3,8}$/.test(seen))throw Error('Invalid YEET_BASE_DEPOSIT_SEEN_MS');
  return Object.freeze({
+  mode,
+  batchMaxCostWei:wei(env,'YEET_BASE_BATCH_MAX_COST_WEI','20000000000000'),
+  depositSeenMs:Number(seen),
   rpcUrl:String(env.BASE_RPC_URL??'').trim()||null,
   gasWallet:gw?gw.toLowerCase():null,
   keyFile:String(env.YEET_BASE_GAS_WALLET_KEY_FILE??'').trim()||DEFAULT_KEY_FILE,
