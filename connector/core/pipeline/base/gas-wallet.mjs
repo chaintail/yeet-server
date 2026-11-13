@@ -25,6 +25,14 @@ export function createGasWalletKey(file){
  return {address,file};
 }
 
+/** The address of an existing key file (mode 0600 required). For the init tool's refuse-to-overwrite message. */
+export function gasWalletAddress(file){
+ const st=statSync(file);
+ if(!st.isFile()||(st.mode&0o777)!==0o600)refuse('GAS_WALLET_NOT_CONFIGURED','key file mode must be 0600');
+ const key=readFileSync(file,'utf8').trim();
+ if(!/^0x[0-9a-fA-F]{64}$/.test(key))refuse('GAS_WALLET_NOT_CONFIGURED','key file format');
+ return privateKeyToAddress(key).toLowerCase();
+}
 function readKey(config){
  if(!config.gasWallet||!config.keyFile)refuse('GAS_WALLET_NOT_CONFIGURED','YEET_BASE_GAS_WALLET unset');
  let st;try{st=statSync(config.keyFile)}catch{refuse('GAS_WALLET_NOT_CONFIGURED','key file missing')}
