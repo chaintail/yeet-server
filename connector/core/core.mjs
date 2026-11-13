@@ -76,6 +76,16 @@ app.post('/operator/trading',operatorTrade('trading',(e,ctx)=>{
 }));
 app.post('/operator/trades/propose',operatorTrade('propose',(e,ctx,a)=>e.propose(ctx,a)));
 app.post('/operator/trades/execute',operatorTrade('execute',(e,ctx,a)=>e.execute(ctx,a)));
+// Cancel a trade whose legs were never broadcast (executor.cancel): checks 1Click and Privy first, then fails the legs
+// through the transition guard, returns the amount to the daily cap and writes audit rows. Open regardless of the
+// allowlist and the flags: it can only stop a send, never start one. A refusal answers cancelled:false and the reason.
+app.post('/operator/trades/cancel',operatorTrade('cancel',async(e,ctx,a)=>{
+ if(typeof a.trade_id!=='string'||!/^t_[a-z0-9]{20}$/.test(a.trade_id))throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});
+ if(a.reason!==undefined&&typeof a.reason!=='string')throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});
+ const out=await e.cancel(ctx,a.trade_id,{reason:a.reason});
+ console.log(JSON.stringify({event:'operator_trade_cancel',trade:a.trade_id,cancelled:out.cancelled,status:out.status,reason:out.reason??null}));
+ return out;
+}));
 app.post('/operator/trades/status',operatorTrade('status',(e,ctx,a)=>{
  if(typeof a.trade_id!=='string'||!/^t_[a-z0-9]{20}$/.test(a.trade_id))throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});
  const view=e.status(ctx,a.trade_id);

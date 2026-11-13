@@ -1,0 +1,103 @@
+{
+  "_source": "Shape of the live 1Click GET /v0/status answer of 2026-11-13 (PENDING_DEPOSIT, every not-yet-known swapDetails field null), extended to the other six statuses of the OpenAPI GetExecutionStatusResponse enum with the fields each status can still lack set to null. Addresses and hashes are dummies.",
+  "PENDING_DEPOSIT": {
+    "status": "PENDING_DEPOSIT",
+    "updatedAt": "2026-11-13T08:50:33.759Z",
+    "correlationId": "00000000-0000-4000-8000-000000000001",
+    "swapDetails": {
+      "depositedAmount": null, "depositedAmountUsd": null, "depositedAmountFormatted": null,
+      "intentHashes": [], "nearTxHashes": [],
+      "amountIn": null, "amountInFormatted": null, "amountInUsd": null,
+      "amountOut": null, "amountOutFormatted": null, "amountOutUsd": null,
+      "slippage": null,
+      "refundedAmount": "0", "refundedAmountFormatted": "0", "refundedAmountUsd": "0",
+      "refundReason": null, "refundFee": "2400", "withdrawFee": "1415769",
+      "originChainTxHashes": [], "destinationChainTxHashes": []
+    },
+    "quoteResponse": {"correlationId": "00000000-0000-4000-8000-000000000001", "quote": {"amountIn": "5000000", "depositAddress": "0x1111111111111111111111111111111111111111"}}
+  },
+  "KNOWN_DEPOSIT_TX": {
+    "status": "KNOWN_DEPOSIT_TX",
+    "updatedAt": "2026-11-13T08:51:02.000Z",
+    "correlationId": "00000000-0000-4000-8000-000000000002",
+    "swapDetails": {
+      "depositedAmount": null, "depositedAmountUsd": null, "depositedAmountFormatted": null,
+      "intentHashes": null, "nearTxHashes": null,
+      "amountIn": null, "amountInFormatted": null, "amountInUsd": null,
+      "amountOut": null, "amountOutFormatted": null, "amountOutUsd": null,
+      "slippage": null, "refundedAmount": null, "refundedAmountFormatted": null, "refundedAmountUsd": null, "refundReason": null,
+      "originChainTxHashes": [{"hash": "0x2222222222222222222222222222222222222222222222222222222222222222", "explorerUrl": null}],
+      "destinationChainTxHashes": []
+    },
+    "quoteResponse": null
+  },
+  "PROCESSING": {
+    "status": "PROCESSING",
+    "updatedAt": "2026-11-13T08:51:20.000Z",
+    "correlationId": "00000000-0000-4000-8000-000000000003",
+    "swapDetails": {
+      "depositedAmount": "5000000", "depositedAmountUsd": "4.9978", "depositedAmountFormatted": "5.0",
+      "intentHashes": [], "nearTxHashes": [],
+      "amountIn": null, "amountInFormatted": null, "amountInUsd": null,
+      "amountOut": null, "amountOutFormatted": null, "amountOutUsd": null,
+      "slippage": null, "refundedAmount": "0", "refundedAmountFormatted": "0", "refundedAmountUsd": "0", "refundReason": null,
+      "originChainTxHashes": [{"hash": "0x2222222222222222222222222222222222222222222222222222222222222222", "explorerUrl": "https://basescan.org/tx/0x2222222222222222222222222222222222222222222222222222222222222222"}],
+      "destinationChainTxHashes": []
+    }
+  },
+  "SUCCESS": {
+    "status": "SUCCESS",
+    "updatedAt": "2026-11-13T08:52:01.000Z",
+    "correlationId": "00000000-0000-4000-8000-000000000004",
+    "swapDetails": {
+      "depositedAmount": "5000000", "depositedAmountUsd": "4.9978", "depositedAmountFormatted": "5.0",
+      "intentHashes": ["9xQe"], "nearTxHashes": ["Hs3u"],
+      "amountIn": "5000000", "amountInFormatted": "5.0", "amountInUsd": "4.9978",
+      "amountOut": "31461517", "amountOutFormatted": "31.461517", "amountOutUsd": "4.7268",
+      "slippage": 12, "refundedAmount": "0", "refundedAmountFormatted": "0", "refundedAmountUsd": null, "refundReason": null,
+      "originChainTxHashes": [{"hash": "0x2222222222222222222222222222222222222222222222222222222222222222", "explorerUrl": ""}],
+      "destinationChainTxHashes": [{"hash": "5VfYmGBjvQKe3xgLtTQPkMeAZJcMBdkdhtQ1WtABpbQV3Q6yZ8NnHcRmw7pS4u9vKcXbNfLwDtYr2aE6hJ1gMxoP", "explorerUrl": null}]
+    }
+  },
+  "INCOMPLETE_DEPOSIT": {
+    "status": "INCOMPLETE_DEPOSIT",
+    "updatedAt": "2026-11-13T08:53:00.000Z",
+    "correlationId": "00000000-0000-4000-8000-000000000005",
+    "swapDetails": {
+      "depositedAmount": "4000000", "depositedAmountUsd": "3.998", "depositedAmountFormatted": "4.0",
+      "intentHashes": [], "nearTxHashes": [],
+      "amountIn": null, "amountInFormatted": null, "amountInUsd": null,
+      "amountOut": null, "amountOutFormatted": null, "amountOutUsd": null,
+      "slippage": null, "refundedAmount": "0", "refundedAmountFormatted": "0", "refundedAmountUsd": "0", "refundReason": null,
+      "originChainTxHashes": [{"hash": "0x2222222222222222222222222222222222222222222222222222222222222222", "explorerUrl": ""}],
+      "destinationChainTxHashes": null
+    }
+  },
+  "REFUNDED": {
+    "status": "REFUNDED",
+    "updatedAt": "2026-11-13T09:30:00.000Z",
+    "correlationId": "00000000-0000-4000-8000-000000000006",
+    "swapDetails": {
+      "depositedAmount": "4000000", "depositedAmountUsd": "3.998", "depositedAmountFormatted": "4.0",
+      "intentHashes": [], "nearTxHashes": [],
+      "amountIn": null, "amountInFormatted": null, "amountInUsd": null,
+      "amountOut": null, "amountOutFormatted": null, "amountOutUsd": null,
+      "slippage": null, "refundedAmount": "3997600", "refundedAmountFormatted": "3.9976", "refundedAmountUsd": "3.9954", "refundReason": "PARTIAL_DEPOSIT",
+      "originChainTxHashes": [{"hash": "0x2222222222222222222222222222222222222222222222222222222222222222", "explorerUrl": ""}],
+      "destinationChainTxHashes": []
+    }
+  },
+  "FAILED": {
+    "status": "FAILED",
+    "updatedAt": "2026-11-13T09:31:00.000Z",
+    "correlationId": "00000000-0000-4000-8000-000000000007",
+    "swapDetails": {
+      "depositedAmount": null, "depositedAmountUsd": null, "depositedAmountFormatted": null,
+      "intentHashes": [], "nearTxHashes": [],
+      "amountIn": null, "amountInFormatted": null, "amountInUsd": null,
+      "amountOut": null, "amountOutFormatted": null, "amountOutUsd": null,
+      "slippage": null, "refundedAmount": null, "refundedAmountFormatted": null, "refundedAmountUsd": null, "refundReason": null,
+      "originChainTxHashes": [], "destinationChainTxHashes": []
+    }
+  }
+}

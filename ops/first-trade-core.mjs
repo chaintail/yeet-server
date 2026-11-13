@@ -50,6 +50,14 @@ function spentTodayRaw(accountId){
  finally{db.close()}
 }
 
+/** The trade an execute of this proposal committed (read-only), or null. */
+function tradeForProposal(proposalId){
+ if(!existsSync('/state/trade.sqlite')||typeof proposalId!=='string')return null;
+ const db=new DatabaseSync('/state/trade.sqlite',{readOnly:true});
+ try{return db.prepare("SELECT id FROM trades WHERE proposal_id=? AND status<>'requote_required' ORDER BY created_at DESC LIMIT 1").get(proposalId)?.id??null}
+ finally{db.close()}
+}
+
 const GAS_FIELDS=new Set(['gas_limit','gas_price','max_fee_per_gas','max_priority_fee_per_gas','gas']);
 /** Our Base transfer against one condition of an ALLOW rule: true, false, 'gas' (depends on gas fields), or 'unknown'. */
 function baseCondition(c,{usdcAddress,usdcRaw}){
@@ -172,6 +180,19 @@ async function plan(){
    // signer-privy.mjs GAS_MIN_WEI: the self-gas send refuses below 0.00001 ETH.
    if(A.selfGas)check('Base ETH >= 0.00001 for self-paid gas',eth>=10_000_000_000_000n,`${formatUnits(eth,18)} ETH`);
    else check('Base ETH not needed (sponsored)',true,`${formatUnits(eth,18)} ETH`,'info');
+   // Self-gas cost now (base-gas.mjs): one USDC transfer at the current Base gas price plus the L1 data fee, x3.
+   try{
+    const {readBaseGasCost,selfGasCheck}=await imp('core/trade/base-gas.mjs');
+    const g=await readBaseGasCost({rpcUrl:PUBLIC_BASE_RPC,from:w.base.address,amountRaw:usdcRaw>0n?usdcRaw:1n});
+    let ethUsd;
+    try{const toks=await new OneClickClient({jwt:env.ONECLICK_JWT||undefined,timeoutMs:8000,retryDelayMs:500}).getTokens();ethUsd=toks.find(t=>t.blockchain==='base'&&t.symbol==='ETH'&&typeof t.price==='number')?.price}catch{}
+    const s=selfGasCheck({balanceWei:eth,gasLimit:g.gasLimit,gasPriceWei:g.gasPriceWei,l1FeeWei:g.l1FeeWei,ethUsd});
+    out.self_gas={gas_limit:String(g.gasLimit),gas_estimated:g.estimated,gas_price_gwei:formatUnits(g.gasPriceWei,9),l1_fee_eth:formatUnits(g.l1FeeWei,18),l1_known:g.l1Known,
+     cost_eth:s.cost_eth,cost_usd:s.cost_usd,needed_eth:s.needed_eth,needed_usd:s.needed_usd,margin:s.margin,balance_eth:s.balance_eth,eth_usd:ethUsd??null,covered:s.covered,
+     engine_min_eth:'0.00001'};
+    check(`Base ETH covers one self-gas USDC transfer x${s.margin} (needs ${s.needed_eth} ETH${s.needed_usd?` ~$${s.needed_usd}`:''})`,s.covered,
+     `balance ${s.balance_eth} ETH; cost now ${s.cost_eth} ETH${s.cost_usd?` ~$${s.cost_usd}`:''} = ${g.gasLimit} gas${g.estimated?'':' (fallback)'} x ${formatUnits(g.gasPriceWei,9)} gwei + L1 ${formatUnits(g.l1FeeWei,18)} ETH`,A.selfGas?'block':'info');
+   }catch(e){check('self-gas cost readable (Base RPC)',false,String(e?.message??e).slice(0,120),A.selfGas?'block':'info')}
   }catch(e){check('balances from public RPC',false,e?.message)}
   await policyChecks({env,limits,w,usdcRaw,check,out});
 
@@ -214,10 +235,15 @@ async function follow(accountId,tradeId,{timeoutMs,startedAt=Date.now()}){
   catch(e){if(++errors>=12){emit('EVT',{stage:'status_unreachable',error:String(e?.message??e).slice(0,120)});return view}await sleep(5000);continue}
   if(r.status!==200){emit('EVT',{stage:'status_refused',http:r.status,error:r.body?.error??null});return view}
   view=r.body;
-  const legs=view.legs.map(l=>({symbol:l.symbol,status:l.status,origin_tx:l.origin_tx,destination_tx:l.destination_tx,amount_out:l.amount_out,refund_reason:l.refund_reason}));
+  // send: the engine's real leg state (queued | sending | sent | failed | not_sent), not the contract's folded view.
+  const rec=view.record?.legs??[];
+  const legs=view.legs.map((l,i)=>({symbol:l.symbol,status:l.status,send:rec[i]?.send_status??null,send_attempts:rec[i]?.send_attempts??null,hash_pending:rec[i]?.hash_pending??false,
+   privy_error:rec[i]?.privy_error??null,origin_tx:l.origin_tx,destination_tx:l.destination_tx,amount_out:l.amount_out,refund_reason:l.refund_reason}));
   const key=JSON.stringify([view.status,legs,view.record?.last_error]);
   if(key!==last){last=key;emit('EVT',{stage:'status',trade_id:tradeId,status:view.status,legs,received:view.received,last_error:view.record?.last_error??null,xp_award:view.xp_award??null,elapsed_s:Math.round((Date.now()-startedAt)/1000)})}
-  const done=FINAL_TRADE.has(view.status)||(view.status==='partial'&&view.legs.every(l=>FINAL_LEG.has(l.status)))||view.record?.receipt?.complete===true;
+  // Nothing was sent and nothing can be any more: final, whatever the trade status says.
+  const noneSent=rec.length>0&&rec.every(l=>l.send_status==='failed'||l.send_status==='not_sent');
+  const done=noneSent||FINAL_TRADE.has(view.status)||(view.status==='partial'&&view.legs.every(l=>FINAL_LEG.has(l.status)))||view.record?.receipt?.complete===true;
   if(done)return view;
   if(Date.now()-startedAt>timeoutMs){emit('EVT',{stage:'watch_timeout',status:view.status});return view}
   await sleep(5000);
@@ -252,12 +278,36 @@ async function live(){
   try{x=await op('/operator/trades/execute',{account:accountId,proposal_id:proposal.proposal_id,revision:proposal.revision,confirm:p.body.confirm.code},90_000);break}
   catch(e){emit('EVT',{stage:'execute_retry',attempt,error:String(e?.message??e).slice(0,120)});if(attempt===3)return emit('RESULT',{ok:false,stage:'execute',proposal,reason:'no answer from execute after 3 tries; run --watch with the trade id from the core log (event operator_trade) or trade.sqlite'})}
  }
- if(x.status!==200)return emit('RESULT',{ok:false,stage:'execute',http:x.status,error:x.body?.error??null,proposal});
+ if(x.status!==200){
+  // execute refused after the trade was committed (e.g. Privy refused every leg): the trade, its real leg states and
+  // the Privy error are still on record; read them so the receipt says why.
+  const tradeId=tradeForProposal(proposal.proposal_id);
+  const s=tradeId?await op('/operator/trades/status',{account:accountId,trade_id:tradeId},15_000).catch(()=>null):null;
+  const status=s?.status===200?s.body:null;
+  if(status)emit('EVT',{stage:'executed',execute:{trade_id:tradeId,status:'refused',error:x.body?.error??null},send_states:status.record?.legs??[]});
+  return emit('RESULT',{ok:false,stage:'execute',http:x.status,error:x.body?.error??null,proposal,trade_id:tradeId,status,privy_errors:(status?.record?.legs??[]).map(l=>l.privy_error).filter(Boolean)});
+ }
  const exec=strip(x.body);
- emit('EVT',{stage:'executed',execute:exec});
+ const s0=await op('/operator/trades/status',{account:accountId,trade_id:exec.trade_id},15_000).catch(()=>null);
+ emit('EVT',{stage:'executed',execute:exec,send_states:s0?.status===200?s0.body.record?.legs??[]:null});
  if(exec.status==='requote_required')return emit('RESULT',{ok:false,stage:'requote',proposal,execute:exec,reason:'live quote worse than the preview; nothing was sent. Review the new quote with the owner and run --plan again'});
  const final=await follow(accountId,exec.trade_id,{timeoutMs:A.timeoutMin*60_000,startedAt:started});
  emit('RESULT',{ok:!!final&&final.status==='success',stage:'final',proposal,execute:exec,status:final});
+}
+
+/** --cancel: the operator cancel route, then the trade's final record. Changes only this trade's rows; sends nothing. */
+async function cancel(){
+ const c=await op('/operator/trades/cancel',{account:A.account,trade_id:A.tradeId,reason:A.reason??'operator cancel (ops/first-trade.mjs --cancel)'},60_000);
+ if(c.status!==200)return emit('RESULT',{ok:false,stage:'cancel',http:c.status,error:c.body?.error??null});
+ emit('EVT',{stage:'cancel',...c.body});
+ const s=await op('/operator/trades/status',{account:A.account,trade_id:A.tradeId},15_000);
+ const view=s.status===200?s.body:null;
+ const legs=view?.record?.legs??[];
+ const final=c.body.cancelled===true&&view?.status==='failed'&&legs.length>0&&legs.every(l=>l.send_status==='failed'||l.send_status==='not_sent');
+ emit('RESULT',{ok:final,stage:'cancel',cancel:c.body,status:view,spent_today_usdc:spentTodayUsdc(A.account),...(final?{}:{reason:c.body.reason??'trade not in a final not-sent state'})});
+}
+function spentTodayUsdc(accountId){
+ try{const s=spentTodayRaw(accountId);const v=s.raw.toString().padStart(7,'0');return `${v.slice(0,-6)}.${v.slice(-6)}`}catch{return null}
 }
 
 async function watch(){
@@ -265,5 +315,5 @@ async function watch(){
  emit('RESULT',{ok:!!final&&final.status==='success',stage:'final',status:final});
 }
 
-try{await ({plan,live,watch}[A.mode]??(()=>{throw Error('unknown mode')}))()}
+try{await ({plan,live,watch,cancel}[A.mode]??(()=>{throw Error('unknown mode')}))()}
 catch(e){emit('RESULT',{ok:false,stage:'error',error:String(e?.message??e).slice(0,300)});process.exitCode=1}

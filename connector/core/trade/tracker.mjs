@@ -157,7 +157,11 @@ export function createTracker({db,client,now=Date.now,onSettled=()=>{},intervalM
    if(!t||t.account_id!==ctx.accountId)refuse('INVALID_ARGUMENT','unknown trade');
    const events=db.prepare('SELECT leg_id,kind,from_status,to_status,evidence_json,at FROM trade_events WHERE trade_id=? ORDER BY id').all(tradeId)
     .map(e=>({at:iso(e.at),kind:e.kind,leg:e.leg_id,from:e.from_status,to:e.to_status,evidence:e.evidence_json?JSON.parse(e.evidence_json):null}));
-   return {receipt:t.receipt_json?JSON.parse(t.receipt_json):null,last_error:t.last_error??null,proposal_id:t.proposal_id,created_at:iso(t.created_at),events};
+   // The real send state per leg (the contract view folds `sending` into PENDING_DEPOSIT / `sent`), with the redacted
+   // Privy error of the last failed send attempt.
+   const legs=legsOf(tradeId).map(l=>({idx:l.idx,symbol:l.symbol,send_status:l.send_status,send_attempts:l.send_attempts,tx_hash:l.tx_hash??null,
+    hash_pending:l.send_status==='sent'&&!l.tx_hash&&!!l.privy_tx_id,refused:l.refused_at!==null,privy_error:l.privy_error?JSON.parse(l.privy_error):null}));
+   return {receipt:t.receipt_json?JSON.parse(t.receipt_json):null,last_error:t.last_error??null,proposal_id:t.proposal_id,created_at:iso(t.created_at),status:t.status,legs,events};
   },
   /** trade_status for the trade's owner. */
   status(ctx,tradeId){

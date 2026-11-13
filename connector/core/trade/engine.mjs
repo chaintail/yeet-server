@@ -13,12 +13,14 @@ import {createTracker} from './tracker.mjs';
 import {createAccounting,accountingFromEnv,balanceReader} from './accounting.mjs';
 import {createSigner} from './signer.mjs';
 import {iso,usd,refuse} from './util.mjs';
+import {statusTolerantFetch} from './oneclick-status.mjs';
 
 export const PRICE_TTL_MS=5*60_000;
 
-export async function createEngine({db,env=process.env,client,signer,balances,chain,didFor,now=Date.now,onSettled,trackerIntervalMs=5000,budgetMs,hooks,catalog=CATALOG,fetch=globalThis.fetch}){
+export async function createEngine({db,env=process.env,client,signer,balances,chain,didFor,now=Date.now,onSettled,trackerIntervalMs=5000,budgetMs,hooks,catalog=CATALOG,fetch=globalThis.fetch,log}){
  const limits=limitsFromEnv(env);
- client??=new OneClickClient({jwt:env.ONECLICK_JWT||undefined,timeoutMs:6000,retryDelayMs:500});
+ // statusTolerantFetch: 1Click answers null for not-yet-known status fields (oneclick-status.mjs).
+ client??=new OneClickClient({jwt:env.ONECLICK_JWT||undefined,timeoutMs:6000,retryDelayMs:500,fetch:statusTolerantFetch(fetch)});
  balances??=createRpcBalances({baseRpcUrl:env.BASE_RPC_URL,solanaRpcUrl:env.SOLANA_RPC_URL,fetch});
  signer??=await createSigner({env,fetch,balances,didFor,db,now});
  const codes=createConfirmCodes({db,now,mintLimit:limits.codeMintLimit});
@@ -26,7 +28,7 @@ export async function createEngine({db,env=process.env,client,signer,balances,ch
  const proposals=createProposals({db,client,limits,wallets,codes,now,catalog});
  const accounting=createAccounting({db,chain:chain??balanceReader(balances),now,...accountingFromEnv(env)});
  const tracker=createTracker({db,client,now,onSettled,intervalMs:trackerIntervalMs,trackMaxHours:limits.trackMaxHours,accounting});
- const executor=createExecutor({db,client,limits,wallets,signer,codes,proposals,tracker,accounting,now,hooks,...(budgetMs?{budgetMs}:{})});
+ const executor=createExecutor({db,client,limits,wallets,signer,codes,proposals,tracker,accounting,now,hooks,...(budgetMs?{budgetMs}:{}),...(log?{log}:{})});
  tracker.useRecovery(id=>executor.recover(id));
 
  let prices={at:0,bySymbol:new Map()};
@@ -55,6 +57,8 @@ export async function createEngine({db,env=process.env,client,signer,balances,ch
   quote:(ctx,body)=>proposals.quote(ctx,body),
   execute:(ctx,body)=>executor.execute(ctx,body),
   status:(ctx,id)=>tracker.status(ctx,id),
+  /** Operator only (core.mjs /operator/trades/cancel): ends a trade whose legs were never broadcast (executor.cancel). */
+  cancel:(ctx,id,body)=>executor.cancel(ctx,id,body),
   /** yeet_portfolio: catalogue coins held on Solana, USDC on Base, values from 1Click /tokens prices when known. */
   async portfolio(ctx){
    const w=await wallets.require(ctx.accountId);

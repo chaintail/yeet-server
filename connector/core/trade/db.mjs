@@ -169,6 +169,11 @@ export const MIGRATIONS=Object.freeze([
   ALTER TABLE trade_legs ADD COLUMN send_request TEXT;
   ALTER TABLE trade_legs ADD COLUMN key_generation INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE trade_legs ADD COLUMN cached_failure_at INTEGER;`,
+ // 5: Privy refusals (first-trade review 2026-11-13). privy_error is the redacted error of the last Privy answer to this
+ // leg's send ({status, code, message}, JSON). refused_at is set when a re-issue of a `sending` leg got a definite
+ // refusal (4xx): the leg is never sent again, only looked up by reference_id and failed once Privy has nothing.
+ `ALTER TABLE trade_legs ADD COLUMN privy_error TEXT;
+  ALTER TABLE trade_legs ADD COLUMN refused_at INTEGER;`,
 ]);
 
 /** Opens (and migrates) the trade database. `file` defaults to $STATE_DIR/trade.sqlite; ':memory:' for tests. */

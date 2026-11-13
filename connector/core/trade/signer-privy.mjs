@@ -30,22 +30,37 @@ export const PRIVY_FAILED_STATUSES=new Set(['failed','execution_reverted']);
 
 /**
  * Failures carry `notSent: true` only when nothing can have been broadcast: the call was refused before the transfer
- * request left (bad wallet id, no fee payer, calldata, gas check) or Privy explicitly refused this request (policy
- * denial, authorization refused). A timeout, a 5xx or an answer without a hash may follow a broadcast and carries no
+ * request left (bad wallet id, no fee payer, calldata, gas check) or Privy explicitly refused this request (any 4xx
+ * but 408 and the key-reuse 400, see definiteRefusal). A timeout, a 5xx or an answer without a hash may follow a broadcast and carries no
  * flag: the engine then keeps the leg `sending` and resolves it by lookup or with the same idempotency key.
  * A 5xx also carries `cachedFailure: true`: Privy keeps a 5xx on /rpc against the key for 24 h, so the same key can
  * never succeed and the caller must look the transaction up (reference_id) before deciding anything.
  * A 400 for a key reused with another body carries `keyConflict: true`: the key was accepted earlier.
  */
 export const DEFINITE_REFUSALS=new Set(['PRIVY_POLICY_DENIED','PRIVY_AUTHORIZATION_DENIED','PRIVY_INSUFFICIENT_FUNDS','INVALID_PRIVY_PATH','INVALID_IDEMPOTENCY_KEY']);
+/**
+ * A Privy answer to the send that is a definite "not sent" (2026-11-13 first-trade review): any 4xx except a 408
+ * (request timeout: Privy may still be working on it) and the 400 for a key reused with another body (the key was
+ * accepted before, so an earlier request under it may have been broadcast). docs.privy.io idempotency keys: on /rpc a
+ * 4xx is cached against the key and replayed, so re-sending the same request can never succeed either. Also Privy's
+ * `transaction_broadcast_failure` ("The transaction was not broadcasted", api-errors) at any status. Timeouts, 5xx and
+ * an accepted send without a hash stay ambiguous.
+ */
+export function definiteRefusal(e){
+ if(DEFINITE_REFUSALS.has(e?.code))return true;
+ if(e?.privy?.code==='transaction_broadcast_failure')return true;
+ return Number.isInteger(e?.status)&&e.status>=400&&e.status<500&&e.status!==408&&e.code!=='PRIVY_IDEMPOTENCY_CONFLICT';
+}
 const notSent=fn=>{try{return fn()}catch(e){const t=e?.name==='TradeError'?e:new TradeError('TEMPORARILY_UNAVAILABLE',e?.message);t.notSent=true;throw t}};
 const notSentAsync=async fn=>{try{return await fn()}catch(e){const t=e?.name==='TradeError'?e:new TradeError('TEMPORARILY_UNAVAILABLE',e?.message);t.notSent=true;throw t}};
 async function rpc(api,walletId,body,idempotencyKey){
  try{return await api.signed('POST',`/v1/wallets/${walletId}/rpc`,body,{idempotencyKey})}
  catch(e){try{privyFailure(e)}catch(t){
-  if(DEFINITE_REFUSALS.has(e?.code))t.notSent=true;
+  if(definiteRefusal(e))t.notSent=true;
   if(Number.isInteger(e?.status))t.privyStatus=e.status;
-  if(e?.status>=500)t.cachedFailure=true;
+  // The redacted Privy error {status, code, message}: kept on the leg, its audit row and the operator output.
+  if(e?.privy)t.privyError=e.privy;
+  if(e?.status>=500&&!t.notSent)t.cachedFailure=true;
   if(e?.code==='PRIVY_IDEMPOTENCY_CONFLICT')t.keyConflict=true;
   throw t;
  }}

@@ -18,7 +18,35 @@ import {createPrivateKey,createPublicKey,sign} from 'node:crypto';
 import {canonical} from './util.mjs';
 
 export const PRIVY_ORIGIN='https://api.privy.io';
-export class PrivyApiError extends Error{constructor(code,status){super(code);this.name='PrivyApiError';this.code=code;this.status=status}}
+/** `privy` is the redacted error body of a non-2xx answer ({status, code, message}, see privyErrorDetail), or undefined. */
+export class PrivyApiError extends Error{constructor(code,status,privy){super(code);this.name='PrivyApiError';this.code=code;this.status=status;if(privy)this.privy=privy}}
+
+export const PRIVY_ERROR_MAX=300;
+// Anything that looks like a credential: PEM blocks, wallet-auth keys, Basic/Bearer values, JWTs, key=value pairs named
+// like secrets, and long opaque runs (base64/base64url/hex of 32+ characters). 0x-prefixed hex (addresses, hashes) is
+// public chain data and kept.
+const REDACT=[
+ [/-----BEGIN[\s\S]*?(-----END[^-]*-----|$)/g,'[redacted]'],
+ [/wallet-auth:\S*/gi,'[redacted]'],
+ [/\b(basic|bearer)\s+\S+/gi,'$1 [redacted]'],
+ [/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]*)?/g,'[redacted]'],
+ [/\b(secret|token|password|passwd|api[_-]?key|private[_-]?key|authorization|signature)(["']?\s*[:=]\s*)("[^"]*"|'[^']*'|\S+)/gi,'$1$2[redacted]'],
+ [/(?<![0-9a-zA-Z])(?!0x)[A-Za-z0-9+/_=-]{32,}/g,'[redacted]'],
+];
+/** A Privy error text with credential-like parts replaced by [redacted]; also every literal in `secrets`. */
+export function redact(text,secrets=[]){
+ let s=String(text??'');
+ for(const v of secrets)if(typeof v==='string'&&v.length>=6)s=s.split(v).join('[redacted]');
+ for(const [re,to] of REDACT)s=s.replace(re,to);
+ return s;
+}
+/** The error code and message of a non-2xx Privy body, redacted and cut to PRIVY_ERROR_MAX characters; never the body. */
+export function privyErrorDetail(status,json,secrets=[]){
+ const code=typeof json?.code==='string'?redact(json.code,secrets).slice(0,64):null;
+ const raw=[json?.error,json?.message].map(v=>Array.isArray(v)?v.filter(x=>typeof x==='string').join('; '):v).find(v=>typeof v==='string'&&v)??null;
+ const message=raw===null?null:redact(raw,secrets).replace(/\s+/g,' ').trim().slice(0,PRIVY_ERROR_MAX);
+ return {status,code,message};
+}
 
 /** Env names: PRIVY_APP_ID, PRIVY_APP_SECRET, YEET_PRIVY_AUTHORIZATION_KEY, YEET_PRIVY_KEY_QUORUM_ID. Null when any of
  * the first three is missing (the adapters then answer WALLET_NOT_READY). */
@@ -83,7 +111,7 @@ export function createPrivyApi({config,fetch=globalThis.fetch,timeoutMs=15_000})
   try{res=await fetch(url,{method,headers,...(body!==undefined?{body:canonical(body)}:{}),redirect:'error',signal:AbortSignal.timeout(timeoutMs)})}
   catch{throw new PrivyApiError('PRIVY_TRANSPORT_UNAVAILABLE')}
   let json;try{json=await res.json()}catch{json=null}
-  if(res.status<200||res.status>=300)throw new PrivyApiError(privyErrorCode(res.status,json),res.status);
+  if(res.status<200||res.status>=300)throw new PrivyApiError(privyErrorCode(res.status,json),res.status,privyErrorDetail(res.status,json,[config.appSecret,config.authorizationKey]));
   return json;
  }
  return {

@@ -216,7 +216,9 @@ test('engine: a cached 5xx Privy never acted on: that key is never sent again; a
  assert.notEqual(privy.rpc[1].key,first);assert.equal(privy.rpc[1].raw,privy.rpc[0].raw,'byte-identical body, same reference_id');
  assert.equal(JSON.parse(privy.rpc[1].raw).reference_id,first);
  assert.equal(leg.send_status,'sent');assert.equal(privy.broadcasts.length,1);
- const rekeyEvent=tradeEvents(db,r.trade_id).find(e=>e.from_status==='sending'&&e.to_status==='sending');
+ const same=tradeEvents(db,r.trade_id).filter(e=>e.from_status==='sending'&&e.to_status==='sending');
+ assert.equal(same[0].evidence.privy_error.status,502,'the 5xx itself is on the audit trail');
+ const rekeyEvent=same.find(e=>e.evidence.key_generation!==undefined);
  assert.deepEqual([rekeyEvent.evidence.key_generation,rekeyEvent.evidence.reference_id],[1,first]);
  now.advance(60_000);await engine.tracker.pollOnce();
  assert.equal(privy.rpc.length,2);

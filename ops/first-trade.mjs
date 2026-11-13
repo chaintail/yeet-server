@@ -11,6 +11,12 @@
 //      core's own executor: propose (request_id = plan id), execute with the minted one-time code, and one line per
 //      state change until final. Receipt JSON under ~/.local/state/yeet/receipts/.
 //   node ops/first-trade.mjs --watch <trade id> --account yeet-privy-...   follow a trade already started
+//   node ops/first-trade.mjs --cancel <trade id> --account yeet-privy-... [--reason "..."]
+//      End a trade none of whose legs was broadcast (core checks 1Click and Privy first): legs failed/not_sent through
+//      the transition guard, amount back to the daily cap, audit rows; it can never be sent afterwards. Sends nothing.
+//      Receipt cancel-<trade id>.json. Exit 0 only when the trade is final with every leg failed or not_sent.
+// Every state line shows the engine's real leg state (`send=`); a send Privy refused prints its HTTP status, error code
+// and message. --live and --watch exit non-zero unless the trade ends `success`.
 //
 // The container side (ops/first-trade-core.mjs) is piped into node inside the core container with one docker exec;
 // the core-operator secret and every other secret stay inside the container and are never printed.
@@ -19,6 +25,7 @@ import {readFileSync,writeFileSync,mkdirSync,existsSync,readdirSync,renameSync} 
 import {join} from 'node:path';
 import {homedir} from 'node:os';
 import {randomBytes} from 'node:crypto';
+import {et,describe,links,printFinal,privyErrors} from './first-trade-format.mjs';
 
 const STATE=join(homedir(),'.local/state/yeet');
 const PLANS=join(STATE,'first-trade'),RECEIPTS=join(STATE,'receipts');
@@ -30,9 +37,8 @@ const argv=process.argv.slice(2);
 const has=f=>argv.includes(f);
 const val=(f,d)=>{const i=argv.indexOf(f);return i>=0&&argv[i+1]&&!argv[i+1].startsWith('--')?argv[i+1]:d};
 const die=(msg,code=2)=>{console.error(`first-trade: ${msg}`);process.exit(code)};
-const et=d=>new Date(d).toLocaleString('en-US',{timeZone:'America/New_York',hour12:false})+' ET';
 
-const mode=has('--live')?'live':has('--watch')?'watch':'plan';
+const mode=has('--live')?'live':has('--watch')?'watch':has('--cancel')?'cancel':'plan';
 const args={coin:(val('--coin','WIF')).toUpperCase(),usdc:val('--usdc','5'),slippage:Number(val('--slippage','100')),selfGas:has('--self-gas'),
  account:val('--account'),didSuffix:val('--did-suffix'),expectBase:val('--expect-base'),timeoutMin:Number(val('--timeout-min','30'))};
 const container=val('--container','yeet-core-1');
@@ -78,6 +84,7 @@ function printPlan(p){
   line('cost / slippage',`${q.cost_bps} bps cost, ${q.slippage_bps} bps slippage, ~${q.time_estimate_s}s, deposit address: ${q.deposit_address_present?'present':'none (dry)'}`);
   line('1click correlation',q.correlation_id);}
  if(p.gas)line('base gas',`wanted ${p.gas.wanted}, core env ${p.gas.core_env}${p.gas.spend_30d_usd!==undefined?`, gas credits charged 30d $${p.gas.spend_30d_usd}`:''}`);
+ if(p.self_gas){const s=p.self_gas;line('self-gas cost',`${s.cost_eth} ETH${s.cost_usd?` ~$${s.cost_usd}`:''} now (${s.gas_limit} gas${s.gas_estimated?'':' fallback'} x ${s.gas_price_gwei} gwei + L1 ${s.l1_fee_eth} ETH); x${s.margin} = ${s.needed_eth} ETH${s.needed_usd?` ~$${s.needed_usd}`:''}; balance ${s.balance_eth} ETH -> ${s.covered?'covered':'NOT covered'}`)}
  if(p.flags)line('flags',`trading=${p.flags.trading} YEET_LIVE=${p.flags.yeet_live?1:0} KILL=${p.flags.kill_switch?1:0} allowlist env=${p.flags.live_accounts_env} caps ${p.flags.min_leg_usdc}/${p.flags.max_trade_usdc}/${p.flags.daily_cap_usdc} cost<=${p.flags.max_cost_bps}bps`);
  if(p.operator_api)line('operator api',p.operator_api.present?`present (scope ${p.operator_api.scope}, allowed ${p.operator_api.account_allowed}, gas ${p.operator_api.base_gas})`:`absent (HTTP ${p.operator_api.status}): redeploy needed`);
  console.log('  checks:');
@@ -94,28 +101,6 @@ const sameArgs=(a,b)=>['coin','usdc','slippage','selfGas'].every(k=>a[k]===b[k])
 
 function receiptPath(planId){mkdirSync(RECEIPTS,{recursive:true,mode:0o700});return join(RECEIPTS,`first-trade-${planId}.json`)}
 function writeReceipt(path,data){writeFileSync(path+'.tmp',JSON.stringify(data,null,2)+'\n',{mode:0o600});renameSync(path+'.tmp',path)}
-
-function describe(e){
- const at=et(Date.now());
- if(e.stage==='trading')return `${at}  stack: trading=${e.trading} scope=${e.scope} account_allowed=${e.account_allowed} gas=${e.base_gas}`;
- if(e.stage==='proposed'){const l=e.proposal.legs[0];return `${at}  proposed ${e.proposal.proposal_id} r${e.proposal.revision}: ${l.amount_in} USDC -> est ${l.est_out} ${l.symbol} (min ${l.min_out}), cost ${e.proposal.totals.cost_pct}%`}
- if(e.stage==='executed'){const x=e.execute;return `${at}  execute: ${x.status} ${x.trade_id??''} `+(x.legs??[]).map(l=>`${l.symbol} ${l.status} deposit ${l.deposit_address} tx ${l.tx_hash??'(hash pending)'}`).join('; ')}
- if(e.stage==='status')return `${at}  [+${e.elapsed_s}s] trade ${e.status}: `+e.legs.map(l=>`${l.symbol} ${l.status}${l.origin_tx?` base_tx ${l.origin_tx}`:''}${l.destination_tx?` sol_tx ${l.destination_tx}`:''}${l.amount_out?` out ${l.amount_out}`:''}${l.refund_reason?` (${l.refund_reason})`:''}`).join('; ')+(e.last_error?`  last_error: ${e.last_error}`:'');
- return `${at}  ${e.stage} ${JSON.stringify(e)}`;
-}
-function links(status){
- const legs=status?.record?.receipt?.legs??[];
- return (status?.legs??[]).map((l,i)=>({symbol:l.symbol,status:l.status,base_tx:l.origin_tx,basescan:l.origin_tx?`https://basescan.org/tx/${l.origin_tx}`:null,
-  deposit_address:legs[i]?.depositAddress??null,near_intents:legs[i]?.depositAddress?`https://explorer.near-intents.org/transactions/${legs[i].depositAddress}`:null,
-  solana_tx:l.destination_tx,solscan:l.destination_tx?`https://solscan.io/tx/${l.destination_tx}`:null,amount_out:l.amount_out,refund_reason:l.refund_reason}));
-}
-function printFinal(r){
- console.log(`\nRESULT ${r.ok?'OK':'NOT OK'} (stage ${r.stage})${r.reason?`: ${r.reason}`:''}${r.error?`: ${r.error}`:''}`);
- if(r.status){
-  console.log(`  trade ${r.status.trade_id} status ${r.status.status}; received ${JSON.stringify(r.status.received)}; xp ${JSON.stringify(r.status.xp_award??null)}`);
-  for(const l of links(r.status))console.log(`  ${l.symbol}: ${l.status}\n    base tx      ${l.basescan??'-'}\n    near intents ${l.near_intents??'-'}\n    solana tx    ${l.solscan??'-'}${l.refund_reason?`\n    refund       ${l.refund_reason}`:''}`);
- }
-}
 
 if(mode==='plan'){
  const p=await runCore({mode:'plan',...args}).catch(e=>die(e.message,1));
@@ -138,7 +123,22 @@ if(mode==='watch'){
  mkdirSync(RECEIPTS,{recursive:true,mode:0o700});
  const path=join(RECEIPTS,`watch-${tradeId}.json`);
  const r=await runCore({mode:'watch',account:args.account,tradeId,timeoutMin:args.timeoutMin},e=>console.log(describe(e))).catch(e=>die(e.message,1));
- printFinal(r);writeReceipt(path,{version:1,kind:'yeet-trade-watch',written_at:new Date().toISOString(),result:r,links:links(r.status)});
+ printFinal(r);writeReceipt(path,{version:1,kind:'yeet-trade-watch',written_at:new Date().toISOString(),result:r,links:links(r.status),privy_errors:privyErrors(r)});
+ console.log(`  receipt ${path}`);process.exit(r.ok?0:1);
+}
+
+if(mode==='cancel'){
+ const tradeId=val('--cancel');
+ if(!/^t_[a-z0-9]{20}$/.test(tradeId??''))die('--cancel needs a t_... trade id');
+ if(!args.account)die('--cancel needs --account');
+ const reason=val('--reason');
+ if(reason!==undefined&&!/^[\w .,:;()/-]{1,200}$/.test(reason))die('--reason: up to 200 plain characters');
+ mkdirSync(RECEIPTS,{recursive:true,mode:0o700});
+ const path=join(RECEIPTS,`cancel-${tradeId}.json`);
+ const events=[];
+ const r=await runCore({mode:'cancel',account:args.account,tradeId,reason},e=>{events.push({at:new Date().toISOString(),...e});console.log(describe(e))}).catch(e=>die(e.message,1));
+ printFinal(r);
+ writeReceipt(path,{version:1,kind:'yeet-trade-cancel',written_at:new Date().toISOString(),trade_id:tradeId,account:args.account,events,result:r,privy_errors:privyErrors(r)});
  console.log(`  receipt ${path}`);process.exit(r.ok?0:1);
 }
 
@@ -164,7 +164,7 @@ console.log(`LIVE run for plan ${plan.id}: ${args.usdc} USDC -> ${args.coin}, ac
 const r=await runCore({mode:'live',...args,account:plan.account,planId:plan.id,planQuote:plan.quote,maxDriftBps:MAX_DRIFT_BPS},e=>{
  console.log(describe(e));receipt.events.push({at:new Date().toISOString(),...e});writeReceipt(path,receipt);
 }).catch(e=>{receipt.result={ok:false,stage:'tool',error:e.message};writeReceipt(path,receipt);die(`${e.message}; the trade may be running: check the core log and use --watch`,1)});
-receipt.result=r;receipt.links=links(r.status);receipt.finished_at=new Date().toISOString();
+receipt.result=r;receipt.links=links(r.status);receipt.privy_errors=privyErrors(r);receipt.finished_at=new Date().toISOString();
 writeReceipt(path,receipt);
 printFinal(r);
 console.log(`  receipt ${path}`);

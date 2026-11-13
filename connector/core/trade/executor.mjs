@@ -83,7 +83,14 @@ export function assertLivePlan({direction,live,legs,w,log=console.error}){
  }
 }
 
-export function createExecutor({db,client,limits,wallets,signer,codes,proposals,tracker,accounting,now=Date.now,budgetMs=EXECUTE_BUDGET_MS,hooks={}}){
+/** `leg 0: CODE (Privy 400 some_code: message)`: the last_error text of a failed send. */
+export function sendNote(idx,e){
+ const p=e?.privyError;
+ const privy=p?` (Privy ${p.status}${p.code?` ${p.code}`:''}${p.message?`: ${p.message}`:''})`:e?.privyStatus?` (Privy ${e.privyStatus})`:'';
+ return `leg ${idx}: ${e?.detail??e?.message??'send not confirmed'}${privy}`;
+}
+
+export function createExecutor({db,client,limits,wallets,signer,codes,proposals,tracker,accounting,now=Date.now,budgetMs=EXECUTE_BUDGET_MS,hooks={},log=console.error}){
  const trade=id=>db.prepare('SELECT * FROM trades WHERE id=?').get(id);
  const legsOf=id=>db.prepare('SELECT * FROM trade_legs WHERE trade_id=? ORDER BY idx').all(id);
  const legOf=(id,idx)=>db.prepare('SELECT * FROM trade_legs WHERE trade_id=? AND idx=?').get(id,idx);
@@ -226,20 +233,43 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
   }
   if(l.send_status!=='sending')return;
   // A key that answered a 5xx holds that 5xx for 24 h: it is never sent again (recover() looks up, then rekeys).
-  if(l.cached_failure_at!==null)return;
+  // A leg Privy refused (4xx) on a re-issue is never sent again at all (recover() looks it up, then fails it).
+  if(l.cached_failure_at!==null||l.refused_at!==null)return;
   if(l.idempotency_key!==legIdempotencyKey(wallet.walletId,t.id,idx,l.key_generation)){note(t.id,`leg ${idx}: wallet changed since the first attempt, not re-issued`);return}
   let call;
   try{call=prepare(t,l,wallet,held)}catch(e){note(t.id,`leg ${idx}: ${e?.detail??e?.message}`);return codeOf(e)}
   db.prepare('UPDATE trade_legs SET send_attempts=send_attempts+1,updated_at=? WHERE trade_id=? AND idx=?').run(now(),t.id,idx);
   return finish(t,idx,call,false);
  }
+ /** The redacted Privy error of a send: on the leg row and as one structured log line (never the request or a secret). */
+ function keepPrivyError(t,idx,e,first){
+  const p=e?.privyError;if(!p)return null;
+  db.prepare('UPDATE trade_legs SET privy_error=? WHERE trade_id=? AND idx=?').run(JSON.stringify(p),t.id,idx);
+  log(JSON.stringify({event:'privy_send_error',trade:t.id,leg:idx,attempt:first?'first':'reissue',http:p.status,code:p.code,message:p.message,
+   not_sent:e.notSent===true,catalogue_code:codeOf(e)}));
+  return p;
+ }
  async function finish(t,idx,call,first){
   let res;
   try{res=await call()}
   catch(e){
-   // A re-issue's refusal says nothing about the first attempt, so only a first attempt can be released.
-   if(first&&e?.notSent===true){release(t,idx,'failed',{reason:codeOf(e),stage:'signer',not_sent:true});return codeOf(e)}
-   note(t.id,`leg ${idx}: ${e?.detail??e?.message??'send not confirmed'}${e?.privyStatus?` (Privy ${e.privyStatus})`:''}`);
+   const privy=keepPrivyError(t,idx,e,first);
+   note(t.id,sendNote(idx,e));
+   // A definite refusal of the first attempt: nothing was broadcast under this leg.
+   if(first&&e?.notSent===true){release(t,idx,'failed',{reason:codeOf(e),stage:'signer',not_sent:true,...(privy?{privy_error:privy}:{})});return codeOf(e)}
+   if(!first&&e?.notSent===true&&privy){
+    // Privy refused a re-issue (4xx; on /rpc the same key replays a cached 4xx). That says nothing certain about an
+    // earlier attempt under another key, so the leg is never sent again and fails only once a reference_id lookup finds
+    // no transaction; until then it stays `sending` (spent) and recovery repeats the lookup.
+    db.prepare("UPDATE trade_legs SET refused_at=?,updated_at=? WHERE trade_id=? AND idx=? AND send_status='sending' AND refused_at IS NULL").run(now(),now(),t.id,idx);
+    recordLegEvent(db,{tradeId:t.id,idx,status:'sending',evidence:{reason:'Privy refused the re-issued send; never sent again',privy_error:privy},at:now()});
+    const found=await privyLookup(t,legOf(t.id,idx));
+    if(found?.state==='none'){release(t,idx,'failed',{reason:codeOf(e),stage:'signer_reissue',not_sent:true,privy_error:privy,privy_lookup:'none'});return codeOf(e)}
+    if(found)return applyFound(t,idx,found,'privy_reference');
+    return codeOf(e);
+   }
+   // Ambiguous (5xx, 408, key reuse): the leg stays `sending`; the Privy answer goes on its audit trail.
+   if(privy&&legOf(t.id,idx)?.send_status==='sending')recordLegEvent(db,{tradeId:t.id,idx,status:'sending',evidence:{reason:'Privy error, outcome unknown',privy_error:privy},at:now()});
    if(e?.cachedFailure){
     // Privy caches a 5xx on /rpc against the key: this key is spent. Look the transfer up before deciding anything.
     db.prepare("UPDATE trade_legs SET cached_failure_at=?,updated_at=? WHERE trade_id=? AND idx=? AND send_status='sending'").run(now(),now(),t.id,idx);
@@ -329,6 +359,11 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
     // Privy by reference_id: a transfer it accepted under any key of this leg is adopted, never sent again.
     const found=await privyLookup(t,l);
     if(found&&found.state!=='none'){await applyFound(t,l.idx,found,'privy_reference');continue}
+    if(l.refused_at!==null){
+     // Privy refused a re-issue: never sent again; failed (cap returned) once Privy has nothing under the reference.
+     if(found?.state==='none')release(t,l.idx,'failed',{reason:'Privy refused the send; no transaction under the reference',privy_error:l.privy_error?JSON.parse(l.privy_error):null,privy_lookup:'none',stage:'recovery'});
+     continue;
+    }
     if(paused)continue;// stays `sending` (spent) until 1Click or the tracker horizon resolves it
     // Never re-issue towards an address that may be inactive: the leg stays `sending` (spent) until 1Click or the
     // tracker's horizon resolves it.
@@ -384,8 +419,78 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
   return {...result,confirm:proposals.mint(fresh,revision,ctx.accountId,ctx.clientId,{rateLimited:false})};// follows a used code: no amplification
  }
 
+ /**
+  * Operator cancel (core.mjs /operator/trades/cancel, ops/first-trade.mjs --cancel): a trade none of whose legs was
+  * ever broadcast ends `failed` and can never be sent. Per open leg, before anything changes:
+  *   queued   never attempted: nothing to check
+  *   sending  no chain hash and no Privy transaction id on the row; 1Click sees no deposit at its address (status
+  *            PENDING_DEPOSIT, or the address unknown); Privy lists no live transaction under its reference_id (none or
+  *            failed). Any check that cannot be completed refuses the cancel.
+  * A trade with a `sent` leg is refused. Then, in one transaction: queued -> not_sent, sending -> failed (the legal
+  * edges, through transitionLeg, with the checks as evidence), the amount back to the daily cap, the proposal
+  * `failed`, the stored execute answer an error, and one `review` audit row `operator_cancel`; then the trade folds to
+  * `failed`. Returns {trade_id, cancelled, reason?, status, legs, released_raw, checks}; refusals are answers, not throws.
+  */
+ async function cancel(ctx,tradeId,{reason}={}){
+  const t=trade(tradeId);
+  if(!t||t.account_id!==ctx.accountId)refuse('INVALID_ARGUMENT','unknown trade');
+  const view=extra=>({trade_id:tradeId,status:trade(tradeId).status,legs:legsOf(tradeId).map(l=>({idx:l.idx,symbol:l.symbol,send_status:l.send_status,send_attempts:l.send_attempts,tx_hash:l.tx_hash??null})),...extra});
+  if(inFlight.has(tradeId))return view({cancelled:false,reason:'the trade is being sent right now; try again in a minute'});
+  inFlight.add(tradeId);
+  try{
+   const legs=legsOf(tradeId);
+   if(legs.some(l=>l.send_status==='sent'))return view({cancelled:false,reason:'a leg was sent: it is tracked, never cancelled'});
+   const open=legs.filter(l=>l.send_status==='queued'||l.send_status==='sending');
+   if(!open.length)return view({cancelled:false,reason:`nothing to cancel: no leg is queued or sending (trade ${t.status})`});
+   const checks={};
+   for(const l of open){
+    const c=checks[l.idx]={send_status:l.send_status};
+    if(l.send_status==='queued')continue;
+    if(l.tx_hash||l.privy_tx_id)return view({cancelled:false,reason:`leg ${l.idx} has a transfer hash or Privy transaction id`,checks});
+    try{
+     const st=await client.status(l.deposit_address,l.deposit_memo??undefined);
+     c.oneclick_status=st?.status??null;
+     if(st?.status!=='PENDING_DEPOSIT'||(st.swapDetails?.originChainTxHashes??[]).length)return view({cancelled:false,reason:`leg ${l.idx}: 1Click reports ${st?.status} for its deposit address`,checks});
+    }catch(e){
+     if(e?.status===404)c.oneclick_status='unknown_address';
+     else return view({cancelled:false,reason:`leg ${l.idx}: 1Click status unreadable (${String(e?.message??e).slice(0,120)})`,checks});
+    }
+    const referenceId=referenceOf(l);
+    if(!referenceId){c.privy_lookup='never_requested';continue}
+    if(typeof signer.lookupTransfer!=='function')return view({cancelled:false,reason:'the signer cannot look transfers up',checks});
+    let found;
+    try{found=await signer.lookupTransfer({chain:chainOf(t),referenceId})}
+    catch(e){return view({cancelled:false,reason:`leg ${l.idx}: Privy lookup failed (${e?.detail??e?.message})`,checks})}
+    c.privy_lookup=found?.state??null;if(found?.status)c.privy_status=found.status;
+    if(!['none','failed'].includes(found?.state))return view({cancelled:false,reason:`leg ${l.idx}: Privy has a ${found?.state} transaction under its reference`,checks});
+   }
+   const at=now(),opNote=typeof reason==='string'&&reason.trim()?reason.trim().slice(0,200):null;
+   let released=0n;
+   const done=tx(db,()=>{
+    for(const l of open){
+     const cur=legOf(tradeId,l.idx);
+     if(cur.send_status!==l.send_status||cur.tx_hash||cur.privy_tx_id)return false;
+     const to=l.send_status==='queued'?'not_sent':'failed';
+     const evidence={reason:'operator cancel: never broadcast',operator_note:opNote,checks:checks[l.idx],released_raw:String(l.amount_in_raw),
+      ...(cur.privy_error?{privy_error:JSON.parse(cur.privy_error)}:{})};
+     if(!transitionLeg(db,{tradeId,idx:l.idx,from:l.send_status,to,evidence,set:{updated_at:at,...(to==='failed'?{refused_at:cur.refused_at??at}:{})},at}))return false;
+     if(t.direction==='yeet'){recordSpend(db,t.account_id,t.created_at,-BigInt(l.amount_in_raw));released+=BigInt(l.amount_in_raw)}
+    }
+    db.prepare("UPDATE proposals SET status='failed',updated_at=? WHERE id=? AND status IN('executing','executed')").run(at,t.proposal_id);
+    if(!trade(tradeId).result_json)db.prepare('UPDATE trades SET result_json=? WHERE id=?').run(JSON.stringify({error:'TEMPORARILY_UNAVAILABLE'}),tradeId);
+    note(tradeId,`operator cancel: ${open.length} leg(s) never broadcast${opNote?`; ${opNote}`:''}`);
+    appendEvent(db,{tradeId,kind:'review',from:t.status,to:'operator_cancel',evidence:{reason:'operator cancel',operator_note:opNote,legs:open.map(l=>l.idx),checks,released_raw:released.toString()},at});
+    return true;
+   });
+   if(!done)return view({cancelled:false,reason:'the trade changed meanwhile; run the cancel again',checks});
+   log(JSON.stringify({event:'operator_trade_cancelled',trade:tradeId,legs:open.length,released_raw:released.toString()}));
+   try{tracker.refresh(tradeId)}catch(e){note(tradeId,`refresh: ${e?.message}`)}
+   return view({cancelled:true,released_raw:released.toString(),checks});
+  }finally{inFlight.delete(tradeId)}
+ }
+
  return {
-  answer,recover,
+  answer,recover,cancel,
   async execute(ctx,{proposal_id,revision,confirm}){
    const started=now();
    const code=codes.check({code:confirm,accountId:ctx.accountId,clientId:ctx.clientId,proposalId:proposal_id,revision});

@@ -130,8 +130,8 @@ export function fakePrivyEnv(extra={}){
  *   - GET /v1/transactions?reference_id= lists the transactions created with that reference_id
  *   - GET /v1/users/{did} and GET /v1/wallets/{id}: the person's embedded wallets, the YEET quorum attached with
  *     `policyIds[chain]` (an array value attaches several)
- * `rpcFailures`: [{at: rpc request index (new keys only), status: 500|503|'timeout', accepted: bool}]; accepted means
- * Privy created and broadcast the transaction before the failure.
+ * `rpcFailures`: [{at: rpc request index (new keys only), status: 4xx|500|503|'timeout', accepted: bool, body}];
+ * accepted means Privy created and broadcast the transaction before the failure; body is the error answer.
  */
 export function fakePrivy({confirmAfter=1,rpcFailures=[],policyIds=FAKE_POLICY_IDS,quorum='quorum-yeet',did='did:privy:alice'}={}){
  const keys=new Map(),txs=new Map(),calls=[];let rpcN=0,txN=0;
@@ -172,7 +172,7 @@ export function fakePrivy({confirmAfter=1,rpcFailures=[],policyIds=FAKE_POLICY_I
    }
    if(fail){
     if(fail.accepted)create(m[1],body);
-    const res={status:fail.status,body:{error:'Internal server error'}};
+    const res={status:fail.status,body:fail.body??{error:'Internal server error'}};
     if(key)keys.set(key,{raw:init.body,...res});
     return answer(res.status,res.body);
    }
@@ -258,9 +258,10 @@ export function fakeChain({balances,signer,adjust={},failReads=0}={}){
 export function fakeClock(start=Date.parse('2026-11-12T12:00:00.000Z')){let t=start;const now=()=>t;now.advance=ms=>{t+=ms};now.set=ms=>{t=ms};return now}
 
 /** An engine over an in-memory database with fakes for every external system. */
-export async function fakeEngine({env={YEET_LIVE:'1'},oneclick,signer,balances,chain,now=fakeClock(),onSettled,budgetMs,hooks,db=openTradeDb(':memory:')}={}){
+export async function fakeEngine({env={YEET_LIVE:'1'},oneclick,signer,balances,chain,now=fakeClock(),onSettled,budgetMs,hooks,db=openTradeDb(':memory:'),logs=[]}={}){
  env={...FAKE_POLICY_ENV,...env};
  oneclick??=fakeOneClick();signer??=fakeSigner();balances??=fakeBalances();chain??=fakeChain({balances,signer});
- const engine=await createEngine({db,env,client:oneclick,signer,balances,chain,now,onSettled,trackerIntervalMs:0,budgetMs,hooks});
- return {engine,db,oneclick,signer,balances,chain,now};
+ // `logs`: the executor's structured log lines (parsed), instead of stderr.
+ const engine=await createEngine({db,env,client:oneclick,signer,balances,chain,now,onSettled,trackerIntervalMs:0,budgetMs,hooks,log:line=>logs.push(JSON.parse(line))});
+ return {engine,db,oneclick,signer,balances,chain,now,logs};
 }
