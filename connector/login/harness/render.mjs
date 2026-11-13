@@ -49,7 +49,8 @@ function harness(state) {
 window.fetch=function(url,init){var u=String(url);
 if(u.indexOf("/account/identity-config")>=0)return Promise.resolve(new Response(JSON.stringify({appId:"harness-app",signerId:"s",policyIds:{}}),{status:200,headers:{"content-type":"application/json"}}));
 if(u.indexOf("/account/wallets")>=0){if(h.wallets==="fail")return Promise.resolve(new Response(JSON.stringify({code:"WALLET_SETUP_FAILED",message:"YEET could not set up your wallets. Nothing was charged. Tap Try again."}),{status:409,headers:{"content-type":"application/json"}}));return new Promise(function(){});}
-if(u.indexOf("mainnet.base.org")>=0)return Promise.resolve(new Response(JSON.stringify({jsonrpc:"2.0",id:1,result:"0x"+(42500000).toString(16).padStart(64,"0")}),{status:200,headers:{"content-type":"application/json"}}));
+if(u.indexOf("mainnet.base.org")>=0){h.baseReads=(h.baseReads||0)+1;var units=h.rise&&h.baseReads>1?67500000:42500000;return Promise.resolve(new Response(JSON.stringify({jsonrpc:"2.0",id:1,result:"0x"+units.toString(16).padStart(64,"0")}),{status:200,headers:{"content-type":"application/json"}}));}
+if(u.indexOf("api.mainnet-beta.solana.com")>=0){var owner=JSON.parse(init.body).params[0];return Promise.resolve(new Response(JSON.stringify({jsonrpc:"2.0",id:1,result:{context:{slot:1},value:[{pubkey:"x",account:{data:{program:"spl-token",parsed:{type:"account",info:{mint:"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",owner:owner,tokenAmount:{amount:"12000000",decimals:6,uiAmountString:"12"}}}}}}]}}),{status:200,headers:{"content-type":"application/json"}}));}
 return real(url,init)};})();</script>`;
 }
 const page = (title, body, state) => document(title, body).replace("</head>", `${state ? harness(state) : ""}</head>`);
@@ -67,6 +68,8 @@ const PAGES = {
   "account-new": page(ACCOUNT_TITLE, accountBody({ csrf: "x", username: null, name: "Lucky Otter 42" })),
   "account-taken": page(ACCOUNT_TITLE, accountBody({ csrf: "x", username: null, name: "Lucky Otter 42", value: "satoshi", error: usernameMessage("USERNAME_TAKEN") })),
   fund: page(FUND_TITLE, '<div id="yeet-fund"><p role="status">Loading your YEET wallet…</p></div><script type="module" src="/account/privy-login/fund.js"></script>', { authenticated: true, user: withWallets }),
+  // The Base balance rises from 42.50 to 67.50 USDC on the second read (Refresh balance, or the next poll).
+  "fund-arrived": page(FUND_TITLE, '<div id="yeet-fund"><p role="status">Loading your YEET wallet…</p></div><script type="module" src="/account/privy-login/fund.js"></script>', { authenticated: true, user: withWallets, rise: true }),
   refused: providerErrorPage("access_denied"),
   expired: page("Authorization page expired or unavailable", expiredAuthorizationBody),
   signout: page("Sign out", loginForm("logout"), { authenticated: true, user: withWallets }),

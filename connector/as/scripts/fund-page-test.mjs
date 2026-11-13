@@ -3,8 +3,8 @@
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
-import { fundRoutes, fundCsp, privyPageCsp, afterSignIn, nextField, FUND_TITLE, BASE_RPC_ORIGIN } from "../fund-page.mjs";
-import { BASE_RPC } from "../../login/fund-balance.js";
+import { fundRoutes, fundCsp, privyPageCsp, afterSignIn, nextField, FUND_TITLE, BASE_RPC_ORIGIN, SOLANA_RPC_ORIGIN } from "../fund-page.mjs";
+import { BASE_RPC, SOLANA_RPC } from "../../login/fund-balance.js";
 
 let enabled = true;
 const app = express();
@@ -39,7 +39,7 @@ test("Privy sign-in not configured: 404 even with a session", async () => {
   }
 });
 
-test("signed in: page with nonce CSP for Privy and the Base RPC, popup-friendly opener policy", async () => {
+test("signed in: page with nonce CSP for Privy and the Base and Solana RPCs, popup-friendly opener policy", async () => {
   const r = await get("yeet_session=good");
   assert.equal(r.status, 200);
   assert.match(r.headers.get("content-type"), /^text\/html/);
@@ -55,15 +55,19 @@ test("signed in: page with nonce CSP for Privy and the Base RPC, popup-friendly 
   const d = directives(csp);
   assert.deepEqual(d["default-src"], ["'self'"]);
   assert.deepEqual(d["script-src"], ["'self'", `'nonce-${nonce}'`, "https://challenges.cloudflare.com"]);
-  assert.deepEqual(d["connect-src"], ["'self'", "https://auth.privy.io", "https://*.rpc.privy.systems", BASE_RPC_ORIGIN]);
+  assert.deepEqual(d["connect-src"], ["'self'", "https://auth.privy.io", "https://*.rpc.privy.systems", BASE_RPC_ORIGIN, SOLANA_RPC_ORIGIN]);
+  assert.deepEqual([BASE_RPC_ORIGIN, SOLANA_RPC_ORIGIN], ["https://mainnet.base.org", "https://api.mainnet-beta.solana.com"]);
+  // The QR code is inline SVG and wallet links are navigations: no image host, no wallet origin in the policy.
+  assert.deepEqual(d["img-src"], ["'self'", "data:", "blob:"]);
   assert.deepEqual(d["frame-src"], ["https://auth.privy.io", "https://challenges.cloudflare.com"]);
   assert.deepEqual(d["frame-ancestors"], ["'none'"]);
   assert.deepEqual(d["form-action"], ["'self'"]);
   assert.deepEqual(d["object-src"], ["'none'"]);
   assert.deepEqual(d["base-uri"], ["'none'"]);
   assert.ok(!csp.includes("unsafe-"), "no unsafe-inline or unsafe-eval");
-  // The balance adapter's RPC is exactly the origin the CSP allows.
+  // The balance adapters' RPCs are exactly the origins the CSP allows.
   assert.equal(new URL(BASE_RPC).origin, BASE_RPC_ORIGIN);
+  assert.equal(new URL(SOLANA_RPC).origin, SOLANA_RPC_ORIGIN);
   assert.match(html, new RegExp(`<title>${FUND_TITLE}</title>`));
   assert.match(html, /<div id="yeet-fund">/);
   assert.match(html, /<script type="module" src="\/account\/privy-login\/fund\.js"><\/script>/);

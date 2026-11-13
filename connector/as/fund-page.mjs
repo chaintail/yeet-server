@@ -1,6 +1,7 @@
 // "Add funds" page at /fund. It is served by the sign-in server so it shares the origin (and the Privy session and
-// embedded wallets) of the YEET sign-in page. The page script (login/fund.jsx) opens Privy's funding flow for USDC on
-// Base; Privy opens Coinbase Onramp in its own popup window, where Coinbase shows Apple Pay or Google Pay.
+// embedded wallets) of the YEET sign-in page. The page script (login/fund.jsx) shows the person's own wallet address
+// for a direct USDC transfer on Base or Solana first (QR code, wallet links, live balance), then Privy's card funding
+// flow for USDC on Base; Privy opens Coinbase Onramp in its own popup window, where Coinbase shows Apple Pay or Google Pay.
 import { randomBytes } from "node:crypto";
 import { document } from "./auth-pages.mjs";
 
@@ -9,6 +10,9 @@ export const FUND_PATH = "/fund";
 export const FUND_NEXT = "fund";
 /** Public Base RPC the page reads the USDC balance from (eth_call, read only). Keep in sync with login/fund-balance.js. */
 export const BASE_RPC_ORIGIN = "https://mainnet.base.org";
+/** Public Solana RPC the page reads the USDC on Solana balance from (getTokenAccountsByOwner, read only). Keep in sync
+ * with login/fund-balance.js SOLANA_RPC. */
+export const SOLANA_RPC_ORIGIN = "https://api.mainnet-beta.solana.com";
 
 /**
  * Content-Security-Policy for pages that run the Privy bundle: auth API, wallet RPC hosts, the wallet iframe and the
@@ -35,7 +39,8 @@ export function privyPageCsp(nonce, { connect = [], formAction = "'self'", teleg
   ].join("; ");
 }
 
-export const fundCsp = (nonce) => privyPageCsp(nonce, { connect: [BASE_RPC_ORIGIN] });
+// The QR code is inline SVG drawn by the page script; wallet links are plain navigations. Neither needs a CSP source.
+export const fundCsp = (nonce) => privyPageCsp(nonce, { connect: [BASE_RPC_ORIGIN, SOLANA_RPC_ORIGIN] });
 
 export const FUND_TITLE = "Add funds";
 const FUND_BODY =

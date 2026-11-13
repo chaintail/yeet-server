@@ -255,6 +255,29 @@ input[type=checkbox]:focus-visible { outline: 3px solid var(--yellow); outline-o
 .balance dd { margin: 0; font: italic 900 1.5rem/1 var(--font-display); font-stretch: 125%; color: var(--yellow); font-variant-numeric: tabular-nums; }
 .row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: stretch; }
 .row button { width: auto; margin-top: 0; min-height: 54px; padding: 0 16px; }
+.label { display: block; font-weight: 650; margin: 20px 0 8px; color: var(--text); }
+.address { display: block; min-width: 0; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: 16px; background: rgba(6, 7, 28, .6); color: var(--text); font: 500 .86rem/1.45 var(--font-mono); overflow-wrap: anywhere; word-break: break-all; user-select: all; -webkit-user-select: all; }
+.balance dd { white-space: nowrap; }
+.section { margin: 28px 0 12px; font: italic 900 1.35rem/1.1 var(--font-display); font-stretch: 125%; color: #fff; }
+.switch { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; padding: 4px; border-radius: 18px; background: rgba(6, 7, 28, .6); border: 1px solid var(--line); }
+.switch button, .chips button { margin: 0; min-height: 46px; padding: 8px 12px; color: var(--muted); font: 700 1rem/1.2 var(--font-body); background: transparent; box-shadow: none; animation: none; border-radius: 14px; }
+.switch button::before, .switch button::after, .chips button::before, .chips button::after { display: none; }
+.switch button[aria-pressed=true] { color: var(--ink); background: var(--yellow); }
+.asset { margin: 18px 0 12px; text-align: center; font-size: 1.05rem; }
+.qr { width: min(220px, 64vw); margin: 0 auto; padding: 0; border-radius: 18px; overflow: hidden; background: #fff; box-shadow: 0 14px 30px -18px rgba(0, 0, 0, .8); }
+.qr svg { display: block; width: 100%; height: auto; }
+.warn { margin: 14px 0 0; font-size: var(--text-small); }
+.pick { margin: 26px 0 10px; font-weight: 650; color: var(--text); }
+.chips { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.chips button { padding: 8px 0; font-size: .95rem; white-space: nowrap; overflow-wrap: normal; color: var(--text); background: rgba(255, 255, 255, .06); border: 1px solid var(--line-strong); }
+.chips button[aria-pressed=true] { color: var(--ink); background: var(--yellow); border-color: var(--yellow); }
+.wallets { margin-top: 6px; }
+.wallets .button, .wallets button { margin-top: 10px; }
+.wallets .button:first-child { margin-top: 16px; }
+.wallets .hint { margin-top: 12px; }
+.arrived { margin: 14px 0 0; padding: 14px 16px; border-radius: 16px; background: rgba(57, 255, 136, .08); border: 1px solid rgba(57, 255, 136, .4); animation: rise var(--dur-in) var(--ease-out) both; }
+.arrived-amount { margin: 0 0 4px; color: var(--yeet-lift); font: italic 900 1.3rem/1.1 var(--font-display); font-stretch: 125%; }
+.arrived .hint { margin: 0; color: var(--text); }
 
 @media (min-width: 520px) {
   .card { padding: 34px 32px 30px; }

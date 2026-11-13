@@ -47,6 +47,49 @@ export function formatUsdc(units) {
   return `${whole.toLocaleString("en-US")}.${frac.toString().padStart(2, "0")}`;
 }
 
+/** Native USDC on Solana (Circle), 6 decimals. login/fund-links.js uses the same mint. */
+const SOLANA_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+/** Public Solana RPC (answers browser CORS). The fund page CSP allows exactly this origin (as/fund-page.mjs SOLANA_RPC_ORIGIN). */
+export const SOLANA_RPC = "https://api.mainnet-beta.solana.com";
+const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+/** getTokenAccountsByOwner payload: the owner's USDC token accounts, parsed, at confirmed commitment. */
+export function solanaUsdcAccountsCall(owner) {
+  if (!SOLANA_ADDRESS.test(owner)) throw Error("invalid-address");
+  return {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "getTokenAccountsByOwner",
+    params: [owner, { mint: SOLANA_USDC_MINT }, { encoding: "jsonParsed", commitment: "confirmed" }],
+  };
+}
+
+/** USDC on Solana: the sum of the owner's USDC token accounts in base units. No account is a balance of 0. */
+export function solanaUsdcReader({ fetchImpl = (...a) => globalThis.fetch(...a), rpcUrl = SOLANA_RPC } = {}) {
+  return {
+    async balance(owner) {
+      const response = await fetchImpl(rpcUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(solanaUsdcAccountsCall(owner)),
+      });
+      if (!response.ok) throw Error("balance-unavailable");
+      const body = await response.json();
+      const accounts = body?.result?.value;
+      if (!Array.isArray(accounts)) throw Error("balance-unavailable");
+      let total = 0n;
+      for (const a of accounts) {
+        const info = a?.account?.data?.parsed?.info;
+        const units = info?.tokenAmount?.amount;
+        if (info?.mint !== SOLANA_USDC_MINT || info?.owner !== owner || typeof units !== "string" || !/^\d{1,20}$/.test(units))
+          throw Error("balance-unavailable");
+        total += BigInt(units);
+      }
+      return total;
+    },
+  };
+}
+
 /** Balance adapter over JSON-RPC eth_call. fetchImpl is injected; tests never reach the network. */
 export function baseUsdcReader({ fetchImpl = (...a) => globalThis.fetch(...a), rpcUrl = BASE_RPC } = {}) {
   return {
