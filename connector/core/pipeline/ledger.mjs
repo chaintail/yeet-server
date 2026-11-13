@@ -35,7 +35,8 @@ export const TRADE_EDGES=Object.freeze({
  */
 export const LEG_EDGES=Object.freeze({
  [null]:['awaiting_signature'],
- awaiting_signature:['signing','awaiting_gas','not_sent'],
+ // -> sent: Base, the wallet paid the deposit address with its own bytes before submitting ours (review finding 1/2).
+ awaiting_signature:['signing','awaiting_gas','sent','not_sent'],
  awaiting_gas:['signing','sent','failed','not_sent'],
  signing:['sent','failed','not_sent'],
  queued:['sending','failed','not_sent'],sending:['sent','failed'],
@@ -259,6 +260,44 @@ export function createLedger({db,now=Date.now,sponsorLimits=DEFAULT_SPONSORSHIP_
      if(s&&s.state==='pending'){db.prepare("UPDATE sponsor_send SET state='not_submitted',updated_at=? WHERE attempt_id=?").run(now(),open.attempt_id);refund(s)}}
     const t=trade(tradeId);
     if(!transitionLeg(db,{tradeId,idx,from:'awaiting_signature',to:'not_sent',evidence:{...evidence,released_raw:t.direction==='yeet'?l.amount_in_raw:null},set:{updated_at:now()},at:now()}))return false;
+    releaseSpend(t,l);
+    return true;
+   });
+  },
+  /**
+   * Base (review finding 8): the leg follows the Base driver's durable attempt, never ahead of it. `target`:
+   *   'signed'     the person's bytes validated and stored: attempt pending -> signing, leg -> awaiting_gas
+   *   'broadcast'  the stored bytes were sent: attempt -> confirming, leg awaiting_gas -> signing
+   *   'confirmed'  a receipt with the pinned Transfer log (or an observed Transfer): attempt -> confirmed, leg -> sent
+   *   'failed' / 'not_sent'  signed but nothing landed for this leg: attempt -> failed, leg -> target, amount held
+   * Earlier steps are applied first when a crash skipped them. False when the attempt is already final.
+   */
+  evmProgress(id,target,{signedHex=null,txHash=null,reason=null,evidence={}}={}){
+   return tx(db,()=>{
+    const a=attempt(id);
+    if(!a||a.chain!=='base'||['confirmed','failed','abandoned'].includes(a.status))return false;
+    const at=now(),t=trade(a.trade_id);
+    const legNow=()=>leg(a.trade_id,a.leg_idx).send_status;
+    const move=(to,ev,set={})=>{const from=legNow();if(from===to)return;
+     if(!transitionLeg(db,{tradeId:a.trade_id,idx:a.leg_idx,from,to,evidence:{attempt_id:id,...ev},set:{updated_at:at,...set},at}))throw new TransitionRefused(`leg left ${from}`)};
+    let st=a.status;
+    if(st==='pending'&&signedHex){
+     setAttempt(id,'pending','signing',{signed_base64:signedHex,signature:txHash});st='signing';
+     move('awaiting_gas',{tx_hash:txHash,stage:'signed',signed_bytes_persisted:true},{tx_hash:txHash});
+    }
+    if(target==='signed')return true;
+    if(target==='broadcast'){
+     if(st!=='signing')return st==='confirming';
+     setAttempt(id,'signing','confirming');move('signing',{tx_hash:a.signature??txHash,stage:'broadcast'});return true;
+    }
+    if(target==='confirmed'){
+     setAttempt(id,st,'confirmed',{signature:txHash});
+     move('sent',{tx_hash:txHash,source:'base_receipt',...evidence},{tx_hash:txHash});return true;
+    }
+    if(st==='pending')throw new TransitionRefused('an unsigned Base attempt ends through endAttempt');
+    const l=leg(a.trade_id,a.leg_idx);
+    setAttempt(id,st,'failed',{failure_reason:String(reason??target).slice(0,200)});
+    move(target,{reason,stage:'base',released_raw:null,held_raw:t.direction==='yeet'?l.amount_in_raw:null,...evidence});
     releaseSpend(t,l);
     return true;
    });

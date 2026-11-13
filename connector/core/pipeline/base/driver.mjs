@@ -456,5 +456,10 @@ export function createBaseDriver({db,rpc,env=process.env,now=Date.now,alert=()=>
   return out;
  }
 
- return Object.freeze({chain:'base',kind:'evm_tx',readiness,prepare,submit,recover});
+ /** For the pipeline adapter (leg-driver.mjs): read one attempt; cancel one that was never signed. */
+ const attempt=id=>store.attempt(String(id))??null;
+ function abandonPrepared(id,code='SUPERSEDED'){const a=store.attempt(String(id));if(a&&a.kind==='transfer'&&a.state==='prepared')cancel(a,code)}
+ const maxAttemptNo=(tradeId,legIdx)=>store.legTransfers(String(tradeId),Number(legIdx)).reduce((m,a)=>Math.max(m,a.seq),0);
+ const preparedFor=wallet=>store.walletTransfers(String(wallet).toLowerCase(),['prepared']);
+ return Object.freeze({chain:'base',kind:'evm_tx',readiness,prepare,submit,recover,attempt,abandonPrepared,maxAttemptNo,preparedFor});
 }

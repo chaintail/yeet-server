@@ -253,14 +253,14 @@ test('operator trades (ops/first-trade.mjs): only with the operator secret, only
  const {configureTradeEngine}=await import('../core/trade/runtime.mjs');
  const {fakeRuntime}=await import('../core/pipeline/fakes.mjs');
  const basket={request_id:'op-1',amount_usdc:'5',legs:[{symbol:'WIF',parts:10}]};
- const setup=extra=>{const f=fakeRuntime({env:extra});configureTradeEngine(f.overrides);return f};
+ const setup=extra=>{const f=fakeRuntime({env:{BASE_RPC_URL:'',...extra}});configureTradeEngine(f.overrides);return f};
  try{
   // No allowlist: the operator can read, never trade.
   setup({});
   assert.equal((await as('core-mcp','/operator/trading',{account:me.sub})).status,403,'only the operator role');
   assert.equal((await op('/operator/trading',{account:'yeet-privy-nobody'})).status,400);
   assert.deepEqual(await (await op('/operator/trading',{account:me.sub})).json(),{trading:'live',live:true,kill_switch:false,scope:'all',live_accounts:0,account_allowed:false,operator_trades:false,
-   signing:'user_wallet',buy_chain:'sol',sell_chain:'sol',drivers:{sol:{ok:true,reasons:[]}}});
+   signing:'user_wallet',buy_chain:'sol',sell_chain:'sol',drivers:{sol:{ok:true,reasons:[]},base:{ok:false,reasons:['BASE_RPC_NOT_CONFIGURED']}}});
   const refused=await op('/operator/trades/propose',{account:me.sub,...basket});
   assert.equal(refused.status,403);assert.equal((await refused.json()).error,'TRADING_PAUSED');
   // Listed: propose, execute with the minted code, follow the status; the trade is the engine's own.
