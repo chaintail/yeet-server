@@ -11,6 +11,8 @@ import {CATALOG} from '../trade/router.mjs';
 import {createPipeline} from './pipeline.mjs';
 import {staticWalletDirectory} from './wallet-directory.mjs';
 import {localSigner} from './solana/verify.mjs';
+import {privateKeyToAccount} from 'viem/accounts';
+import {txFromPayload} from './base/source-executor.mjs';
 
 export const OPERATOR_ACCOUNT='yeet-privy-operator-test-wallet';
 export const OPERATOR_CLIENT='yeet-operator-tool';
@@ -80,7 +82,9 @@ export async function runUserSignedTrade({opts,wallet,env=process.env,emit=()=>{
  const directory=staticWalletDirectory({[accountId]:{base:{address:wallet.base.address},solana:{address:wallet.solana.address}}});
  const events=[];
  const p=createPipeline({db,env:runEnv,directory,now,trackerIntervalMs:0,liveBroadcast:opts.broadcast,log:l=>events.push(l),...overrides,driverOverrides});
- const sign={solana_tx:(w,r)=>Buffer.from(w.solana.signTransaction(Buffer.from(r.payload.transaction_base64,'base64'))).toString('base64'),...signers};
+ const sign={solana_tx:(w,r)=>Buffer.from(w.solana.signTransaction(Buffer.from(r.payload.transaction_base64,'base64'))).toString('base64'),
+  // Base: the test wallet's secp256k1 key signs the payload exactly as given (sign only), like the card's Privy wallet.
+  evm_tx:async(w,r)=>privateKeyToAccount(`0x${Buffer.from(w.base.privateKey()).toString('hex')}`).signTransaction(txFromPayload(r.payload)),...signers};
  emit({step:'start',mode:opts.broadcast?'broadcast':'dry_run',chain:opts.chain,side:opts.side,account:accountId,solana_wallet:wallet.solana.address,base_wallet:wallet.base.address,
   drivers:Object.fromEntries(Object.entries(p.drivers).map(([c,d])=>[c,d.readiness()]))});
 
@@ -94,7 +98,7 @@ export async function runUserSignedTrade({opts,wallet,env=process.env,emit=()=>{
  for(const r of x.sign_requests??[]){
   const fn=sign[r.kind];
   if(!fn){emit({step:'sign',leg:r.leg,kind:r.kind,error:`no local signer for ${r.kind}`});results.push({leg:r.leg,state:'unsigned'});continue}
-  const signed=fn(wallet,r);
+  const signed=await fn(wallet,r);
   const s=await p.submit(ctx,{trade_id:r.trade_id,leg:r.leg,attempt_id:r.attempt_id,signed},{dryRun:!opts.broadcast});
   const leg=s.legs.find(l=>l.leg===r.leg);
   emit({step:'submitted',leg:r.leg,send_status:leg?.send_status??null,tx_hash:leg?.tx_hash??null,
