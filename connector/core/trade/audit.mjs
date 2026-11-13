@@ -17,7 +17,9 @@ export const TRADE_EDGES=Object.freeze({
  partial:['refunded','failed'],
  requote_required:[],success:[],refunded:[],failed:[],
 });
-/** trade_legs.send_status (migration 2): queued -> sending -> sent, with failed/not_sent only before funds can move. */
+/** trade_legs.send_status (migration 2): queued -> sending -> sent, with failed/not_sent only before funds can move.
+ * `sent` needs a transfer hash, a 1Click status, or a Privy transaction id (a sponsored Base send accepted by Privy
+ * whose chain hash is not known yet: "sent, hash pending", never re-sent; recordLegHash adds the hash later). */
 export const LEG_EDGES=Object.freeze({
  [null]:['queued'],
  queued:['sending','failed','not_sent'],
@@ -45,7 +47,7 @@ export const atomic=(db,fn)=>db.isTransaction?fn():tx(db,fn);
 function checkEvidence(table,to,evidence){
  if(!evidenceRequired(to,table))return;
  if(!evidence||typeof evidence!=='object'||!Object.keys(evidence).length)throw new TransitionRefused(`${table} -> ${to} needs evidence`);
- if(table==='trade_legs'&&to==='sent'&&!evidence.tx_hash&&!evidence.oneclick_status)throw new TransitionRefused('a sent leg needs a transfer hash or a 1Click status');
+ if(table==='trade_legs'&&to==='sent'&&!evidence.tx_hash&&!evidence.oneclick_status&&!evidence.privy_transaction_id)throw new TransitionRefused('a sent leg needs a transfer hash, a 1Click status or a Privy transaction id');
 }
 
 /** Appends one audit row. kind: 'trade' and 'leg' for transitions, 'review' for accounting flags (no status change). */
@@ -80,6 +82,22 @@ export function transitionLeg(db,{tradeId,idx,from,to,evidence,set={},at}){
  return atomic(db,()=>{
   if(guarded(db,{table:'trade_legs',status:'send_status',key:'trade_id=? AND idx=?',keyArgs:[tradeId,idx],from,to,set,at})!==1)return false;
   appendEvent(db,{tradeId,legIdx:idx,kind:'leg',from,to,evidence,at});
+  return true;
+ });
+}
+
+/** An audit row for a leg that keeps its status (a hash resolved, a new idempotency key); evidence is required. */
+export function recordLegEvent(db,{tradeId,idx,status,evidence,at}){
+ if(!evidence||typeof evidence!=='object'||!Object.keys(evidence).length)throw new TransitionRefused(`leg ${status} event needs evidence`);
+ appendEvent(db,{tradeId,legIdx:idx,kind:'leg',from:status,to:status,evidence,at});
+}
+
+/** The chain hash of a `sent` leg that had only a Privy transaction id: written once, with its audit row. */
+export function recordLegHash(db,{tradeId,idx,txHash,evidence,at}){
+ if(typeof txHash!=='string'||!txHash)throw new TransitionRefused('a resolved hash is required');
+ return atomic(db,()=>{
+  if(db.prepare("UPDATE trade_legs SET tx_hash=?,updated_at=? WHERE trade_id=? AND idx=? AND send_status='sent' AND tx_hash IS NULL").run(txHash,at,tradeId,idx).changes!==1)return false;
+  recordLegEvent(db,{tradeId,idx,status:'sent',evidence:{...evidence,tx_hash:txHash},at});
   return true;
  });
 }

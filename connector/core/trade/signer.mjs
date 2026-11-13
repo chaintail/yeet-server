@@ -3,9 +3,15 @@
 //   kind                              'delegated' | 'custodial' | 'fake'
 //   directory.lookup(accountId)       -> {base:{address,walletId,signerState,policyId}, solana:{...}} | null
 //   directory.stable                  true when a stored wallet never needs a refresh (custodial)
-//   transferUsdcBase({walletId, from, to, amountRaw, idempotencyKey})                    -> {txHash}
-//   transferSpl({walletId, owner, source, destinationOwner, mint, decimals, amountRaw, tokenProgram, idempotencyKey})
-//                                                                                        -> {txHash}
+//   transferUsdcBase({walletId, from, to, amountRaw, idempotencyKey, referenceId, request, persistRequest})
+//   transferSpl({walletId, owner, source, destinationOwner, mint, decimals, amountRaw, tokenProgram, idempotencyKey,
+//     referenceId, request, persistRequest})
+//        -> {txHash, transactionId, hashPending}: a Privy transaction id without a hash is a transfer accepted and
+//           broadcast whose chain hash is not known yet (sponsored EVM); it is resolved by lookupTransfer
+//   lookupTransfer({chain, walletId, transactionId | referenceId})                       (optional)
+//        -> {state:'none'|'pending'|'confirmed'|'failed', txHash, transactionId, status}
+//   persistRequest(body) stores the exact request before it is sent; a retry passes it back as `request` and the
+//   adapter sends it byte for byte (never rebuilt under the same idempotency key).
 // Failures are TradeError codes from the contract catalogue (WALLET_NOT_READY, LIMIT_EXCEEDED, TEMPORARILY_UNAVAILABLE).
 import {createHash} from 'node:crypto';
 import {refuse} from './util.mjs';
@@ -26,8 +32,10 @@ export function erc20TransferData(to,amountRaw){
 /** ERC-20 balanceOf(owner) calldata. */
 export const erc20BalanceOfData=owner=>'0x70a08231'+owner.slice(2).toLowerCase().padStart(64,'0');
 
-/** Idempotency key per trade leg: a retried send can never become a second transfer. */
-export const legIdempotencyKey=(walletId,tradeId,idx)=>createHash('sha256').update(`yeet-leg:${walletId}:${tradeId}:${idx}`).digest('hex');
+/** Idempotency key per trade leg: a retried send can never become a second transfer. Generation 0 is the leg's first
+ * key (also its reference_id); a later generation exists only after a cached 5xx and a reference lookup that found
+ * nothing (executor.mjs rekey). */
+export const legIdempotencyKey=(walletId,tradeId,idx,generation=0)=>createHash('sha256').update(`yeet-leg:${walletId}:${tradeId}:${idx}${generation?`:${generation}`:''}`).digest('hex');
 
 export function signerKind(env=process.env){
  const kind=env.YEET_SIGNER||'delegated';

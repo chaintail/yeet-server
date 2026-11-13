@@ -7,6 +7,9 @@
 //   YEET_REQUOTE_TOLERANCE_BPS  live output may be this far under the previewed estimate at the tap (default 50)
 //   YEET_CODE_MINT_LIMIT confirm codes per account per 10 minutes (default 20) -> TEMPORARILY_UNAVAILABLE
 //   YEET_TRACK_MAX_HOURS hours a trade is tracked past its 1Click deposit deadline before it is stale (default 24)
+//   YEET_BASE_POLICY_ID / YEET_SOLANA_POLICY_ID  the Privy policy the delegated signer must carry on each chain; a
+//                        wallet whose signer entry has any other policy set is refused     -> WALLET_NOT_READY
+// The daily cap is enforced here only: Privy's aggregation does not count eth_sendTransaction (PRIVY-SETUP-REVIEW).
 //   at most 5 legs                                                 -> INVALID_ARGUMENT
 import {parseUnits} from './router.mjs';
 import {refuse,utcDay} from './util.mjs';
@@ -37,6 +40,8 @@ export function limitsFromEnv(env=process.env){
   trackMaxHours:intEnv(env,'YEET_TRACK_MAX_HOURS',24,24*30),
   killSwitch:['1','true','on','yes'].includes(String(env.YEET_KILL_SWITCH??'').toLowerCase()),
   live:env.YEET_LIVE==='1',
+  basePolicyId:env.YEET_BASE_POLICY_ID?.trim()||null,
+  solanaPolicyId:env.YEET_SOLANA_POLICY_ID?.trim()||null,
   maxLegs:MAX_LEGS,
  });
 }

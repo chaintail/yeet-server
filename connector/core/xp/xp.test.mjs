@@ -12,7 +12,7 @@ import {leaderboard,rankRows,handle} from './board.mjs';
 import {openXp,homeXp,homeXpKeys} from './xp.mjs';
 import {createEngine} from '../trade/engine.mjs';
 import {openTradeDb} from '../trade/db.mjs';
-import {fakeOneClick,fakeSigner,fakeBalances,fakeClock,BASE_WALLET,SOL_WALLET} from '../trade/fakes.mjs';
+import {fakeOneClick,fakeSigner,fakeBalances,fakeClock,BASE_WALLET,SOL_WALLET,FAKE_POLICY_ENV} from '../trade/fakes.mjs';
 import {toolSchemas,zodSchema} from '../../mcp/tool-contract.mjs';
 
 const SECRET='test-xp-secret-0123456789abcdef';
@@ -144,7 +144,7 @@ test('names: a short handle that leaks no account id, sign-in id, email or walle
 const alice={accountId:'yeet-privy-alice',clientId:'https://chatgpt.com/oauth/client.json'};
 const basket=(id,legs=[{symbol:'WIF',parts:6},{symbol:'BOME',parts:4}])=>({request_id:id,amount_usdc:'20',legs});
 async function engineOn(db,xp,now,oneclick=fakeOneClick()){
- return createEngine({db,env:{YEET_LIVE:'1'},client:oneclick,signer:fakeSigner(),balances:fakeBalances(),now,onSettled:e=>xp.onSettled(e),trackerIntervalMs:0});
+ return createEngine({db,env:{YEET_LIVE:'1',...FAKE_POLICY_ENV},client:oneclick,signer:fakeSigner(),balances:fakeBalances(),now,onSettled:e=>xp.onSettled(e),trackerIntervalMs:0});
 }
 const tradeOnce=async(engine,id,legs)=>{const p=await engine.propose(alice,basket(id,legs));return engine.execute(alice,{proposal_id:p.proposal_id,revision:p.revision,confirm:p.confirm.code})};
 
@@ -184,7 +184,7 @@ test('trade XP: paid once on settlement; never again after a tracker restart, a 
 test('trade XP: a lost onSettled (crash before the hook) is paid by the next status read, once; refunds pay 0',async()=>{
  const now=clock(),tradeDb=openTradeDb(':memory:');
  const xp=openXp({secret:SECRET,now});
- const lost=await createEngine({db:tradeDb,env:{YEET_LIVE:'1'},client:fakeOneClick(),signer:fakeSigner(),balances:fakeBalances(),now,onSettled:()=>{throw Error('crash')},trackerIntervalMs:0});
+ const lost=await createEngine({db:tradeDb,env:{YEET_LIVE:'1',...FAKE_POLICY_ENV},client:fakeOneClick(),signer:fakeSigner(),balances:fakeBalances(),now,onSettled:()=>{throw Error('crash')},trackerIntervalMs:0});
  const r=await tradeOnce(lost,'l1',[{symbol:'WIF',parts:10}]);
  await lost.tracker.pollOnce();await lost.tracker.pollOnce();
  assert.equal(xp.ledger.total(alice.accountId),0);

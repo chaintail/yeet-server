@@ -26,7 +26,7 @@ const core=await import('../core.mjs');
 const as=await import('../../as/as.mjs');
 const connector=await import('../../mcp/mcp.mjs');
 const {configureTradeEngine,tradeEngine}=await import('../trade/runtime.mjs');
-const {fakeOneClick,fakeSigner,fakeBalances}=await import('../trade/fakes.mjs');
+const {fakeOneClick,fakeSigner,fakeBalances,FAKE_POLICY_ENV}=await import('../trade/fakes.mjs');
 const {handle}=await import('./board.mjs');
 after(async()=>{
  configureTradeEngine({});
@@ -73,7 +73,7 @@ test('YEET_P2=1: tools/list adds the leaderboard (model and card) and daily_spin
 
 test('YEET_P2=1 end to end: home -> spin -> leaderboard, then a settled trade shows its xp_award',async()=>{
  const oneclick=fakeOneClick();
- configureTradeEngine({client:oneclick,signer:fakeSigner(),balances:fakeBalances(),env:{...process.env,YEET_LIVE:'1'},trackerIntervalMs:0});
+ configureTradeEngine({client:oneclick,signer:fakeSigner(),balances:fakeBalances(),env:{...process.env,...FAKE_POLICY_ENV,YEET_LIVE:'1'},trackerIntervalMs:0});
  const alice=await signIn('did:privy:xp-alice'),bob=await signIn('did:privy:xp-bob');
 
  // Sign-in paid 5 XP once today; the spin is open; no wins are invented.

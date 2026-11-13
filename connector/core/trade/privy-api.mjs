@@ -6,8 +6,13 @@
 //     authorization Basic base64(app_id:app_secret), privy-authorization-signature
 //   - signature: canonical JSON (sorted keys) of {version:1, method, url (full, no trailing slash), body, headers:
 //     every privy- header}, ECDSA P-256 / SHA-256, ASN.1 DER, standard base64
-//   - refusals: 400/403 with code policy_violation = policy denial; 401/403 invalid_authorization_signature or the
-//     "No valid authorization ..." messages = signer not authorised
+//   - refusals (docs.privy.io api-errors, checked 2026-11-13): code policy_violation = policy denial; the authorization
+//     codes zero_correct_authorization_signatures, insufficient_correct_authorization_signatures,
+//     incorrect_quantity_of_authorization_signatures, missing_or_empty_authorization_header (and the older
+//     invalid_authorization_signature, or invalid_data with the "No valid authorization signatures" message) = signer
+//     not authorised. Both are definite: Privy did not act on the request.
+//   - idempotency (docs.privy.io idempotency keys): a key reused with a different body answers 400; on /rpc a 4xx or
+//     5xx is cached against the key for 24 h, so a 5xx is surfaced with its status for the caller to look up first.
 // Secrets are read once from env names and kept non-enumerable; nothing here logs a value.
 import {createPrivateKey,createPublicKey,sign} from 'node:crypto';
 import {canonical} from './util.mjs';
@@ -44,13 +49,30 @@ export function authorizationSignature(key,{method,url,body,headers}){
 }
 
 const REFUSALS=['No valid authorization signatures were provided','No valid authorization keys or user signing keys available','Missing `privy-authorization-signature` header','Not enough valid authorization signatures'];
+/** Privy's documented authorization error codes: the request was refused before anything was signed. */
+export const AUTHORIZATION_CODES=new Set(['zero_correct_authorization_signatures','insufficient_correct_authorization_signatures',
+ 'incorrect_quantity_of_authorization_signatures','missing_or_empty_authorization_header','invalid_authorization_signature']);
+const QUERY_VALUE=/^[A-Za-z0-9_-]{1,128}$/;
+
+/** Maps a non-2xx Privy answer onto a PrivyApiError code. */
+export function privyErrorCode(status,json){
+ const code=typeof json?.code==='string'?json.code:'',error=[json?.error,json?.message].find(v=>typeof v==='string')??'';
+ if(status>=400&&status<500){
+  if(code==='policy_violation')return 'PRIVY_POLICY_DENIED';
+  if(AUTHORIZATION_CODES.has(code)||(code==='invalid_data'&&error.startsWith('No valid authorization signatures'))||((status===401||status===403)&&REFUSALS.some(p=>error.startsWith(p))))return 'PRIVY_AUTHORIZATION_DENIED';
+  if(status===400&&/idempotency/i.test(error))return 'PRIVY_IDEMPOTENCY_CONFLICT';
+ }
+ return `PRIVY_HTTP_${status}`;
+}
 
 export function createPrivyApi({config,fetch=globalThis.fetch,timeoutMs=15_000}){
  const basic=()=>`Basic ${Buffer.from(`${config.appId}:${config.appSecret}`).toString('base64')}`;
- async function send(method,path,body,{idempotencyKey,signed}){
+ async function send(method,path,body,{idempotencyKey,signed,query}){
   if(!/^\/v1\/[A-Za-z0-9_/:-]+$/.test(path))throw new PrivyApiError('INVALID_PRIVY_PATH');
   if(idempotencyKey!==undefined&&!/^[a-f0-9]{64}$/.test(idempotencyKey))throw new PrivyApiError('INVALID_IDEMPOTENCY_KEY');
-  const url=PRIVY_ORIGIN+path;
+  const q=Object.entries(query??{});
+  if(!q.every(([k,v])=>/^[a-z_]{1,32}$/.test(k)&&QUERY_VALUE.test(String(v))))throw new PrivyApiError('INVALID_PRIVY_PATH');
+  const url=PRIVY_ORIGIN+path+(q.length?`?${new URLSearchParams(q)}`:'');
   const privyHeaders={'privy-app-id':config.appId,...(idempotencyKey?{'privy-idempotency-key':idempotencyKey}:{})};
   const headers={...privyHeaders,authorization:basic(),...(body!==undefined?{'content-type':'application/json'}:{})};
   if(signed)headers['privy-authorization-signature']=authorizationSignature(config.authorizationKey,{method,url,body:body??{},headers:privyHeaders});
@@ -58,12 +80,7 @@ export function createPrivyApi({config,fetch=globalThis.fetch,timeoutMs=15_000})
   try{res=await fetch(url,{method,headers,...(body!==undefined?{body:canonical(body)}:{}),redirect:'error',signal:AbortSignal.timeout(timeoutMs)})}
   catch{throw new PrivyApiError('PRIVY_TRANSPORT_UNAVAILABLE')}
   let json;try{json=await res.json()}catch{json=null}
-  if(res.status<200||res.status>=300){
-   const code=json?.code,error=typeof json?.error==='string'?json.error:'';
-   if((res.status===400||res.status===403)&&code==='policy_violation')throw new PrivyApiError('PRIVY_POLICY_DENIED',res.status);
-   if((res.status===401||res.status===403)&&(code==='invalid_authorization_signature'||REFUSALS.some(p=>error.startsWith(p))))throw new PrivyApiError('PRIVY_AUTHORIZATION_DENIED',res.status);
-   throw new PrivyApiError(`PRIVY_HTTP_${res.status}`,res.status);
-  }
+  if(res.status<200||res.status>=300)throw new PrivyApiError(privyErrorCode(res.status,json),res.status);
   return json;
  }
  return {
