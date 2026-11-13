@@ -39,6 +39,7 @@ import {readSponsorshipLimits} from './solana/sponsorship.mjs';
 import {WALLET_CHAIN,CHAINS} from './driver-interface.mjs';
 import {createFunding,forcedBuyChain,chainPaused,NETWORK} from './funding.mjs';
 import {xpRuntime} from '../xp/xp.mjs';
+import {averageCost} from '../trade/pnl.mjs';
 
 export const PREVIEW_STALE_MS=60_000;
 export const PRICE_TTL_MS=5*60_000;
@@ -409,6 +410,8 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
 
  return {
   limits,wallets,proposals,tracker,codes,ledger,drivers,buyChain,sellChain,catalog,funding,
+  /** The person's average YEET price per held coin, from settled legs (trade/pnl.mjs): Map(symbol -> USD per coin). */
+  averageCost:accountId=>averageCost(db,catalog,accountId),
   /** The 1Click client (dry quotes for the lucky wheel's coin availability, core/xp/availability.mjs). */
   client,
   /** The proposal a trade of the account came from (the lucky wheel's claim, core.mjs). */

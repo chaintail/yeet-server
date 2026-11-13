@@ -10,6 +10,7 @@ import {SIGNER_META_KEY,signerMetaFromEnv} from '#shared/signing.mjs';
 /** Core route per tool: route(args) -> [core route, body or undefined for GET]. Everything else about a tool (title,
  * description, schemas, annotations, scope, card, visibility, widget access, card-only confirm) is the contract's. */
 const ROUTES={
+ yeet_overview:()=>['/overview'],
  yeet_home:()=>['/home'],
  yeet_coins:()=>['/coins'],
  yeet_propose:args=>['/proposals',args],
@@ -37,7 +38,7 @@ export function spinText(r){
 /** Tools whose core result may carry fields the pinned contract does not list yet (stamps): cut to the contract's
  * top-level properties so the closed output schema still passes; the fields flow through once the contract lists them. */
 // yeet_home and the proposals carry `limits` (XP tier caps: tier, per_trade_usdc, daily_limit_usdc, left_today_usdc).
-const CUT_TO_CONTRACT=new Set(['daily_spin','yeet_home','yeet_propose','yeet_quote','skeet_propose']);
+const CUT_TO_CONTRACT=new Set(['yeet_overview','daily_spin','yeet_home','yeet_propose','yeet_quote','skeet_propose']);
 /** lucky_wheel and lucky_spin: one plain sentence for the model (the card reads structuredContent). */
 export function luckyText(r){
  const l=r?.lucky;
@@ -47,7 +48,17 @@ export function luckyText(r){
  if(l.slice===null)return `Today's lucky wheel: ${coins}. Spin it in the card.`;
  return `The lucky wheel landed on ${l.wheel[l.slice].coin}: YEET ${l.amount_usdc} USDC into ${l.wheel[l.slice].coin} for a bonus spin and a ${l.wheel[l.slice].coin} stamp.`;
 }
-const TEXT={daily_spin:spinText,lucky_wheel:luckyText,lucky_spin:luckyText};
+/** yeet_overview's text for the model: the person in one line (one USDC number, no wallet, no chain), then the
+ * follow-ups to offer. */
+export function overviewText(r){
+ const bits=[r.usdc===null?null:`${r.usdc} USDC`,r.xp===null?null:`${r.xp} XP (${r.tier})`,r.streak_days===null?null:`${r.streak_days}-day streak`,
+  r.holdings_count===null?null:`${r.holdings_count} coin${r.holdings_count===1?'':'s'} held`].filter(Boolean);
+ const win=r.top_winner?` Biggest winner: ${r.top_winner.symbol}, up ${r.top_winner.pct}% on their average YEET price.`:'';
+ const open=r.checkin_open===true?' Today\'s daily check-in is still open.':'';
+ const paused=r.trading==='paused'?' Trading is paused right now.':'';
+ return `${r.username}: ${bits.join(', ')}.${open}${win}${paused} Offer next: ${r.suggestions.map(s=>`${s.label} ("${s.say}")`).join('; ')}.`;
+}
+const TEXT={yeet_overview:overviewText,daily_spin:spinText,lucky_wheel:luckyText,lucky_spin:luckyText};
 /** P0 and P1 are always registered; P2 (leaderboard, spin) only with YEET_P2=1. */
 export const registeredTools=(env=process.env)=>Object.values(toolSpecs).filter(t=>t.priority!=='P2'||env.YEET_P2==='1');
 export const TOOLS=Object.freeze(Object.values(toolSpecs).map(t=>Object.freeze({...t,route:ROUTES[t.name]})));

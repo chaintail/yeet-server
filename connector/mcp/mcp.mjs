@@ -26,8 +26,9 @@ app.get('/version',async(_q,r)=>{
 });
 app.get(prmPath,(_q,r)=>r.json({resource:RESOURCE,authorization_servers:[AS],scopes_supported:advertisedScopes(),bearer_methods_supported:['header']}));
 const challenge=res=>res.set('WWW-Authenticate',`Bearer resource_metadata="${new URL(RESOURCE).origin}${prmPath}"`);
-/** Core deadline per route: proposals (YEET and SKEET) and quotes 15 s, trade execution 25 s, everything else 4.5 s. */
-export const coreTimeout=(route,method)=>method==='POST'&&route==='/trades'?25_000:method==='POST'&&/^\/proposals(\/skeet|\/[^/]+\/quote)?$/.test(route)?15_000:4500;
+/** Core deadline per route: proposals (YEET and SKEET) and quotes 15 s, trade execution 25 s, the overview (wallets,
+ * balances and holdings in one answer) 8 s, everything else 4.5 s. */
+export const coreTimeout=(route,method)=>method==='GET'&&route==='/overview'?8000:method==='POST'&&route==='/trades'?25_000:method==='POST'&&/^\/proposals(\/skeet|\/[^/]+\/quote)?$/.test(route)?15_000:4500;
 app.post(resourcePath,async(req,res)=>{
  const bearer=req.headers.authorization?.match(/^Bearer (\S+)$/i)?.[1];
  const auth=await authenticate(bearer,{introspect:b=>introspectBearer(b,'mcp-resource','introspection'),validate:validatePrincipal});

@@ -2,6 +2,14 @@
 // refusal code and state. This repository carries neutral text in every string; the wording YEET deploys is not part
 // of it.
 export const COPY=Object.freeze({
+
+ yeet_overview:{
+  base:"YEET yeet_overview.base: {username} {lead}.",
+  lead_none:" YEET yeet_overview.lead_none.",
+  lead_fund:", YEET yeet_overview.lead_fund.",
+  lead_checkin:", YEET yeet_overview.lead_checkin.",
+  lead_paused:", YEET yeet_overview.lead_paused.",
+ },
  yeet_home:{
   paused:"YEET yeet_home.paused.",
   paused_no_wheel:"YEET yeet_home.paused_no_wheel.",
@@ -204,7 +212,13 @@ function lucky(r){
  if(l.slice===null||l.slice===undefined||!l.wheel?.[l.slice])return c.ready;
  return fill(c.landed,{coin:l.wheel[l.slice].coin,amount:l.amount_usdc,lucky_id:l.lucky_id});
 }
+function overviewGuidance(r){
+ const c=COPY.yeet_overview,first=r.suggestions?.[0]?.id;
+ const lead=r.trading==='paused'?c.lead_paused:first==='fund'?c.lead_fund:first==='checkin'?c.lead_checkin:c.lead_none;
+ return fill(c.base,{username:r.username,lead});
+}
 const BY_TOOL={
+ yeet_overview:overviewGuidance,
  yeet_home:home,
  yeet_coins:()=>COPY.yeet_coins.list,
  yeet_propose:proposal,yeet_quote:proposal,skeet_propose:proposal,

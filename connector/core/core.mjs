@@ -14,6 +14,8 @@ import {z} from 'zod';
 import {toolSchemas,zodSchema,contract} from '../mcp/tool-contract.mjs';
 import {homeWithFundUrl,failureWithFundUrl} from './fund-link.mjs';
 import {versionInfo} from './version.mjs';
+import {overview} from './overview.mjs';
+import {winnerOf} from './trade/pnl.mjs';
 // Accounts are created on the first verified sign-in (identity-store.mjs). The identity app is Privy in
 // production and the development stub only under TEST_PROFILE=1 with DEV_IDENTITY_STUB=1.
 const devStub=TEST&&process.env.DEV_IDENTITY_STUB==='1';
@@ -119,6 +121,7 @@ app.use(async(q,r,next)=>{if(Object.keys(q.query).length)return r.sendStatus(400
 app.get('/eligibility',(q,r)=>q.role==='mcp'?r.json({ok:true}):r.sendStatus(403));
 /** Scope each connector route needs; a route not listed here is refused for the connector. */
 export const ROUTE_SCOPES=Object.freeze([
+ ['GET',/^\/overview$/,'yeet:read'],
  ['GET',/^\/home$/,'yeet:read'],
  ['GET',/^\/coins$/,'yeet:read'],
  ['POST',/^\/proposals$/,'yeet:write'],
@@ -169,6 +172,14 @@ app.get('/home',trade('yeet_home',async(e,ctx)=>{
  const home=homeWithFundUrl(await e.home(ctx));
  if(!p2On())return home;
  return {...home,xp:xpSafe('home',()=>homeXp(xpRuntime().summary(ctx.accountId),HOME_XP_KEYS),null),recent_wins:xpSafe('wins',()=>xpRuntime().recentWins(),[])};
+}));
+// yeet_overview (overview.mjs): the entry answer. The portfolio read, the XP summary and the cost basis each fail soft
+// (their fields are null); only the wallets and readiness (e.home) can refuse the call.
+app.get('/overview',trade('yeet_overview',async(e,ctx)=>{
+ const [home,bag]=await Promise.all([e.home(ctx),e.portfolio(ctx).catch(()=>null)]);
+ const xp=p2On()?xpSafe('overview',()=>xpRuntime().summary(ctx.accountId),null):null;
+ const winner=bag?xpSafe('winner',()=>winnerOf(bag.solana.holdings,e.averageCost(ctx.accountId)),null):null;
+ return overview({home,bag,xp,winner,username:boardName(ctx.accountId),wheel:p2On(),board:p2On()});
 }));
 // lucky_id (optional): the caller's own lucky wheel, spun today, else INVALID_ARGUMENT. The proposal is linked to it;
 // the bonus is decided when the trade settles (lucky.settle), since yeet_quote can still change coins and amount.
@@ -231,7 +242,7 @@ function xpRoute(tool,fn){
  };
 }
 /** The name a board shows: the username the person set, otherwise the default name. */
-export const boardName=id=>usernameOf(id)??handle(id);
+export function boardName(id){return usernameOf(id)??handle(id)}
 app.get('/leaderboard/:board',xpRoute('yeet_leaderboard',(x,who,a)=>x.board(a.board??'xp',who,boardName)));
 app.post('/spin',xpRoute('daily_spin',(x,who)=>x.doSpin(who)));
 // Lucky wheel (xp/lucky.mjs): today's five hot coins (only coins 1Click quotes now), then the server's slice.

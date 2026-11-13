@@ -34,7 +34,7 @@ after(async()=>{
  rmSync(root,{recursive:true,force:true});
 });
 
-const LISTED=['execute_trade','skeet_propose','submit_trade_signature','trade_status','yeet_coins','yeet_home','yeet_portfolio','yeet_propose','yeet_quote'];
+const LISTED=['execute_trade','skeet_propose','submit_trade_signature','trade_status','yeet_coins','yeet_home','yeet_overview','yeet_portfolio','yeet_propose','yeet_quote'];
 const SCOPES=['openid','offline_access','yeet:read','yeet:write','yeet:trade'];
 const local=url=>{const u=new URL(url,ORIGIN);return u.origin===ORIGIN?`${AS}${u.pathname}${u.search}`:u.href};
 function jar(){const c=new Map();return {header:()=>[...c].map(([k,v])=>`${k}=${v}`).join('; '),add(r){for(const s of r.headers.getSetCookie()){const p=s.split(';')[0],i=p.indexOf('=');c.set(p.slice(0,i),p.slice(i+1))}}}}

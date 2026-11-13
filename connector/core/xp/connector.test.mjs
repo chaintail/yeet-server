@@ -168,6 +168,20 @@ test('YEET_P2=1 end to end: home -> spin -> leaderboard, then a settled trade sh
   assert.deepEqual(st.structuredContent.xp_award,{points:70,total});
  }
  assert.equal((await alice.call('yeet_home')).structuredContent.xp.total,total);
+
+ // yeet_overview, the entry tool: the person in one answer, USDC as one number, no wallet or network, the follow-ups.
+ const o=await alice.call('yeet_overview');
+ assert.equal(o.isError,undefined,JSON.stringify(o.content));
+ const ov=o.structuredContent;
+ assert.equal(ov.username,handle(alice.sub));assert.equal(ov.xp,total);assert.equal(ov.streak_days,1);assert.equal(ov.checkin_open,false);
+ assert.match(ov.usdc,/^[0-9]+(\.[0-9]+)?$/);assert.equal(ov.needs_card_sign_in,'unknown');assert.equal(ov.trading,'live');
+ assert.equal(ov.tier,total>=69?'Winner':'Noob');
+ assert.ok(ov.suggestions.length>=3&&ov.suggestions.every(s=>s.label&&s.say));assert.ok(!ov.suggestions.some(s=>s.id==='checkin'),'the check-in was done today');
+ assert.equal(ov.suggestions.at(-1).id,'others');
+ assert.match(ov.guidance,/^Welcome .+ in one short line/);assert.equal(o.content[1].text,ov.guidance);
+ assert.match(o.content[0].text,new RegExp(`^${handle(alice.sub)}: [0-9.]+ USDC, ${total} XP \\((Noob|Winner)\\), 1-day streak`));
+ assert.match(o.content[0].text,/Offer next: /);
+ for(const leak of [alice.sub,'0x','Base','Solana','wallet'])assert.ok(!JSON.stringify([ov,o.content[0].text]).includes(leak),leak);
 });
 
 test('lucky wheel end to end: lucky_wheel -> lucky_spin -> YEET 5 USDC into the landed coin -> settled: claimed, one bonus spin',async()=>{

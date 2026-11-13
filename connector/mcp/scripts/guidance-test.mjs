@@ -83,6 +83,19 @@ test('yeet_home: paused, wallet set-up, no USDC (with and without a spin), ready
  assert.equal(g('yeet_home',{wallets:wallets(null),ready:'ready',xp:null,recent_wins:[]},P01),COPY.yeet_home.ready);
 });
 
+test('yeet_overview: offer the suggestions in order, never a coin; the lead follows the first suggestion; paused is said first',()=>{
+ const S=(...ids)=>ids.map(id=>({id,label:'x',say:'y'}));
+ const o=(suggestions,over={})=>({username:'Lucky Otter 42',usdc:'20',xp:5,tier:'Noob',streak_days:1,checkin_open:false,holdings_count:0,top_winner:null,trading:'live',needs_card_sign_in:'unknown',suggestions,...over});
+ const plain=g('yeet_overview',o(S('discover','holdings','fund')));
+ rules('overview',plain);
+ assert.match(plain,/^Welcome Lucky Otter 42 in one short line/);assert.match(plain,/YEET/);
+ assert.match(plain,/YEET/);assert.match(plain,/never ask them to log in\.$/);
+ assert.match(g('yeet_overview',o(S('fund','checkin'))),/YEET/);
+ assert.match(g('yeet_overview',o(S('checkin','holdings'))),/YEET/);
+ const paused=g('yeet_overview',o(S('checkin'),{trading:'paused'}));rules('overview paused',paused);assert.match(paused,/trading is paused right now/);
+ for(const k of Object.keys(COPY.yeet_overview))assert.doesNotMatch(COPY.yeet_overview[k],/wallet|Base|Solana|chain/i,k);
+});
+
 test('funding is described for both networks: no string says USDC can only be added or held on Base',()=>{
  for(const [label,text] of entries)assert.doesNotMatch(text,/adds USDC on Base|Add USDC on Base|USDC on Base\.$/,label);
  for(const k of ['needs_funds_spin','needs_funds','needs_funds_no_wheel'])assert.match(COPY.yeet_home[k],/YEET/,k);

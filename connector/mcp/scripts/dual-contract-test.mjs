@@ -5,8 +5,8 @@ import {toolSchemas,zodSchema,contract} from '../tool-contract.mjs';
 import {toolError} from '../errors.mjs';
 import {instructions,descriptions,titles} from '../instructions.mjs';
 import {allScopes} from '#scope-catalog';
-const ALL=['yeet_home','yeet_coins','yeet_propose','yeet_quote','execute_trade','submit_trade_signature','trade_status','yeet_portfolio','skeet_propose','yeet_leaderboard','daily_spin','yeet_set_username','lucky_wheel','lucky_spin'];
-test('every published schema has a top-level object, resolved references, strict input; the fourteen contract tools',()=>{
+const ALL=['yeet_overview','yeet_home','yeet_coins','yeet_propose','yeet_quote','execute_trade','submit_trade_signature','trade_status','yeet_portfolio','skeet_propose','yeet_leaderboard','daily_spin','yeet_set_username','lucky_wheel','lucky_spin'];
+test('every published schema has a top-level object, resolved references, strict input; the contract tools',()=>{
  assert.deepEqual(Object.keys(toolSchemas),ALL);
  for(const schema of Object.values(toolSchemas)){
   assert.equal(schema.output.type,'object');assert.doesNotMatch(JSON.stringify(schema),/\$ref/);assert.equal(schema.input.additionalProperties,false);
@@ -61,7 +61,13 @@ test('model-visible catalog: titles and descriptions for every tool; data-not-in
  assert.deepEqual(Object.keys(titles),ALL);assert.deepEqual(Object.keys(descriptions),ALL);
  assert.match(instructions,/YEET/);
  assert.match(instructions,/YEET/);
- assert.ok(instructions.length>=450&&instructions.length<=650,`instructions length ${instructions.length}`);
+ assert.ok(instructions.length>=450&&instructions.length<=1400,`instructions length ${instructions.length}`);
+ // Owner, voice 39611: the overview is the entry; a basket only after the person brought up a coin.
+ assert.match(instructions,/YEET/);
+ assert.match(instructions,/YEET/);
+ assert.match(instructions,/YEET/);
+ assert.doesNotMatch(instructions,/yeet me a win/i);
+ assert.match(descriptions.yeet_overview,/How do I win\?/);assert.match(descriptions.yeet_overview,/@yeet/);
  assert.match(descriptions.execute_trade,/Only the card can call this/);
 });
 test('the core yeet_coins answer fits the published output schema and lists only tradable Solana coins',async()=>{
