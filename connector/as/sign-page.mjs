@@ -5,11 +5,21 @@
 //                                      another hash is redirected to the stable name below)
 //   GET  /cards/yeet-signer.js         the same bytes under a stable name, cached 5 minutes
 //   GET  /sign?trade_id=t_...          the first-party signing page: the card opens it with window.openai.openExternal
-//                                      when it cannot sign inline. It runs the same signer at top level.
+//                                      when it cannot sign inline (an account that connected with Google or Apple has
+//                                      no emailed code for the card; or the card's frame refused the wallet). It runs
+//                                      the same signer at top level. A browser with no YEET session gets the connect
+//                                      screen's sign-in methods (login/sign.jsx, loaded on demand; nothing is created
+//                                      there). Google and Apple return to the bare /sign (Privy matches redirect
+//                                      addresses exactly, with no query); the page keeps the trade id for that trip.
 //   POST /sign/api/requests            {trade_id, privy_access_token} -> the trade's open sign requests
 //   POST /sign/api/signature           {trade_id, leg, attempt_id, signed, privy_access_token} -> submit_trade_signature
 //                                      (once per sign request; a Solana request may pay several legs, `legs` /
 //                                      `leg_summaries`, with one signature: `leg` is its anchor, legs[0])
+//   POST /sign/api/email-linked        {trade_id, privy_access_token} -> {ok}: the person linked an email login to
+//                                      their Privy user on the page (the optional step after a Google or Apple
+//                                      trade); core drops its cached sign-in facts for that account, so the next
+//                                      basket card emails the code. Nothing is believed from the page: core reads
+//                                      the facts from Privy.
 //
 // Who may sign what. The page holds no YEET session of its own; every API call carries the Privy access token of the
 // person signed in on the page, and nothing else identifies them:
@@ -33,6 +43,8 @@ const TRADE_ID = /^t_[a-z0-9]{20}$/;
 const read = (file) => readFileSync(new URL(file, import.meta.url));
 const ASSETS = {
   "/sign/sign.js": ["text/javascript; charset=utf-8", read("./viewer/sign/sign.js")],
+  // The page's flow with no DOM (the session, the trade, the press and hold, the optional email step).
+  "/sign/flow.mjs": ["text/javascript; charset=utf-8", read("./viewer/sign/flow.mjs")],
   "/sign/sign.css": ["text/css; charset=utf-8", read("./viewer/sign/sign.css")],
   // The card-builder contract (sign request -> Privy wallet RPC body, wallet answer -> `signed`), the one source both
   // the card (vendored verbatim) and this page use.
@@ -67,7 +79,7 @@ export function signPageHtml({appId, tradeId, asset, back, nonce}) {
     ["back", back ?? ""],
   ].map(([k, v]) => ` data-${k}="${html(v)}"`).join("");
   const signer = asset ? `<script nonce="${html(nonce)}" src="${html(asset.path)}"></script>` : "";
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#09071C"><meta name="referrer" content="no-referrer"><title>${html(SIGN_TITLE)} · YEET</title><link rel="icon" type="image/svg+xml" href="/account/icon.svg"><link rel="stylesheet" href="/sign/sign.css">${signer}<script nonce="${html(nonce)}" type="module" src="/sign/sign.js"></script></head><body><main id="yeet-sign"${data}><section class="card" aria-live="polite"><header class="top"><span class="mark">YEET</span><h1>${html(SIGN_TITLE)}</h1></header><div id="sign-body"><p class="line" role="status">Getting your trade…</p></div></section></main></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#09071C"><meta name="referrer" content="no-referrer"><meta property="csp-nonce" content="${html(nonce)}"><title>${html(SIGN_TITLE)} · YEET</title><link rel="icon" type="image/svg+xml" href="/account/icon.svg"><link rel="stylesheet" href="/sign/sign.css">${signer}<script nonce="${html(nonce)}" type="module" src="/sign/sign.js"></script></head><body><main id="yeet-sign"${data}><section class="card" aria-live="polite"><header class="top"><span class="mark">YEET</span><h1>${html(SIGN_TITLE)}</h1></header><div id="sign-body"><p class="line" role="status">Getting your trade…</p></div></section></main></body></html>`;
 }
 
 /**
@@ -109,7 +121,8 @@ export function signRoutes(app, {enabled, appId, lookup, core, originOK, asset =
 
   const json = express.json({limit: "64kb"});
   const fail = (r, status, code, message) => r.status(status).json({code, message});
-  const NOT_YOURS = "This trade isn’t on the YEET account you signed in with. Sign out, then sign in with the email you use for YEET.";
+  // Another account's trade and an unknown trade answer the same. The page adds who is here and "Use another account".
+  const NOT_YOURS = "This trade belongs to a different YEET account than the one you’re using here. Use the Google, Apple or email account you connected to ChatGPT with.";
   /** Verifies the caller and returns the account id, or answers the refusal and returns null. */
   async function who(q, r) {
     r.set("Cache-Control", "no-store");
@@ -119,7 +132,7 @@ export function signRoutes(app, {enabled, appId, lookup, core, originOK, asset =
     if (!TRADE_ID.test(b.trade_id ?? "")) { fail(r, 400, "INVALID_ARGUMENT", "Open this page from the YEET card in ChatGPT."); return null; }
     let account;
     try { account = await lookup({privy_access_token: b.privy_access_token, identity_token: b.identity_token}); }
-    catch { fail(r, 401, "SIGN_IN_REQUIRED", "Your sign-in expired. Sign in again."); return null; }
+    catch { fail(r, 401, "SIGN_IN_REQUIRED", "Your session here ended. Confirm it’s you again."); return null; }
     if (!account) { fail(r, 404, "TRADE_NOT_FOUND", NOT_YOURS); return null; }
     return account;
   }
@@ -127,7 +140,7 @@ export function signRoutes(app, {enabled, appId, lookup, core, originOK, asset =
   function refusal(r, status, body) {
     if (status === 400 || (status === 409 && body?.error === "INVALID_ARGUMENT")) return fail(r, 404, "TRADE_NOT_FOUND", NOT_YOURS);
     if (status === 403) return fail(r, 403, "NOT_ELIGIBLE", "This account can’t trade with YEET.");
-    if (status === 409 && typeof body?.error === "string") return fail(r, 409, body.error, typeof body.message === "string" ? body.message : "Your wallet’s signature wasn’t accepted. Nothing was sent.");
+    if (status === 409 && typeof body?.error === "string") return fail(r, 409, body.error, typeof body.message === "string" ? body.message : "Your wallet’s answer wasn’t accepted. Nothing was sent.");
     return fail(r, 502, "TEMPORARILY_UNAVAILABLE", "YEET couldn’t reach your trade. Try again in a minute.");
   }
   const leg = (l) => ({leg: l.leg, symbol: l.symbol, send_status: l.send_status});
@@ -153,5 +166,14 @@ export function signRoutes(app, {enabled, appId, lookup, core, originOK, asset =
     if (out.status !== 200 || !out.body) return refusal(r, out.status, out.body);
     const b = out.body;
     r.json({trade_id: b.trade_id, status: b.status, legs: (b.legs ?? []).map(leg), ...(b.sign_requests?.length ? {sign_requests: b.sign_requests} : {})});
+  });
+
+  // The optional step after a Google or Apple trade: the person linked an email login on the page. The caller is
+  // verified like every other call; core only forgets what it cached about that account's sign-in.
+  app.post(`${SIGN_PAGE_PATH}/api/email-linked`, json, async (q, r) => {
+    const account = await who(q, r);
+    if (!account) return;
+    try { await core("/sign/account/login-refresh", account, {}, 5000); } catch { /* core reads Privy again within a minute */ }
+    r.json({ok: true});
   });
 }

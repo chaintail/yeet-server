@@ -37,3 +37,31 @@ button.quiet{background:transparent;color:var(--fog);border:1px solid var(--nigh
 button:disabled{opacity:.55;cursor:default}
 a.back{display:block;text-align:center;margin-top:12px;color:var(--ultra-2);font-weight:600;text-decoration:none}
 [hidden]{display:none!important}
+/* The sign-in step: the connect screen's component (login/choose-method.jsx) in this page's look. */
+.signin p{color:var(--fog);font-size:15px}
+.signin p strong{color:var(--cloud)}
+.signin button{position:relative}
+.signin button.secondary{background:var(--night-3);color:var(--cloud);border:1px solid var(--night-4)}
+.signin button.link{background:transparent;color:var(--ultra-2);font-weight:600;font-size:15px;padding:8px}
+.signin .divider{display:flex;align-items:center;gap:12px;margin:16px 0 2px;color:var(--slate);font-size:13px}
+.signin .divider::before,.signin .divider::after{content:"";flex:1;border-top:1px solid var(--night-4)}
+.signin .notice{margin:12px 0 0;padding:10px 12px;border-radius:14px;color:var(--cloud);background:rgba(255,92,138,.1);border:1px solid rgba(255,92,138,.4)}
+.signin p[role=alert]:empty{display:none}
+.sw{white-space:nowrap}
+.wm{display:inline-block;width:.9em;height:.9em;margin-left:.14em;vertical-align:-.12em;flex:none}
+.screen.leaving{opacity:0;transition:opacity .2s ease-in}
+/* Press and hold (the card's button): the fill runs for the hold time, a short tap nudges the hint. */
+button.hold{position:relative;overflow:hidden;touch-action:manipulation;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;font-style:italic;font-weight:800;font-size:20px;letter-spacing:.02em}
+button .hold-fill{position:absolute;inset:0;border-radius:inherit;background:rgba(255,255,255,.6);mix-blend-mode:overlay;transform-origin:0 50%;transform:scaleX(0);pointer-events:none;transition:transform .2s ease-out}
+button.holding .hold-fill{transform:scaleX(1);transition:transform var(--hold,800ms) linear}
+.hold-hint{margin:8px 0 0;text-align:center;font:600 12.5px var(--mono);color:var(--fog)}
+.hold-hint.nudge{color:var(--volt);animation:holdnudge .45s ease-out}
+@keyframes holdnudge{0%{transform:scale(1)}40%{transform:scale(1.08)}100%{transform:scale(1)}}
+/* The end state, and the optional step under it. */
+.line.end{font-size:20px;font-weight:700;margin:4px 0 0}
+.line.end.ok{color:var(--mint)}
+.more{margin-top:18px;padding:14px 14px 12px;border-radius:18px;background:var(--night-3);border:1px solid var(--night-4)}
+.more strong{display:block;font-size:17px;margin:0 0 4px}
+.more .line{margin:0 0 4px}
+.more input{background:var(--night-2)}
+@media (prefers-reduced-motion:reduce){.hold-hint.nudge{animation:none}.screen.leaving{transition:none}}

@@ -1,7 +1,7 @@
 // Sign-in methods from the Privy app configuration, without React or the network.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { LOGIN_METHODS, NO_METHOD_LINE, enabledMethods, introLine } from "./login-methods.js";
+import { LOGIN_METHODS, NO_ACCOUNT_LINE, NO_METHOD_LINE, enabledMethods, introLine, oauthRefusal } from "./login-methods.js";
 
 const ids = (config) => enabledMethods(config).map((m) => m.id);
 
@@ -30,4 +30,13 @@ test("login methods: the intro line names only what is on", () => {
   assert.equal(line({ email_auth: true }), "Sign in with your email. New here? Signing in creates your YEET account and wallets.");
   assert.match(line({ email_auth: true, google_oauth: true, apple_oauth: true }), /^Sign in with Google, Apple or your email\./);
   assert.match(line({ google_oauth: true }), /^Sign in with Google\./);
+});
+
+test("the trade page: a Google or Apple return that is no YEET account says so; backing out says nothing", () => {
+  assert.equal(oauthRefusal("user_does_not_exist"), "No YEET account uses that one. Use the account you connected to ChatGPT with.");
+  assert.equal(oauthRefusal("user_does_not_exist"), NO_ACCOUNT_LINE);
+  assert.equal(oauthRefusal("oauth_user_denied"), "");
+  assert.equal(oauthRefusal("unknown_auth_error"), "That did not finish. Try again.");
+  assert.equal(oauthRefusal(undefined), "That did not finish. Try again.");
+  for (const code of ["user_does_not_exist", "x"]) assert.doesNotMatch(oauthRefusal(code), /\bsign\w*|log ?in/i);
 });

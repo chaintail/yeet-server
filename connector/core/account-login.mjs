@@ -19,20 +19,48 @@ export function loginFacts(user){
  const email=accounts.find(a=>a?.type==='email'&&typeof a.address==='string'&&/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.address))?.address??null;
  return {user:typeof user?.id==='string'?user.id:null,email,masked:maskEmail(email),google:accounts.some(a=>a?.type==='google_oauth'),apple:accounts.some(a=>a?.type==='apple_oauth')};
 }
-const TTL_MS=10*60_000,MAX=2000;
-/** lookup(did) -> loginFacts or null (never throws: the card then falls back to its own check). Cached 10 minutes. */
+// An account WITH an email login keeps it (a person may link at most one email, Privy linking-accounts): 10 minutes.
+// An account without one can gain it on the YEET page (the optional "confirm your email once" step after a Google or
+// Apple trade): the page tells the server at once (lookup.forget), and the answer is kept for one minute only, so the
+// card's emailed code starts working for that person even when that notice is lost.
+const TTL_MS=10*60_000,NO_EMAIL_TTL_MS=60_000,MAX=2000;
+/** lookup(did) -> loginFacts or null (never throws: the card then falls back to its own check). Cached (see above).
+ *  lookup.forget(did) drops the cached answer. */
 export function createAccountLogin({env=process.env,fetch=globalThis.fetch,api,now=Date.now}={}){
  const cache=new Map();
  const config=api?null:privyConfig(env);
  const client=api??(config?createPrivyApi({config,fetch,timeoutMs:4000}):null);
- return async function lookup(did){
+ async function lookup(did){
   if(!client||typeof did!=='string'||!/^did:privy:[A-Za-z0-9_-]{1,128}$/.test(did))return null;
   const hit=cache.get(did);
-  if(hit&&now()-hit.at<TTL_MS)return hit.value;
+  if(hit&&now()-hit.at<(hit.value.email?TTL_MS:NO_EMAIL_TTL_MS))return hit.value;
   try{
    const value=loginFacts(await client.app('GET',`/v1/users/${did}`));
    cache.set(did,{at:now(),value});if(cache.size>MAX)cache.delete(cache.keys().next().value);
    return value;
   }catch{return null}
+ }
+ lookup.forget=did=>{cache.delete(did)};
+ return lookup;
+}
+/**
+ * The basket card's answers (yeet_propose, skeet_propose, yeet_quote) with the same card-only facts as the overview,
+ * as `card_account` (the connector moves it to `_meta["yeet/account"]` and never shows it to the model). The basket
+ * holds the YEET / SKEET button, so it is the card that meets the first trade on a device: with the facts it emails
+ * the code (an account with an email login) or hands the trade to the YEET page (Google or Apple). Only when Privy
+ * answered: with no facts the answer is returned as it is and the card keeps its own step. The facts are read while
+ * the handler runs; they never delay a refusal and never fail the call.
+ *   withCardAccount({lookup: () => lookup function, didOf: ctx => did or null})(handler) -> handler
+ */
+export function withCardAccount({lookup,didOf}){
+ const facts=async ctx=>{
+  try{
+   const did=didOf(ctx),login=did?await lookup()(did):null;
+   return login?{user:did,email:login.email,masked:login.masked,google:login.google===true,apple:login.apple===true,wallets:[]}:null;
+  }catch{return null}
+ };
+ return fn=>async(e,ctx,a,q)=>{
+  const reading=facts(ctx),out=await fn(e,ctx,a,q),account=await reading;
+  return account&&out&&typeof out==='object'&&!Array.isArray(out)?{...out,card_account:account}:out;
  };
 }

@@ -19,7 +19,7 @@ import {winnerOf} from './trade/pnl.mjs';
 import {boardAnswer} from './xp/boards.mjs';
 import {TERMS_VERSION,termsObject,checkAcceptance,termsOpen} from './terms.mjs';
 import {acceptanceOf,recordAcceptance,referralOf,decideReferral,referralCode} from './terms-store.mjs';
-import {createAccountLogin} from './account-login.mjs';
+import {createAccountLogin,withCardAccount} from './account-login.mjs';
 import {hasScope} from '#scope-catalog';
 // Accounts are created on the first verified sign-in (identity-store.mjs). The identity app is Privy in
 // production and the development stub only under TEST_PROFILE=1 with DEV_IDENTITY_STUB=1.
@@ -244,6 +244,9 @@ async function overviewFor(e,ctx,{card=false}={}){
  const wallets=[home.wallets?.base?.address,home.wallets?.solana?.address].filter(a=>typeof a==='string');
  return {...view,card_account:{user:did??null,email:login?.email??null,masked:login?.masked??null,google:login?.google===true,apple:login?.apple===true,wallets}};
 }
+// The basket card meets the first trade on a device: its answers (yeet_propose, skeet_propose, yeet_quote) carry the
+// card-only account facts too (account-login.mjs withCardAccount). No facts from Privy: the answer is unchanged.
+const basketCard=withCardAccount({lookup:()=>(accountLogin??=createAccountLogin()),didOf:ctx=>didFor(ctx.accountId)});
 app.get('/overview',trade('yeet_overview',(e,ctx)=>overviewFor(e,ctx,{card:true})));
 // yeet_fund: the funding card. All USDC as one number (read fresh: the card asks again after the funding page).
 app.get('/fund',trade('yeet_fund',async(e,ctx)=>{
@@ -253,16 +256,16 @@ app.get('/fund',trade('yeet_fund',async(e,ctx)=>{
 // lucky_id (optional): the caller's own lucky wheel, spun today, else INVALID_ARGUMENT. The proposal is linked to it;
 // the bonus is decided when the trade settles (lucky.settle), since yeet_quote can still change coins and amount.
 // Without YEET_P2 the lucky tools are not registered and lucky_id is ignored.
-app.post('/proposals',trade('yeet_propose',async(e,ctx,a)=>{
+app.post('/proposals',trade('yeet_propose',basketCard(async(e,ctx,a)=>{
  if(a.lucky_id===undefined)return e.propose(ctx,a);
  if(!p2On()){const {lucky_id:_,...rest}=a;return e.propose(ctx,rest)}
  xpRuntime().lucky.check(ctx.accountId,a.lucky_id);
  const out=await e.propose(ctx,a);
  xpRuntime().lucky.link(ctx.accountId,a.lucky_id,out.proposal_id);
  return out;
-}));
-app.post('/proposals/skeet',trade('skeet_propose',(e,ctx,a)=>e.skeet(ctx,a)));
-app.post('/proposals/:id/quote',trade(null,(e,ctx,_a,q)=>{const a=inputs.yeet_quote.safeParse({...q.body,proposal_id:q.params.id});if(!a.success)throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});return e.quote(ctx,a.data)}));
+})));
+app.post('/proposals/skeet',trade('skeet_propose',basketCard((e,ctx,a)=>e.skeet(ctx,a))));
+app.post('/proposals/:id/quote',trade(null,basketCard((e,ctx,_a,q)=>{const a=inputs.yeet_quote.safeParse({...q.body,proposal_id:q.params.id});if(!a.success)throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});return e.quote(ctx,a.data)})));
 app.post('/trades',trade('execute_trade',(e,ctx,a)=>e.execute(ctx,a)));
 // submit_trade_signature: bytes the person's own wallet signed for one leg (pipeline.submit checks and sponsors them).
 app.post('/trades/:id/signature',trade(null,(e,ctx,_a,q)=>{const a=inputs.submit_trade_signature.safeParse({...q.body,trade_id:q.params.id});if(!a.success)throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});return e.submit(ctx,a.data)}));
@@ -295,6 +298,15 @@ function pageTrade(fn){
 app.post('/sign/trades/:id/requests',pageTrade((e,ctx,q)=>e.pageRequests(ctx,q.params.id)));
 /** submit_trade_signature from the page: the same engine call as the tool. */
 app.post('/sign/trades/:id/signature',pageTrade((e,ctx,q)=>{const a=inputs.submit_trade_signature.safeParse({...q.body,trade_id:q.params.id});if(!a.success)throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});return e.submit(ctx,a.data)}));
+/** The page linked an email login to the account's Privy user (the optional step after a Google or Apple trade):
+ * drop the cached sign-in facts, so the next basket answer reads them from Privy again and the card emails the code.
+ * Nothing is taken from the page's word: the facts always come from Privy (account-login.mjs). Sign-in server only. */
+app.post('/sign/account/login-refresh',(q,r)=>{
+ if(q.role!=='as')return r.sendStatus(403);
+ const did=didFor(q.subject);
+ if(did)accountLogin?.forget(did);
+ r.json({ok:true});
+});
 // Leaderboard and daily spin (P2): answered only with YEET_P2=1, otherwise a typed retryable failure.
 function xpRoute(tool,fn){
  return async(q,r)=>{

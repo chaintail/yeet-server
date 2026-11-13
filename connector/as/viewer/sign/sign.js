@@ -1,30 +1,54 @@
-// The first-party signing page (as/sign-page.mjs). The trade card opens it when it cannot sign inside ChatGPT. Same
-// contract as the card (yeet-win src/trade-signing.js): the server's sign requests for this trade, each signed by the
-// embedded wallet whose address equals the request's `wallet`, through the same Privy signer (window.YeetSigner, the
-// vendored yeet-signer.js), then submit_trade_signature. Sign only: the wallet never sends; YEET adds the network fee
-// and sends. The card polls trade_status meanwhile.
+// The first-party trade page (as/sign-page.mjs). The trade card opens it when the trade cannot be finished inside
+// ChatGPT: the account connected with Google or Apple (no emailed code for the card), or the wallet could not answer
+// in the card's frame. This file draws the page; the flow is as/viewer/sign/flow.mjs (no DOM), the wallet is the
+// vendored Privy client (window.YeetSigner), and the sign-in step is the connect screen's own component, loaded only
+// when this browser has no YEET session (/account/privy-login/sign.js, login/sign.jsx).
+//
+//   already here (the usual case: the person connected in this browser)  ->  the trade, press and hold, done
+//   no session                                                           ->  Continue with Google / Apple / email,
+//                                                                            back on this page, the same trade
+// Google and Apple send the person back to the bare /sign address (Privy matches redirect addresses exactly, with no
+// query), so the trade id and the way back to ChatGPT are kept in this tab for the round trip.
 import {privyRpcBodies, signedFromWallets} from '/sign/wallet-request.mjs';
-
-/** What the page submits when the wallet refuses eth_sign7702Authorization (plan 3.2). */
-const UNSUPPORTED_7702 = 'unsupported';
+import {createSignFlow, summariesOf, summaryFor, maskEmail} from '/sign/flow.mjs';
 
 const root = document.getElementById('yeet-sign');
 const body = document.getElementById('sign-body');
-const cfg = {appId: root.dataset.appId || '', tradeId: root.dataset.tradeId || '', back: root.dataset.back || ''};
+const SIGN_IN_BUNDLE = '/account/privy-login/sign.js';
+const TRADE_ID = /^t_[a-z0-9]{20}$/;
+const RETURN_KEY = 'yeet-trade-return', FRESH_KEY = 'yeet-trade-fresh', RETURN_FOR_MS = 30 * 60_000;
 const STATE = {
   awaiting_signature: ['Waiting to send', ''], signing_now: ['Sending…', 'run'], signing: ['Sending', 'run'],
   awaiting_gas: ['Network fee on its way', 'run'], sent: ['Sent', 'ok'], not_sent: ['Not sent', 'bad'], failed: ['Not sent', 'bad'],
 };
-const SENT = new Set(['signing', 'awaiting_gas', 'sent']);
-const START_MS = 20000;
-let signer = null, trade = null, busy = false;
-const local = new Map(); // leg -> send_status as this page last saw it
+const LEAD = 'Confirm it’s you to finish this trade.';
 
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = String(text); return n; };
 const line = (text, kind = '') => { const p = el('p', `line ${kind}`.trim(), text); p.setAttribute('role', 'status'); return p; };
+const stores = () => { const out = []; for (const name of ['sessionStorage', 'localStorage']) { try { const s = window[name]; s.getItem('x'); out.push(s); } catch { /* storage is off here */ } } return out; };
+/** Only ChatGPT is ever offered as the way back (the server applies the same rule to ?redirectUrl=). */
+const chatgpt = (v) => { try { const u = new URL(String(v)); return u.protocol === 'https:' && u.hostname === 'chatgpt.com' && !u.username && !u.password ? u.href : ''; } catch { return ''; } };
+
+// ---- Which trade: the address, or (back from Google or Apple) what this tab kept before it left ----------------
+function kept() {
+  for (const s of stores()) {
+    try {
+      const v = JSON.parse(s.getItem(RETURN_KEY) ?? 'null');
+      if (v && TRADE_ID.test(v.trade_id ?? '') && Date.now() - Number(v.at) < RETURN_FOR_MS) return {tradeId: v.trade_id, back: chatgpt(v.back)};
+    } catch { /* not ours */ }
+  }
+  return null;
+}
+const cfg = {appId: root.dataset.appId || '', tradeId: root.dataset.tradeId || '', back: root.dataset.back || ''};
+const query = new URLSearchParams(location.search);
+const fromProvider = query.has('privy_oauth_code') || query.has('privy_oauth_state');
+if (!cfg.tradeId) { const k = kept(); if (k) { cfg.tradeId = k.tradeId; cfg.back = cfg.back || k.back; } }
+const keep = () => { for (const s of stores()) { try { s.setItem(RETURN_KEY, JSON.stringify({trade_id: cfg.tradeId, back: cfg.back, at: Date.now()})); } catch { /* the address still names the trade */ } } };
+const forget = () => { for (const s of stores()) { try { s.removeItem(RETURN_KEY); } catch { /* nothing kept */ } } };
+const tradeUrl = () => `/sign?trade_id=${encodeURIComponent(cfg.tradeId)}${cfg.back ? `&redirectUrl=${encodeURIComponent(cfg.back)}` : ''}`;
+
 function show(...nodes) { body.replaceChildren(...nodes.filter(Boolean), ...(cfg.back ? [backLink()] : [])); }
 function backLink() { const a = el('a', 'back', 'Back to ChatGPT'); a.href = cfg.back; a.rel = 'noopener'; return a; }
-const sameWallet = (req, w) => req.chain === 'base' || req.kind === 'evm_tx' ? String(w.address).toLowerCase() === String(req.wallet).toLowerCase() : w.address === req.wallet;
 
 function units(raw, decimals, places) {
   let v = BigInt(raw); const d = BigInt(decimals); const base = 10n ** d;
@@ -33,180 +57,176 @@ function units(raw, decimals, places) {
   return shown ? `${whole}.${shown}` : `${whole}`;
 }
 const amountOf = (s) => { if (!s) return ''; const usdc = s.asset === 'USDC'; return `${units(s.amount_raw, s.decimals, usdc ? 2 : null)} ${s.asset}`; };
-// One Solana request may pay several legs (one transaction, one signature): `legs` / `leg_summaries`; older and Base
-// requests name one leg.
-const legsOf = (r) => Array.isArray(r?.legs) ? r.legs : [r?.leg];
-const summariesOf = (r) => Array.isArray(r?.leg_summaries) ? r.leg_summaries : [{leg: r?.leg, ...(r?.summary ?? {})}];
-const requestFor = (reqs, leg) => reqs.find((r) => legsOf(r).includes(leg));
-const summaryFor = (reqs, leg) => summariesOf(requestFor(reqs, leg)).find((s) => s.leg === leg);
 
-async function api(path, extra) {
-  const token = await signer.accessToken();
-  if (!token) { const e = Error('signed out'); e.status = 401; throw e; }
-  const r = await fetch(`/sign/api/${path}`, {method: 'POST', credentials: 'same-origin', headers: {'content-type': 'application/json'}, body: JSON.stringify({trade_id: cfg.tradeId, privy_access_token: token, ...extra})});
-  let j = null; try { j = await r.json(); } catch { /* no body */ }
-  if (!r.ok) { const e = Error(j?.message || 'refused'); e.status = r.status; e.code = j?.code; throw e; }
-  return j;
+// ---- Press and hold: nothing that moves funds runs on a single tap (the card's rule, the card's timing) ----------
+// The fill runs HOLD_MS; letting go early, leaving the button or a scroll cancels. Space or Enter held down works the
+// same. An activation with no pointer and no key behind it (a screen reader) arms the button; a second one runs it.
+const HOLD_MS = 800, HOLD_MOVE = 12, ARM_MS = 6000;
+function holdable(b, run, what) {
+  const fill = el('span', 'hold-fill'); fill.setAttribute('aria-hidden', 'true'); b.prepend(fill); b.classList.add('hold'); b.style.setProperty('--hold', `${HOLD_MS}ms`);
+  const label = `Press and hold to ${what}`;
+  const hint = el('p', 'hold-hint', label); b.setAttribute('aria-label', label);
+  let timer = null, at = null, armed = 0, fired = 0;
+  const stop = () => { clearTimeout(timer); timer = null; at = null; b.classList.remove('holding'); };
+  const fire = () => { stop(); fired = Date.now(); armed = 0; run(); };
+  const start = (p) => { if (b.disabled || timer !== null) return; at = p; hint.classList.remove('nudge'); b.classList.add('holding'); timer = setTimeout(fire, HOLD_MS); };
+  b.addEventListener('pointerdown', (e) => { if (e.button > 0) return; start({x: e.clientX || 0, y: e.clientY || 0}); });
+  b.addEventListener('pointermove', (e) => { if (at && Math.hypot((e.clientX || 0) - at.x, (e.clientY || 0) - at.y) > HOLD_MOVE) stop(); });
+  for (const ev of ['pointerup', 'pointercancel', 'pointerleave', 'blur']) b.addEventListener(ev, stop);
+  b.addEventListener('contextmenu', (e) => e.preventDefault());
+  b.addEventListener('keydown', (e) => { if (e.key !== ' ' && e.key !== 'Enter') return; e.preventDefault(); if (!e.repeat) start(null); });
+  b.addEventListener('keyup', (e) => { if (e.key !== ' ' && e.key !== 'Enter') return; e.preventDefault(); stop(); });
+  b.onclick = (e) => {
+    e.preventDefault(); if (b.disabled || Date.now() - fired < 1000) return;
+    if (e.detail > 0) { hint.classList.remove('nudge'); void hint.offsetWidth; hint.classList.add('nudge'); return; }
+    if (Date.now() - armed < ARM_MS) { fire(); return; }
+    armed = Date.now(); hint.textContent = `Activate again to ${what}`; b.setAttribute('aria-label', `Activate again to ${what}`); hint.setAttribute('role', 'status');
+    setTimeout(() => { if (Date.now() - armed >= ARM_MS) { hint.textContent = label; b.setAttribute('aria-label', label); } }, ARM_MS);
+  };
+  return hint;
 }
 
-// ---- Sign-in (email code; existing YEET users only) --------------------------------------------------------------
-function signIn() {
-  return new Promise((resolve) => {
-    const email = el('input'); email.type = 'email'; email.id = 'sign-email'; email.autocomplete = 'email'; email.inputMode = 'email'; email.autocapitalize = 'none';
-    const eLabel = el('label', '', 'Email'); eLabel.htmlFor = 'sign-email';
-    const code = el('input'); code.id = 'sign-code'; code.inputMode = 'numeric'; code.autocomplete = 'one-time-code'; code.maxLength = 6;
-    const cLabel = el('label', '', '6-digit code'); cLabel.htmlFor = 'sign-code';
-    const status = line('');
-    const send = el('button', '', 'Send code'); send.id = 'sign-send';
-    const go = el('button', '', 'Sign in'); go.id = 'sign-login';
-    const codeBox = el('div'); codeBox.hidden = true; codeBox.append(cLabel, code, go);
-    send.onclick = async () => {
-      const v = email.value.trim(); if (!v) { email.focus(); return; }
-      send.disabled = true; status.className = 'line'; status.textContent = 'Sending your code…';
-      try { await signer.sendCode(v); status.textContent = `We sent a 6-digit code to ${v}.`; codeBox.hidden = false; send.textContent = 'Send a new code'; code.focus(); }
-      catch { status.className = 'line bad'; status.textContent = 'The code didn’t go out. Check the email and try again.'; }
-      send.disabled = false;
-    };
-    go.onclick = async () => {
-      go.disabled = true; status.className = 'line'; status.textContent = 'Signing in…';
-      try { await signer.login(email.value.trim(), code.value.trim()); resolve(); }
-      catch (e) {
-        status.className = 'line bad';
-        status.textContent = /not exist|no user|sign ?up|not found/i.test(String(e?.message)) ? 'No YEET account uses this email. Use the email you signed up with.' : 'That code didn’t work. Check it and try again.';
-        go.disabled = false;
-      }
-    };
-    show(line('Sign in with the email you use for YEET. This trade goes out from your wallet, nobody else’s.'), eLabel, email, send, status, codeBox);
-  });
-}
-
-// ---- The trade -----------------------------------------------------------------------------------------------------
-function render(note) {
-  const reqs = trade.sign_requests ?? [];
+// ---- The trade: the total, one row per coin ----------------------------------------------------------------------
+function tradeRows(s) {
+  const trade = s.trade, reqs = trade.sign_requests ?? [];
   const side = trade.direction === 'skeet' ? 'skeet' : 'yeet';
-  const nodes = [];
-  const all = reqs.flatMap(summariesOf), usdc = all.filter((s) => s.asset === 'USDC');
+  const all = reqs.flatMap(summariesOf), usdc = all.filter((x) => x.asset === 'USDC');
   const total = el('div', 'total');
   total.append(el('span', `side ${side}`, side === 'skeet' ? 'SKEET' : 'YEET'),
-    el('span', 'amt', usdc.length === all.length && all.length ? `${units(usdc.reduce((a, s) => a + BigInt(s.amount_raw), 0n), usdc[0].decimals, 2)} USDC` : `${trade.legs.length} coin${trade.legs.length === 1 ? '' : 's'}`));
-  nodes.push(total);
+    el('span', 'amt', usdc.length === all.length && all.length ? `${units(usdc.reduce((a, x) => a + BigInt(x.amount_raw), 0n), usdc[0].decimals, 2)} USDC` : `${trade.legs.length} coin${trade.legs.length === 1 ? '' : 's'}`));
   const ul = el('ul', 'rows');
   for (const l of trade.legs) {
-    const st = STATE[local.get(l.leg) ?? l.send_status] ?? ['', ''];
+    const st = STATE[s.local[l.leg] ?? l.send_status] ?? ['', ''];
     const li = el('li'); li.dataset.leg = String(l.leg);
     const left = el('span'); left.append(el('span', 'sym', l.symbol), document.createTextNode(' '), el('span', 'amt', amountOf(summaryFor(reqs, l.leg))));
     li.append(left, el('span', `state ${st[1]}`.trim(), st[0]));
     ul.append(li);
   }
-  nodes.push(ul);
-  if (note) nodes.push(note);
-  return nodes;
+  return [total, ul];
 }
 
-async function load() {
-  try { trade = await api('requests'); }
-  catch (e) {
-    if (e.status === 401) { await signer.logout().catch(() => {}); await signIn(); return load(); }
-    if (e.status === 404) return show(line(e.message, 'bad'), signOutButton());
-    return show(line(e.status === 403 ? e.message : 'YEET couldn’t reach your trade. Reload to try again.', 'bad'));
-  }
-  for (const l of trade.legs) local.set(l.leg, l.send_status);
-  const reqs = trade.sign_requests ?? [];
-  if (!reqs.length) {
-    const anySent = trade.legs.some((l) => SENT.has(l.send_status));
-    return show(...render(line(anySent ? 'Nothing left to send. Head back to ChatGPT: your card shows each coin as it lands.' : 'Nothing was sent for this trade. Your funds are still in your wallet. Ask in ChatGPT for a new quote.', anySent ? 'ok' : 'bad')));
-  }
-  const side = trade.direction === 'skeet' ? 'skeet' : 'yeet';
-  const btn = el('button', side, 'Send with your wallet'); btn.id = 'sign-go';
+// ---- The sign-in step: the connect screen's methods, nothing created here -----------------------------------------
+let unmount = null, flow = null, signer = null;
+function signedIn() {
+  // The session is in this origin's storage now. One reload hands it to the page's own wallet client.
+  for (const s of stores()) { try { s.setItem(FRESH_KEY, '1'); } catch { /* the page asks once more */ } }
+  location.replace(tradeUrl());
+}
+async function showSignIn(why) {
+  const host = el('div', 'signin'); host.id = 'sign-in';
+  host.append(line('One moment…'));
+  show(why === 'stuck' ? line('That didn’t carry over in this browser. Try once more, or open this page in Safari or Chrome.', 'bad') : null, host);
+  const intro = why === 'expired' ? 'Your session here ended. Confirm it’s you again to finish this trade.' : LEAD;
+  let mod;
+  try { mod = await import(SIGN_IN_BUNDLE); } catch { return emailOnly(host, intro); }
+  host.replaceChildren();
+  unmount = mod.mountSignIn(host, {appId: cfg.appId, redirectUrl: `${location.origin}/sign`, intro, onStart: keep, onDone: signedIn});
+}
+/** The sign-in bundle did not load: the emailed code alone, through the page's own client (existing accounts only). */
+function emailOnly(host, intro) {
+  const email = el('input'); email.type = 'email'; email.id = 'sign-email'; email.autocomplete = 'email'; email.inputMode = 'email'; email.autocapitalize = 'none';
+  const eLabel = el('label', '', 'Email'); eLabel.htmlFor = 'sign-email';
+  const code = el('input'); code.id = 'sign-code'; code.inputMode = 'numeric'; code.autocomplete = 'one-time-code'; code.maxLength = 6;
+  const cLabel = el('label', '', '6-digit code'); cLabel.htmlFor = 'sign-code';
   const status = line('');
-  btn.onclick = () => signAll(btn, status);
-  show(...render(), btn, status, el('p', 'fine', 'It goes out from your own wallet. YEET never holds your keys and only adds the network fee.'));
-}
-
-function signOutButton() {
-  const b = el('button', 'quiet', 'Sign out'); b.onclick = async () => { await signer.logout().catch(() => {}); await signIn(); load(); };
-  return b;
-}
-
-async function signAll(btn, status) {
-  if (busy) return; busy = true; btn.disabled = true;
-  const set = (text, kind = '') => { status.className = `line ${kind}`.trim(); status.textContent = text; };
-  try {
-    const wallets = await signer.wallets();
-    let queue = [...(trade.sign_requests ?? [])];
-    const retried = new Set();
-    // One wallet signature and one submit per REQUEST; every leg it pays moves together.
-    while (queue.length) {
-      const req = queue.shift(), covered = legsOf(req);
-      if (covered.every((leg) => SENT.has(local.get(leg)))) continue; // signed on an earlier tap
-      const w = wallets.find((x) => sameWallet(req, x));
-      if (!w) { set('This sign-in has a different wallet than your YEET account. Nothing was sent.', 'bad'); body.append(signOutButton()); return; }
-      const mark = (s) => { for (const leg of covered) local.set(leg, s); refresh(); };
-      mark('signing_now');
-      // One or two wallet calls (a Base basket's first trade: the one-time authorization, then the batch), one submit.
-      // A wallet that refuses the authorization method answers `unsupported`; the answer carries per-coin requests.
-      let signed;
-      try {
-        const answers = [];
-        for (const b of privyRpcBodies(req)) {
-          try { answers.push(await signer.rpc(w.id, b)); }
-          catch (e) {
-            if (b.method === 'eth_sign7702Authorization' && !/TIMEOUT|FRAME/i.test(String(e?.code ?? e?.message ?? ''))) { signed = UNSUPPORTED_7702; break; }
-            throw e;
-          }
-        }
-        signed ??= signedFromWallets(req, answers);
-      }
-      catch { mark('awaiting_signature'); set('Your wallet didn’t answer. Tap to try again.', 'bad'); btn.disabled = false; return; }
-      let out;
-      try { out = await api('signature', {leg: req.leg, attempt_id: req.attempt_id, signed}); }
-      catch (e) {
-        mark('awaiting_signature');
-        set(e.code === 'SIGN_EXPIRED' ? 'Time ran out before the trade went out. Nothing was sent. Ask in ChatGPT for a new quote.' : e.message || 'That didn’t go through. Tap to try again.', 'bad');
-        btn.disabled = e.code === 'SIGN_EXPIRED'; return;
-      }
-      for (const l of out.legs ?? []) local.set(l.leg, l.send_status);
-      // Expired: the fresh request covering this request's anchor leg (it may cover fewer legs, or come per leg).
-      const fresh = out.sign_requests ?? [];
-      const again = requestFor(fresh, req.leg) ?? fresh.find((r) => legsOf(r).some((leg) => covered.includes(leg)));
-      if (again && signed === UNSUPPORTED_7702) {
-        // Per-coin requests for the same legs: sign each, the way the page always has.
-        const mine = fresh.filter((r) => legsOf(r).some((leg) => covered.includes(leg)));
-        trade.sign_requests = [...trade.sign_requests.filter((r) => r !== req), ...mine];
-        queue.unshift(...mine);
-      } else if (again) {
-        if (retried.has(req.leg)) { set('Time ran out before the trade went out. Nothing was sent. Ask in ChatGPT for a new quote.', 'bad'); refresh(); return; }
-        retried.add(req.leg);
-        const others = fresh.filter((r) => r !== again && legsOf(r).some((leg) => covered.includes(leg)));
-        trade.sign_requests = [...trade.sign_requests.filter((r) => r !== req), again, ...others];
-        queue.unshift(again, ...others);
-      }
-      refresh();
+  const send = el('button', '', 'Email me a code'); send.id = 'sign-send';
+  const go = el('button', '', 'Confirm'); go.id = 'sign-login';
+  const codeBox = el('div'); codeBox.hidden = true; codeBox.append(cLabel, code, go);
+  send.onclick = async () => {
+    const v = email.value.trim(); if (!v) { email.focus(); return; }
+    send.disabled = true; status.className = 'line'; status.textContent = 'Sending your code…';
+    try { await signer.sendCode(v); status.textContent = `We sent a 6-digit code to ${v}.`; codeBox.hidden = false; send.textContent = 'Send a new code'; code.focus(); }
+    catch { status.className = 'line bad'; status.textContent = 'The code didn’t go out. Check the email and try again.'; }
+    send.disabled = false;
+  };
+  go.onclick = async () => {
+    go.disabled = true; status.className = 'line'; status.textContent = 'One moment…';
+    try { await signer.login(email.value.trim(), code.value.trim()); flow.begin(); }
+    catch (e) {
+      status.className = 'line bad';
+      status.textContent = /not exist|no user|sign ?up|not found/i.test(String(e?.message)) ? 'No YEET account uses this email. Use the email of your YEET account.' : 'That code didn’t work. Check it and try again.';
+      go.disabled = false;
     }
-    btn.hidden = true;
-    const failed = [...local.values()].some((s) => s === 'not_sent' || s === 'failed');
-    set(failed ? 'Some coins were not sent. Head back to ChatGPT for the details.' : 'Signed. Head back to ChatGPT: your card shows each coin as it lands.', failed ? 'bad' : 'ok');
-  } finally { busy = false; }
+  };
+  host.replaceChildren(line(intro), eLabel, email, send, status, codeBox);
 }
-function refresh() {
-  for (const l of trade.legs) {
-    const li = body.querySelector(`li[data-leg="${l.leg}"] .state`); if (!li) continue;
-    const st = STATE[local.get(l.leg) ?? l.send_status] ?? ['', ''];
-    li.className = `state ${st[1]}`.trim(); li.textContent = st[0];
+
+// ---- The optional step after the trade: an email login for an account that came in with Google or Apple ---------
+const draft = {email: null, code: ''};
+function linkBox(s) {
+  const k = s.link; if (!k || k.stage === 'skipped') return null;
+  const box = el('section', 'more'); box.id = 'sign-link'; box.setAttribute('aria-label', 'Trade faster next time');
+  if (k.stage === 'done') {
+    box.append(el('strong', '', 'You’re set'), line(`Future trades finish inside ChatGPT. The first one on a device asks for a code we email to ${k.masked ?? 'you'}.`, 'ok'));
+    return box;
+  }
+  box.append(el('strong', '', 'Trade faster next time'), el('p', 'line', 'Confirm your email once and future trades finish inside ChatGPT.'));
+  const quiet = (text, fn, id) => { const b = el('button', 'quiet', text); b.id = id; b.disabled = k.wait; b.onclick = fn; return b; };
+  if (k.stage === 'offer') {
+    if (draft.email === null) draft.email = k.email ?? '';
+    const f = el('input'); f.type = 'email'; f.id = 'link-email'; f.autocomplete = 'email'; f.inputMode = 'email'; f.autocapitalize = 'none'; f.value = draft.email; f.oninput = () => { draft.email = f.value; };
+    const lab = el('label', '', 'Email'); lab.htmlFor = f.id;
+    const go = el('button', '', k.wait ? 'Sending…' : 'Email me a code'); go.id = 'link-send'; go.disabled = k.wait; go.onclick = () => flow.linkSend(draft.email);
+    f.onkeydown = (e) => { if (e.key === 'Enter') go.click(); };
+    box.append(lab, f, go);
+  } else {
+    box.append(line(`We emailed a 6-digit code to ${maskEmail(k.email) ?? k.email}.`));
+    const f = el('input'); f.id = 'link-code'; f.inputMode = 'numeric'; f.autocomplete = 'one-time-code'; f.maxLength = 6; f.value = draft.code; f.oninput = () => { draft.code = f.value; };
+    const lab = el('label', '', '6-digit code'); lab.htmlFor = f.id;
+    const go = el('button', '', k.wait ? 'Checking…' : 'Confirm'); go.id = 'link-confirm'; go.disabled = k.wait; go.onclick = () => flow.linkConfirm(draft.code);
+    f.onkeydown = (e) => { if (e.key === 'Enter') go.click(); };
+    box.append(lab, f, go, quiet('Send again', () => flow.linkSend(k.email), 'link-again'));
+  }
+  if (k.error) { const e = line(k.error, 'bad'); e.setAttribute('role', 'alert'); box.append(e); }
+  box.append(quiet('Not now', () => flow.linkSkip(), 'link-skip'));
+  return box;
+}
+
+// ---- One state, one screen -----------------------------------------------------------------------------------------
+let shown = null;
+function draw(s) {
+  if (s.view !== 'signin' && unmount) { try { unmount(); } catch { /* already gone */ } unmount = null; }
+  if (s.view === 'signin') { if (shown !== 'signin') showSignIn(s.why); shown = 'signin'; return; }
+  shown = s.view;
+  if (s.view === 'starting') return show(line('Starting your wallet…'));
+  if (s.view === 'loading') return show(line('Getting your trade…'));
+  if (s.view === 'unavailable') return show(line(s.message, 'bad'));
+  if (s.view === 'mismatch') {
+    const other = el('button', 'quiet', 'Use another account'); other.id = 'sign-other'; other.onclick = () => flow.useAnother();
+    return show(line(s.message, 'bad'), s.who ? line(`You’re here as ${s.who}.`) : null, other);
+  }
+  if (s.view === 'nothing') return show(...tradeRows(s), line(s.message, s.kind));
+  if (s.view === 'ready' || s.view === 'sending') {
+    const side = s.trade.direction === 'skeet' ? 'skeet' : 'yeet', word = side === 'skeet' ? 'SKEET' : 'YEET';
+    const btn = el('button', side, s.view === 'sending' ? 'Sending…' : word); btn.id = 'sign-go';
+    btn.disabled = s.view === 'sending' || !s.canRetry;
+    const hint = holdable(btn, () => flow.approve(), word);
+    return show(...tradeRows(s), btn, s.view === 'sending' || !s.canRetry ? null : hint, s.message ? line(s.message, s.kind) : null,
+      el('p', 'fine', 'It goes out from your own wallet. YEET never holds your keys and only adds the network fee.'));
+  }
+  if (s.view === 'done') {
+    const end = line(s.message, s.kind); end.classList.add('end'); end.id = 'sign-done';
+    // The way back sits right under the end line; the optional step comes after it.
+    return body.replaceChildren(...tradeRows(s), end, ...(cfg.back ? [backLink()] : []), ...[linkBox(s)].filter(Boolean));
   }
 }
 
 async function main() {
   if (!cfg.tradeId) return show(line('Open this page from the YEET card in ChatGPT.'));
-  if (!cfg.appId || !window.YeetSigner) return show(line('Signing isn’t available right now. Try again in a minute.', 'bad'));
-  try { signer = window.YeetSigner.create({appId: cfg.appId}); } catch { return show(line('Signing isn’t available right now. Try again in a minute.', 'bad')); }
-  let user = null;
-  show(line('Starting your wallet…'));
-  // Privy unreachable or refusing this page: say so instead of waiting forever.
-  const deadline = new Promise((_, reject) => setTimeout(() => reject(Error('timeout')), START_MS));
-  try { user = await Promise.race([signer.session(), deadline]); } catch { return show(line('Your wallet couldn’t start in this browser. Reload to try again.', 'bad')); }
-  if (!user) await signIn();
-  show(line('Getting your trade…'));
-  await load();
+  if (!cfg.appId || !window.YeetSigner) return show(line('This page isn’t available right now. Try again in a minute.', 'bad'));
+  try { signer = window.YeetSigner.create({appId: cfg.appId}); } catch { return show(line('This page isn’t available right now. Try again in a minute.', 'bad')); }
+  const post = async (path, payload) => {
+    const r = await fetch(`/sign/api/${path}`, {method: 'POST', credentials: 'same-origin', headers: {'content-type': 'application/json'}, body: JSON.stringify(payload)});
+    let j = null; try { j = await r.json(); } catch { /* no body */ }
+    return {ok: r.ok, status: r.status, body: j};
+  };
+  flow = createSignFlow({signer, post, wr: {privyRpcBodies, signedFromWallets}, tradeId: cfg.tradeId, onChange: draw});
+  // Back from Google or Apple: the sign-in step finishes what it started (it reads the answer in the address), then
+  // the page reloads on the trade's own address.
+  if (fromProvider) { shown = 'signin'; return showSignIn(null); }
+  let fresh = false;
+  for (const s of stores()) { try { if (s.getItem(FRESH_KEY) === '1') fresh = true; s.removeItem(FRESH_KEY); } catch { /* no flag */ } }
+  forget();
+  await flow.begin({fresh});
 }
 main();

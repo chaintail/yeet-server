@@ -69,6 +69,13 @@ test('GET /sign: the page with its own policy, the hashed signer, the trade id; 
   assert.match(page, /<script nonce="[^"]+" type="module" src="\/sign\/sign\.js"><\/script>/);
   assert.match(page, new RegExp(`data-app-id="${APP}" data-trade-id="${TRADE}" data-back="https://chatgpt.com/c/abc"`));
   assert.match(page, /<title>Finish your trade · YEET<\/title>/);
+  // The sign-in step (Privy's own styles) reads the page's nonce from here, as on the connect screen.
+  assert.ok(page.includes(`<meta property="csp-nonce" content="${nonce}">`));
+  // Google and Apple are top-level navigations away and back: nothing in the policy names them, and the page may
+  // not be framed. The sign-in bundle and its chunks are same-origin scripts.
+  assert.match(csp, /script-src 'self' 'nonce-[^']+' https:\/\/challenges\.cloudflare\.com(;|$)/);
+  assert.doesNotMatch(csp, /navigate-to|google|apple/i);
+  assert.equal(r.headers.get('cross-origin-opener-policy'), 'same-origin');
   assert.doesNotMatch(page, /<script>(?!<\/script>)/, 'no inline script');
   assert.doesNotMatch(page.replace(/<[^>]+>/g, ' '), BANNED);
   // A bad trade id and a foreign return URL are dropped, never echoed.
@@ -82,21 +89,48 @@ test('GET /sign: the page with its own policy, the hashed signer, the trade id; 
   for (const v of ['http://chatgpt.com/', 'https://chatgpt.com.evil.example/', 'javascript:alert(1)', '', undefined]) assert.equal(returnUrl(v), null, String(v));
 });
 
-test('page assets: script, styles and the wallet-request contract module, same-origin', async () => {
-  for (const [path, type] of [['/sign/sign.js', /text\/javascript/], ['/sign/sign.css', /text\/css/], ['/sign/wallet-request.mjs', /text\/javascript/]]) {
+// The owner's rule for everything the person reads here: never sign, signing, signed or signature, and no "log in".
+const WORDS = /\bsign\w*|signature|log ?in/i;
+test('page assets: script, flow, styles and the wallet-request contract module, same-origin; the copy is product copy with none of the banned words', async () => {
+  let sentences = 0;
+  for (const [path, type] of [['/sign/sign.js', /text\/javascript/], ['/sign/flow.mjs', /text\/javascript/], ['/sign/sign.css', /text\/css/], ['/sign/wallet-request.mjs', /text\/javascript/]]) {
     const r = await fetch(BASE + path);
     assert.equal(r.status, 200, path); assert.match(r.headers.get('content-type'), type, path);
     assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
     const text = await r.text();
-    if (path === '/sign/sign.js') {
-      assert.match(text, /from '\/sign\/wallet-request\.mjs'/);
+    if (path === '/sign/sign.js' || path === '/sign/flow.mjs') {
       // Every sentence the page can show is product copy.
-      const copy = [...text.matchAll(/'([^'\n]*[a-z][^'\n]*\.)'/g)].map((m) => m[1]);
-      assert.ok(copy.length > 10);
-      for (const s of copy) assert.doesNotMatch(s, BANNED, s);
+      const copy = [...text.matchAll(/['`]([^'`\n]*[a-z][^'`\n]*[.…])['`]/g)].map((m) => m[1]);
+      sentences += copy.length;
+      for (const s of copy) { assert.doesNotMatch(s, BANNED, s); assert.doesNotMatch(s, WORDS, s); }
     }
+    if (path === '/sign/sign.js') {
+      assert.match(text, /from '\/sign\/wallet-request\.mjs'/); assert.match(text, /from '\/sign\/flow\.mjs'/);
+      // The sign-in step is the connect screen's bundle, loaded on demand; Google and Apple return to the bare /sign.
+      assert.match(text, /const SIGN_IN_BUNDLE = '\/account\/privy-login\/sign\.js'/);
+      assert.match(text, /redirectUrl: `\$\{location\.origin\}\/sign`/);
+      assert.match(text, /'Confirm it’s you to finish this trade\.'/);
+      // The money action is a press and hold, with the card's timing.
+      assert.match(text, /const HOLD_MS = 800\b/); assert.match(text, /holdable\(btn, \(\) => flow\.approve\(\), word\)/);
+      assert.doesNotMatch(text, /btn\.onclick = \(\) => flow\.approve/);
+    }
+    if (path === '/sign/flow.mjs') { assert.match(text, /done: 'Done\. Go back to ChatGPT\.'/); assert.doesNotMatch(text.replace(/^\s*\/\/.*$/gm, ''), /document\.|window\./, 'no DOM in the flow'); }
     if (path === '/sign/wallet-request.mjs') assert.match(text, /export function privyRpcBody/);
   }
+  assert.ok(sentences > 25, `${sentences} sentences checked`);
+  // The page's own shell and the refusals the server words itself.
+  const shell = (await (await fetch(`${BASE}/sign?trade_id=${TRADE}`)).text()).replace(/<[^>]+>/g, ' ');
+  assert.doesNotMatch(shell, WORDS);
+  coreAnswer = () => ({status: 409, body: {error: 'INVALID_ARGUMENT'}});
+  const refusals = [await post('/sign/api/requests', {trade_id: TRADE}), await post('/sign/api/requests', {trade_id: TRADE, privy_access_token: 'tok-new'}), await post('/sign/api/requests', {trade_id: TRADE, privy_access_token: 'tok-alice'}), await post('/sign/api/requests', {trade_id: 't_x', privy_access_token: 'tok-alice'})];
+  coreAnswer = () => ({status: 409, body: {error: 'SIGNATURE_REFUSED'}});
+  refusals.push(await post('/sign/api/signature', {trade_id: TRADE, leg: 0, attempt_id: 'a'.repeat(64), signed: 'AQID', privy_access_token: 'tok-alice'}));
+  const said = await Promise.all(refusals.map(async (x) => (await x.json()).message));
+  assert.deepEqual(said, ['Your session here ended. Confirm it’s you again.',
+    'This trade belongs to a different YEET account than the one you’re using here. Use the Google, Apple or email account you connected to ChatGPT with.',
+    'This trade belongs to a different YEET account than the one you’re using here. Use the Google, Apple or email account you connected to ChatGPT with.',
+    'Open this page from the YEET card in ChatGPT.', 'Your wallet’s answer wasn’t accepted. Nothing was sent.']);
+  for (const s of said) assert.doesNotMatch(s, WORDS, s);
 });
 
 test('API: only from this origin, only with a verified Privy token, only for the account linked to it', async () => {
@@ -166,8 +200,8 @@ test('a 3-leg Solana request (one transaction, one signature): legs and leg_summ
   const out = await (await post('/sign/api/signature', {...ok, leg: 0, attempt_id: req.attempt_id, signed: 'AQID'})).json();
   assert.deepEqual(out.legs.map((l) => l.send_status), ['signing', 'signing', 'signing'], 'every covered row advances from one submit');
   assert.deepEqual(calls.map((c) => c.body), [{leg: 0, attempt_id: req.attempt_id, signed: 'AQID'}]);
-  // The page script signs per request (legs ?? [leg]) and finds a row's request by its covered legs.
-  const js = await (await fetch(BASE + '/sign/sign.js')).text();
+  // The page's flow answers per request (legs ?? [leg]) and finds a row's request by its covered legs.
+  const js = await (await fetch(BASE + '/sign/flow.mjs')).text();
   assert.match(js, /const legsOf = \(r\) => Array\.isArray\(r\?\.legs\) \? r\.legs : \[r\?\.leg\]/);
   assert.match(js, /legsOf\(r\)\.includes\(leg\)/);
   assert.match(js, /api\('signature', \{leg: req\.leg, attempt_id: req\.attempt_id, signed\}\)/);
@@ -199,7 +233,7 @@ test('a 2-leg Base evm_7702 request (one batch): reaches the page intact; one 26
   const out = await (await post('/sign/api/signature', {...ok, leg: 0, attempt_id: req.attempt_id, signed})).json();
   assert.deepEqual(out.legs.map((l) => l.send_status), ['signing', 'signing'], 'both rows advance together');
   assert.deepEqual(calls.map((c) => c.body), [{leg: 0, attempt_id: req.attempt_id, signed}]);
-  const js = await (await fetch(BASE + '/sign/sign.js')).text();
+  const js = await (await fetch(BASE + '/sign/flow.mjs')).text();
   assert.match(js, /for \(const b of privyRpcBodies\(req\)\)/);
   assert.match(js, /signedFromWallets\(req, answers\)/);
   assert.match(js, /UNSUPPORTED_7702/);

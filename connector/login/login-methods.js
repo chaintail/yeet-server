@@ -42,3 +42,16 @@ export function introLine(methods) {
 
 /** Shown instead of any button when the app has no sign-in method turned on. */
 export const NO_METHOD_LINE = "Sign-in opens shortly.";
+
+/** What the trade page says when a Google or Apple account is not a YEET account (nothing is created there). */
+export const NO_ACCOUNT_LINE = "No YEET account uses that one. Use the account you connected to ChatGPT with.";
+/**
+ * A Google or Apple return that did not end in a session on the trade page, by Privy's error code (PrivyErrorCode in
+ * @privy-io/react-auth 3.51.4: user_does_not_exist when sign-up is off, oauth_user_denied when the person backed out).
+ * "" means: say nothing.
+ */
+export function oauthRefusal(code) {
+  if (code === "user_does_not_exist") return NO_ACCOUNT_LINE;
+  if (code === "oauth_user_denied") return "";
+  return "That did not finish. Try again.";
+}

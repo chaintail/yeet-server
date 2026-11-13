@@ -8,7 +8,7 @@ import path from 'node:path';
 process.env.STATE_DIR=mkdtempSync(path.join(tmpdir(),'yeet-terms-'));
 const {TERMS_VERSION,STATEMENTS,REQUIRED_IDS,TERMS_URL,PRIVACY_URL,termsObject,checkAcceptance,termsMode,termsPageUrl,termsOpen}=await import('./terms.mjs');
 const {acceptanceOf,recordAcceptance,referralOf,decideReferral,referralCode}=await import('./terms-store.mjs');
-const {maskEmail,loginFacts,createAccountLogin}=await import('./account-login.mjs');
+const {maskEmail,loginFacts,createAccountLogin,withCardAccount}=await import('./account-login.mjs');
 const {contract,zodSchema}=await import('../mcp/tool-contract.mjs');
 const {z}=await import('zod');
 const A='yeet-privy-terms-a',B='yeet-privy-terms-b';
@@ -116,4 +116,44 @@ test('the connected account for the device check: the code goes only to a linked
  assert.equal(await lookup('did:privy:down'),null,'a failed read is no answer, never an error');
  assert.equal(await lookup('not-a-did'),null);
  assert.equal(await createAccountLogin({env:{}})('did:privy:e'),null,'no Privy credentials: no answer');
+});
+
+test('an account without an email login is read again after a minute, and at once when the page says it linked one; with one it stays 10 minutes',async()=>{
+ const google={id:'did:privy:g',linked_accounts:[{type:'google_oauth',email:'gina@gmail.example'}]};
+ const linked={id:'did:privy:g',linked_accounts:[{type:'email',address:'gina@gmail.example'},{type:'google_oauth',email:'gina@gmail.example'}]};
+ let user=google,calls=0,t=0;
+ const lookup=createAccountLogin({api:{app:async()=>{calls++;return user}},now:()=>t});
+ assert.equal((await lookup('did:privy:g')).email,null);assert.equal((await lookup('did:privy:g')).google,true);assert.equal(calls,1,'cached');
+ t=59_000;await lookup('did:privy:g');assert.equal(calls,1);
+ // The person links an email on the YEET page: without the notice it is seen a minute later at most.
+ user=linked;t=61_000;
+ assert.equal((await lookup('did:privy:g')).email,'gina@gmail.example');assert.equal(calls,2);
+ t=61_000+9*60_000;await lookup('did:privy:g');assert.equal(calls,2,'an account with an email login is kept for 10 minutes');
+ // With the notice: at once.
+ const told=createAccountLogin({api:{app:async()=>{calls++;return user}},now:()=>0});
+ user=google;calls=0;
+ assert.equal((await told('did:privy:g')).email,null);
+ user=linked;told.forget('did:privy:g');
+ assert.equal((await told('did:privy:g')).masked,'g•••@g•••.example');assert.equal(calls,2);
+ told.forget('did:privy:unknown');
+});
+
+test('the basket answers carry the card-only account facts: the code for an email login, the YEET page for Google or Apple; no facts, no change',async()=>{
+ const users={'did:privy:e':{id:'did:privy:e',linked_accounts:[{type:'email',address:'luke@chaintail.xyz'}]},'did:privy:g':{id:'did:privy:g',linked_accounts:[{type:'google_oauth',email:'gina@gmail.example'}]}};
+ const lookup=createAccountLogin({api:{app:async(_m,p)=>{const u=users[p.split('/').at(-1)];if(!u)throw Error('down');return u}}});
+ const dids={'yeet-privy-e':'did:privy:e','yeet-privy-g':'did:privy:g','yeet-privy-down':'did:privy:down','yeet-dev':null};
+ const basket=withCardAccount({lookup:()=>lookup,didOf:ctx=>dids[ctx.accountId]});
+ const proposal={proposal_id:'p_abcdefghij0123456789',revision:1,confirm:{code:'c'.repeat(43)}};
+ const propose=basket(async(_e,_ctx,a)=>({...proposal,echo:a}));
+ assert.deepEqual(await propose(null,{accountId:'yeet-privy-e'},{x:1}),{...proposal,echo:{x:1},card_account:{user:'did:privy:e',email:'luke@chaintail.xyz',masked:'l•••@c•••.xyz',google:false,apple:false,wallets:[]}});
+ assert.deepEqual((await propose(null,{accountId:'yeet-privy-g'},{})).card_account,{user:'did:privy:g',email:null,masked:null,google:true,apple:false,wallets:[]});
+ // Privy did not answer, or the account has no Privy user (development): the answer as it was, so the card keeps its own step.
+ assert.deepEqual(await propose(null,{accountId:'yeet-privy-down'},{}),{...proposal,echo:{}});
+ assert.deepEqual(await propose(null,{accountId:'yeet-dev'},{}),{...proposal,echo:{}});
+ // A lookup that cannot even be made never fails the call; a refusal of the handler is passed on untouched.
+ const broken=withCardAccount({lookup:()=>{throw Error('no client')},didOf:()=>'did:privy:e'});
+ assert.deepEqual(await broken(async()=>proposal)(null,{accountId:'x'}),proposal);
+ const refused=Object.assign(Error('BALANCE_LOW'),{name:'TradeError',code:'BALANCE_LOW'});
+ await assert.rejects(basket(()=>{throw refused})(null,{accountId:'yeet-privy-e'}),e=>e===refused);
+ await assert.rejects(basket(async()=>{throw refused})(null,{accountId:'yeet-privy-g'}),e=>e===refused);
 });

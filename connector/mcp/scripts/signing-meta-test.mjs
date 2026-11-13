@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
-import {createMcpServer,SIGNER_TOOLS} from '../tool-registration.mjs';
+import {createMcpServer,SIGNER_TOOLS,ACCOUNT_META_KEY} from '../tool-registration.mjs';
 import {CARDS} from '../tool-contract.mjs';
 import {resourceMeta,CONFIRM_META_KEY} from '../widgets.mjs';
 import {SIGNER_META_KEY,SIGNING_VIEWS,signerAsset,signerMeta,signerMetaFromEnv,publicOrigin} from '#shared/signing.mjs';
@@ -121,4 +121,26 @@ test("results: _meta['yeet/signer'] on the overview, proposal and trade results 
  const c=new Client({name:'x',version:'1'});const [a,b]=InMemoryTransport.createLinkedPair();await failing.connect(a);await c.connect(b);
  try{const r=await c.callTool({name:'execute_trade',arguments:CALLS.execute_trade});assert.equal(r.isError,true);assert.equal(r._meta?.[SIGNER_META_KEY],undefined)}
  finally{await c.close();await failing.close()}
+});
+
+test('a basket answer with the account facts: they ride in card-only _meta["yeet/account"], never in what the model reads',async()=>{
+ const account={user:'did:privy:gina',email:null,masked:null,google:true,apple:false,wallets:[]};
+ const server=createMcpServer({token:{scope:allScopes.join(' ')},callCore:async route=>{
+  if(route==='/proposals'||route==='/proposals/skeet'||/\/quote$/.test(route))return {...proposal,confirm,card_account:account};
+  return core(route);
+ },env:ENV});
+ const client=new Client({name:'account-meta',version:'1'});const [a,b]=InMemoryTransport.createLinkedPair();await server.connect(a);await client.connect(b);
+ try{
+  for(const name of ['yeet_propose','yeet_quote','skeet_propose']){
+   const r=await client.callTool({name,arguments:CALLS[name]});
+   assert.equal(r.isError,undefined,`${name}: ${JSON.stringify(r.content)}`);
+   assert.deepEqual(r._meta[ACCOUNT_META_KEY],account,name);
+   assert.deepEqual(r._meta[CONFIRM_META_KEY],confirm,name);
+   assert.doesNotMatch(JSON.stringify([r.structuredContent,r.content]),/card_account|did:privy|yeet\/account/,`${name}: the account never reaches the model`);
+  }
+  // An answer without the facts (Privy did not answer): no key at all, the card keeps its own step.
+  const plain=await connect(ENV);
+  try{const r=await plain.client.callTool({name:'yeet_propose',arguments:CALLS.yeet_propose});assert.equal(r._meta[ACCOUNT_META_KEY],undefined)}
+  finally{await plain.close()}
+ }finally{await client.close();await server.close()}
 });
