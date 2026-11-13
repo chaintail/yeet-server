@@ -4,3 +4,4 @@
 **/*.env
 **/.env*
 **/secrets
+!connector/vendor/yeet-win/router/dist
