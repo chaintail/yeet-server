@@ -68,7 +68,7 @@ test('GET /sign: the page with its own policy, the hashed signer, the trade id; 
   assert.match(page, new RegExp(`<script nonce="${nonce.replace(/[+/=]/g, (c) => '\\' + c)}" src="${asset.path}"></script>`));
   assert.match(page, /<script nonce="[^"]+" type="module" src="\/sign\/sign\.js"><\/script>/);
   assert.match(page, new RegExp(`data-app-id="${APP}" data-trade-id="${TRADE}" data-back="https://chatgpt.com/c/abc"`));
-  assert.match(page, /<title>Sign your trade · YEET<\/title>/);
+  assert.match(page, /<title>Finish your trade · YEET<\/title>/);
   assert.doesNotMatch(page, /<script>(?!<\/script>)/, 'no inline script');
   assert.doesNotMatch(page.replace(/<[^>]+>/g, ' '), BANNED);
   // A bad trade id and a foreign return URL are dropped, never echoed.

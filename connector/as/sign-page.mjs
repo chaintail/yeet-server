@@ -38,7 +38,7 @@ const ASSETS = {
   // the card (vendored verbatim) and this page use.
   "/sign/wallet-request.mjs": ["text/javascript; charset=utf-8", read("../core/pipeline/wallet-request.mjs")],
 };
-export const SIGN_TITLE = "Sign your trade";
+export const SIGN_TITLE = "Finish your trade";
 /** Script headers: any card origin (a ChatGPT card host) may load it. */
 const SCRIPT_HEADERS = {
   "Content-Type": "text/javascript; charset=utf-8",

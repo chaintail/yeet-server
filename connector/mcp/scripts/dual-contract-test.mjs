@@ -67,6 +67,9 @@ test('model-visible catalog: titles and descriptions for every tool; data-not-in
  assert.match(instructions,/YEET/);
  assert.match(instructions,/YEET/);
  assert.doesNotMatch(instructions,/yeet me a win/i);
+ // The cards report to the chat themselves; the model answers a report briefly and calls nothing for it.
+ assert.match(instructions,/YEET/);
+ assert.match(instructions,/call no tool for it\./);
  assert.match(descriptions.yeet_overview,/How do I win\?/);assert.match(descriptions.yeet_overview,/@yeet/);
  assert.match(descriptions.execute_trade,/Only the card can call this/);
 });
