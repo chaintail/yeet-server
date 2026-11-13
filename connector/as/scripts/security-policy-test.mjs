@@ -7,7 +7,9 @@ import {
   refreshFamilyTTL,
   operatorClient,
   chatgptRedirect,
-  registrationRedirectProblem,
+  registrationRequest,
+  configuredRefreshWindow,
+  REFRESH_WINDOW_MAX,
   bindInteraction,
   rateLimiter,
 } from "../security-policy.mjs";
@@ -36,9 +38,22 @@ import {
   assert.ok(allow("a"), "new window");
 }
 assert.ok(chatgptRedirect("https://chatgpt.com/connector_platform_oauth_redirect"));
+assert.ok(chatgptRedirect("https://chatgpt.com/connector/oauth/AbC_12-x"));
 for (const uri of [
   undefined,
   "",
+  "https://chatgpt.com/",
+  "https://chatgpt.com/some/other/path",
+  "https://chatgpt.com/connector_platform_oauth_redirect/",
+  "https://chatgpt.com/connector_platform_oauth_redirect?x=1",
+  "https://chatgpt.com/connector_platform_oauth_redirect#x",
+  "https://CHATGPT.com/connector_platform_oauth_redirect",
+  "https://chatgpt.com:443/connector_platform_oauth_redirect",
+  "https://chatgpt.com/connector/oauth/",
+  "https://chatgpt.com/connector/oauth/a/b",
+  "https://chatgpt.com/connector/oauth/a?b=1",
+  "https://chatgpt.com/connector/oauth/a%2Fb",
+  "https://chatgpt.com/connector/oauth/" + "a".repeat(129),
   "https://attacker.example/cb",
   "https://chatgpt.com.attacker.example/cb",
   "https://attacker.example/https://chatgpt.com/",
@@ -88,6 +103,14 @@ assert.equal(refreshFamilyTTL(null, { iiat: now - 500 }), 100);
 assert.equal(refreshFamilyTTL(null, { iiat: now - 601 }), 0);
 assert.throws(() => refreshFamilyTTL(null, { iiat: now + 1 }));
 assert.throws(() => refreshFamilyTTL(null, {}));
+// The family window is absolute from the first refresh token (iiat), up to 7 days.
+assert.equal(REFRESH_WINDOW_MAX, 604800);
+assert.equal(configuredRefreshWindow("604800"), 604800);
+assert.equal(configuredRefreshWindow("14400"), 14400);
+assert.equal(configuredRefreshWindow(undefined), 600);
+for (const bad of ["604801", "599", "", "7d", "1e6"]) assert.throws(() => configuredRefreshWindow(bad), /refresh family window/, bad);
+assert.equal(refreshFamilyTTL(null, { iiat: now - 86400 }, 604800), 604800 - 86400);
+assert.equal(refreshFamilyTTL(null, { iiat: now - 604800 }, 604800), 0);
 console.log(
   "PASS eligibility, exact Origin, browser binding and absolute refresh family policy",
 );
@@ -117,23 +140,31 @@ console.log(
   "PASS explicit bounded Privy operator client, fixture gate, native mock default",
 );
 {
-  // Registration: every redirect URI must be on https://chatgpt.com.
-  const ok = { redirect_uris: ["https://chatgpt.com/connector_platform_oauth_redirect"] };
-  assert.equal(registrationRedirectProblem(ok), null);
-  assert.equal(registrationRedirectProblem({ redirect_uris: ["https://chatgpt.com/a", "https://chatgpt.com/b"] }), null);
+  // Registration: every redirect URI must be one of ChatGPT's documented connector redirect URIs, exactly.
+  const stable = "https://chatgpt.com/connector_platform_oauth_redirect";
+  const ok = registrationRequest({ redirect_uris: [stable], token_endpoint_auth_method: "none" });
+  assert.deepEqual(ok, { body: { redirect_uris: [stable], token_endpoint_auth_method: "none" } });
+  assert.ok(registrationRequest({ redirect_uris: [stable, "https://chatgpt.com/connector/oauth/cb1"] }).body);
+  // No method given: registered as a public client, never client_secret_basic.
+  assert.equal(registrationRequest({ redirect_uris: [stable] }).body.token_endpoint_auth_method, "none");
+  assert.equal(registrationRequest({ redirect_uris: [stable], token_endpoint_auth_method: "private_key_jwt" }).body.token_endpoint_auth_method, "private_key_jwt");
+  for (const method of ["client_secret_basic", "client_secret_post", "client_secret_jwt", "tls_client_auth", 7, null])
+    assert.equal(registrationRequest({ redirect_uris: [stable], token_endpoint_auth_method: method }).problem?.error, method === null ? undefined : "invalid_client_metadata", String(method));
   for (const uris of [
     ["https://evil.example/cb"],
     ["https://chatgpt.com.evil.example/cb"],
     ["http://localhost:3000/cb"],
     ["http://chatgpt.com/cb"],
     ["https://user:pw@chatgpt.com/cb"],
-    ["https://chatgpt.com/ok", "https://evil.example/cb"],
+    ["https://chatgpt.com/some/other/path"],
+    ["https://chatgpt.com/a", "https://chatgpt.com/b"],
+    [stable, "https://evil.example/cb"],
     [42],
     [],
-    "https://chatgpt.com/cb",
+    stable,
     undefined,
   ])
-    assert.equal(registrationRedirectProblem({ redirect_uris: uris })?.error, "invalid_redirect_uri", JSON.stringify(uris));
-  assert.equal(registrationRedirectProblem(undefined)?.error, "invalid_redirect_uri");
-  console.log("PASS registration accepts only https://chatgpt.com redirect URIs");
+    assert.equal(registrationRequest({ redirect_uris: uris }).problem?.error, "invalid_redirect_uri", JSON.stringify(uris));
+  assert.equal(registrationRequest(undefined).problem?.error, "invalid_redirect_uri");
+  console.log("PASS registration accepts only ChatGPT's exact redirect URIs and public or private_key_jwt clients");
 }

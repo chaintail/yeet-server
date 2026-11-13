@@ -10,6 +10,6 @@ export function credentials(){return '<label for="identity_token">Development id
 export function providerErrorPage(code){const c=/^[a-z_]{1,64}$/.test(String(code))?String(code):'invalid_request';return document('Connection refused',`<p>Only ChatGPT can connect to YEET. Start again from ChatGPT.</p><p class="details">Error code: ${html(c)}</p>`)}
 export const expiredAuthorizationBody = '<p>This authorization page expired or its sign-in session changed. Go back to ChatGPT and connect YEET again.</p>';
 export function renewableConsentCopy(window) {
-  const duration = (seconds) => seconds % 3600 === 0 ? `${seconds / 3600} hours` : seconds % 60 === 0 ? `${seconds / 60} minutes` : `${seconds} seconds`;
+  const duration = (seconds) => seconds % 86400 === 0 ? `${seconds / 86400} ${seconds === 86400 ? 'day' : 'days'}` : seconds % 3600 === 0 ? `${seconds / 3600} ${seconds === 3600 ? 'hour' : 'hours'}` : seconds % 60 === 0 ? `${seconds / 60} minutes` : `${seconds} seconds`;
   return `<label><input type="checkbox" name="renewable_consent" value="yes"> Let ChatGPT stay connected for up to ${duration(window)} without asking me again.</label>`;
 }

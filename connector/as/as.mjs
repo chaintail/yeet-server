@@ -32,9 +32,11 @@ import {
   requireFreshBinding,
   bindInteraction,
   chatgptRedirect,
-  registrationRedirectProblem,
+  registrationRequest,
+  CLIENT_AUTH_METHODS,
   rateLimiter,
 } from "./security-policy.mjs";
+import { inspectBody } from "./body-replay.mjs";
 import { SQLiteAdapter as Adapter } from "./adapter.mjs";
 import Provider, { errors } from "oidc-provider";
 import { resourceUserinfo } from "./userinfo.mjs";
@@ -100,6 +102,7 @@ if (!jwks) {
   };
   write("keys.json", jwks);
 }
+const INTERACTION_TTL = 600;
 const client = {
   client_id: "local-chatgpt-fixture",
   redirect_uris: ["http://127.0.0.1:38314/callback"],
@@ -164,15 +167,29 @@ const provider = new Provider(AS, {
   scopes: ["openid", "offline_access", ...issuableScopes],
   pkce: { required: () => true, methods: ["S256"] },
   revokeGrantPolicy: () => true,
+  // Discovery and client metadata: authorization code with PKCE and refresh tokens only (no implicit or hybrid
+  // response types). client_secret_basic stays for the two internal introspection clients above; discovery and
+  // registration offer external clients only CLIENT_AUTH_METHODS (see oauthSurface below).
+  responseTypes: ["code"],
+  clientAuthMethods: [...CLIENT_AUTH_METHODS, "client_secret_basic"],
   ttl: {
     AccessToken: Number(process.env.ACCESS_TTL || 5),
     AuthorizationCode: 60,
+    IdToken: Number(process.env.ACCESS_TTL || 5),
+    // An authorization (sign-in, consent, referral) has 10 minutes, the same as its browser binding.
+    Interaction: INTERACTION_TTL,
+    // The provider's browser session matches the YEET sign-in session (1 hour).
+    Session: 3600,
+    // A grant outlives the longest refresh family that can be issued under it, plus the authorization itself.
+    Grant: () => configuredRefreshWindow() + INTERACTION_TTL + 60,
     RefreshToken: (ctx, token) =>
       refreshFamilyTTL(ctx, token, consentRefreshWindow(token)),
   },
   rotateRefreshToken: () => true,
   features: {
     devInteractions: { enabled: false },
+    // Nothing signs out through the provider (YEET sign-out is /account/logout), so there is no end-session page.
+    rpInitiatedLogout: { enabled: false },
     revocation: { enabled: true },
     introspection: {
       enabled: true,
@@ -217,6 +234,20 @@ const provider = new Provider(AS, {
               headers: { location: "https://127.0.0.1/private" },
             });
           if (name === "/oversized") return new Response("x".repeat(100000));
+          // ChatGPT's published document (https://chatgpt.com/oauth/client.json, 2026-11-12), moved to this host.
+          if (name === "/chatgpt")
+            return Response.json({
+              client_id: String(url),
+              client_uri: "https://chatgpt.com/",
+              redirect_uris: ["https://chatgpt.com/connector_platform_oauth_redirect"],
+              token_endpoint_auth_method: "private_key_jwt",
+              token_endpoint_auth_methods_supported: ["none", "private_key_jwt"],
+              grant_types: ["authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:jwt-bearer"],
+              response_types: ["code"],
+              client_name: "ChatGPT",
+              token_endpoint_auth_signing_alg: "RS256",
+              jwks_uri: "https://chatgpt.com/oauth/jwks.json",
+            });
           return Response.json({
             ...client,
             client_id: String(url),
@@ -234,6 +265,19 @@ provider.on("userinfo.error", (ctx, error) =>
   diagnostic("oauth_userinfo_rejected", { error_code: error?.error, status: ctx.status }),
 );
 provider.on("grant.success", observeToken);
+// A registered client that redeems an authorization code is kept; one that never does expires (adapter.mjs).
+provider.on("grant.success", (ctx) => {
+  if (ctx.oidc?.params?.grant_type === "authorization_code" && ctx.oidc.client)
+    Adapter.keepClient(ctx.oidc.client.clientId);
+});
+// Discovery lists the token endpoint methods external clients can use; the internal introspection clients'
+// client_secret_basic is not offered to anyone else.
+const DISCOVERY = new Set(["/.well-known/openid-configuration", "/.well-known/oauth-authorization-server"]);
+provider.use(async (ctx, next) => {
+  await next();
+  if (DISCOVERY.has(ctx.path) && ctx.status === 200 && ctx.body && typeof ctx.body === "object")
+    ctx.body.token_endpoint_auth_methods_supported = [...CLIENT_AUTH_METHODS];
+});
 provider.on("grant.error", (ctx) =>
   diagnostic("oauth_token_rejected", {
     grant_type: ["authorization_code", "refresh_token"].includes(
@@ -299,15 +343,25 @@ if (PUBLIC) {
   app.use("/reg", limit(20));
   app.use("/auth", limit(60));
 }
-app.use(express.urlencoded({ extended: false, limit: "32kb" }));
-app.use(express.json({ limit: "32kb" }));
-// Registration accepts only ChatGPT redirect URIs (same allowlist as the interaction check). Client id metadata
-// documents (https://chatgpt.com/oauth/client.json) never come through here and keep working.
-app.post("/reg", (q, r, next) => {
-  const problem = registrationRedirectProblem(q.body);
-  if (problem) return r.status(400).set("Cache-Control", "no-store").json(problem);
-  next();
-});
+// Body parsers run only on this server's own forms; oidc-provider reads its routes' bodies itself.
+const formBody = express.urlencoded({ extended: false, limit: "32kb" });
+// Registration accepts only ChatGPT's redirect URIs (same check as the interaction step) and public or
+// private_key_jwt clients. Client id metadata documents (https://chatgpt.com/oauth/client.json) never come through
+// here and keep working.
+app.post(
+  "/reg",
+  inspectBody("json", (body) => {
+    const out = registrationRequest(body);
+    return out.problem ? { reject: { status: 400, body: out.problem } } : { body: out.body };
+  }),
+);
+// Compatibility: the provider otherwise rejects PRM scope growth on refresh.
+app.post(
+  "/token",
+  inspectBody("form", (body) =>
+    body?.grant_type === "refresh_token" && "scope" in body ? { body: ignoreRefreshScope(body) } : undefined,
+  ),
+);
 // Resource-bound access tokens (aud=RESOURCE) cannot pass oidc-provider's userinfo; see userinfo.mjs.
 app.all("/me", resourceUserinfo({
   resource: RESOURCE,
@@ -316,8 +370,6 @@ app.all("/me", resourceUserinfo({
   findClient: (id) => provider.Client.find(id),
   findAccount: (id, token) => findAccount({ oidc: { client: { clientId: token.clientId } } }, id, token),
 }));
-// Compatibility: the provider otherwise rejects PRM scope growth on refresh.
-app.use("/token", (q,_r,next) => { ignoreRefreshScope(q.body); next(); });
 app.use("/auth", (q, _r, next) => {
   if (q.method === "GET") observeAuthorization(q, RESOURCE);
   next();
@@ -431,7 +483,7 @@ app.get("/account/login", (q, r) => {
     ),
   );
 });
-app.post("/account/login", async (q, r) => {
+app.post("/account/login", formBody, async (q, r) => {
   try {
     const c = q.headers.cookie
       ?.split(";")
@@ -575,7 +627,7 @@ app.get("/interaction/:uid", async (q, r, next) => {
     interactionError(e, r, next);
   }
 });
-app.post("/interaction/:uid", async (q, r, next) => {
+app.post("/interaction/:uid", formBody, async (q, r, next) => {
   try {
     const d = await provider.interactionDetails(q, r);
     if (d.uid !== q.params.uid) return r.sendStatus(403);

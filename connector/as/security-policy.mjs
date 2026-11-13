@@ -19,27 +19,38 @@ export function operatorAccountExists(policy) {
 export function exactOrigin(origin, base) {
   return origin === new URL(base).origin;
 }
-// Public deployments only authorize ChatGPT: the redirect must be https://chatgpt.com (registration and CIMD are
-// open, and the consent page speaks of ChatGPT).
+// Public deployments only authorize ChatGPT. Redirect URIs are compared as exact strings against the ones OpenAI
+// documents for connectors (developers.openai.com/apps-sdk/build/auth, "Redirect URIs"): the stable
+// https://chatgpt.com/connector_platform_oauth_redirect, which ChatGPT uses with servers that support RFC 9207 issuer
+// identification (this one does), and the callback-ID form https://chatgpt.com/connector/oauth/{callback_id} that it
+// uses with other servers. ChatGPT's client metadata document (https://chatgpt.com/oauth/client.json) lists only the
+// stable URI.
 export const CHATGPT_ORIGIN = "https://chatgpt.com";
+export const CHATGPT_REDIRECT_URI = "https://chatgpt.com/connector_platform_oauth_redirect";
+const CHATGPT_CALLBACK_REDIRECT = /^https:\/\/chatgpt\.com\/connector\/oauth\/[A-Za-z0-9_-]{1,128}$/;
 export function chatgptRedirect(uri) {
-  try {
-    const u = new URL(uri);
-    return u.origin === CHATGPT_ORIGIN && !u.username && !u.password;
-  } catch {
-    return false;
-  }
+  return typeof uri === "string" && (uri === CHATGPT_REDIRECT_URI || CHATGPT_CALLBACK_REDIRECT.test(uri));
 }
-// Dynamic registration (POST /reg) stores a client only when every redirect_uris entry passes chatgptRedirect, so
-// nobody can fill the sign-in server's state with clients that the authorization step would refuse anyway.
-// Returns null when the registration may go on, otherwise the OAuth error answer.
-export function registrationRedirectProblem(body) {
+// Token endpoint authentication a registered client may ask for: what ChatGPT's metadata lists (none for PKCE
+// public clients, private_key_jwt for signed assertions). Shared-secret methods are kept for the two internal
+// introspection clients only and are never handed to a registered client.
+export const CLIENT_AUTH_METHODS = ["none", "private_key_jwt"];
+// Dynamic registration (POST /reg) stores a client only when every redirect_uris entry passes chatgptRedirect and
+// its token endpoint authentication is one of CLIENT_AUTH_METHODS, so nobody can fill the sign-in server's state with
+// clients that the authorization step would refuse anyway. A request without token_endpoint_auth_method is
+// registered as a public client ("none"): the RFC 7591 default (client_secret_basic) is not offered, and the
+// registration answer tells the client which method it got.
+// Returns { problem } with the OAuth error answer, or { body } with the registration to store.
+export function registrationRequest(body) {
   const uris = body?.redirect_uris;
   if (!Array.isArray(uris) || uris.length === 0 || uris.length > 10)
-    return { error: "invalid_redirect_uri", error_description: "redirect_uris must list ChatGPT redirect URIs" };
-  if (!uris.every((u) => typeof u === "string" && chatgptRedirect(u)))
-    return { error: "invalid_redirect_uri", error_description: "only https://chatgpt.com redirect URIs can be registered" };
-  return null;
+    return { problem: { error: "invalid_redirect_uri", error_description: "redirect_uris must list ChatGPT redirect URIs" } };
+  if (!uris.every(chatgptRedirect))
+    return { problem: { error: "invalid_redirect_uri", error_description: "only ChatGPT's connector redirect URIs can be registered" } };
+  const method = body.token_endpoint_auth_method ?? "none";
+  if (!CLIENT_AUTH_METHODS.includes(method))
+    return { problem: { error: "invalid_client_metadata", error_description: "token_endpoint_auth_method must be none or private_key_jwt" } };
+  return { body: { ...body, token_endpoint_auth_method: method } };
 }
 export function sameOwner(existing, id) {
   return !existing || existing.id === id;
@@ -52,9 +63,15 @@ export function boundBrowser(binding, session, account) {
     sameOwner(session, account)
   );
 }
+// REFRESH_FAMILY_TTL is the absolute lifetime of one refresh token family: oidc-provider carries the first refresh
+// token's issue time (iiat) through every rotation, and refreshFamilyTTL below gives each rotated token only what is
+// left of iiat + window. Using the connection does not extend it; when it runs out, ChatGPT has to connect again.
+// Upper bound: 7 days. Rotation with reuse detection, the per-refresh consent, grant and eligibility checks, and the
+// 5-minute access tokens stay in force for the whole window.
+export const REFRESH_WINDOW_MAX = 7 * 24 * 3600;
 export function configuredRefreshWindow(value = process.env.REFRESH_FAMILY_TTL) {
   const seconds = value === undefined ? 600 : Number(value);
-  if (!Number.isSafeInteger(seconds) || seconds < 600 || seconds > 14400)
+  if (!Number.isSafeInteger(seconds) || seconds < 600 || seconds > REFRESH_WINDOW_MAX)
     throw Error("Invalid refresh family window");
   return seconds;
 }

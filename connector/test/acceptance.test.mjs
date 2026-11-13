@@ -21,6 +21,11 @@ Object.assign(process.env,{
  ...Object.fromEntries(Object.entries(PORTS).map(([k,v])=>[k,String(v)])),
 });
 for(const name of ['PUBLIC_MODE','PRIVY_LOGIN','MOCK_PASSWORD_LOGIN','PUBLIC_BASE_URL','COOKIE_SECURE','TRUST_PROXY'])delete process.env[name];
+// https://cimd.test/<name> answers with fixture client metadata documents (as.mjs, TEST only).
+process.env.CIMD_TEST_FIXTURES='1';
+// oidc-provider's notices about defaults it wants changed, and its warning about a body parsed upstream.
+const providerNotices=[];
+for(const level of ['info','warn']){const orig=console[level];console[level]=(m,...rest)=>{if(String(m).includes('oidc-provider'))providerNotices.push(String(m));orig(m,...rest)}}
 const core=await import('../core/core.mjs');
 const as=await import('../as/as.mjs');
 const connector=await import('../mcp/mcp.mjs');
@@ -70,7 +75,7 @@ test('registration stores only ChatGPT clients; other redirect hosts get 400 and
  const reg=(redirect_uris)=>fetch(AS+'/reg',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({redirect_uris,token_endpoint_auth_method:'none',grant_types:['authorization_code','refresh_token'],response_types:['code'],application_type:'web'})});
  const good=await reg(['https://chatgpt.com/connector_platform_oauth_redirect']);
  assert.equal(good.status,201);const c=await good.json();assert.ok(c.client_id);
- for(const uris of [['https://evil.example/cb'],['https://chatgpt.com.evil.example/cb'],['http://localhost:3000/cb'],['https://chatgpt.com/ok','https://evil.example/cb']]){
+ for(const uris of [['https://evil.example/cb'],['https://chatgpt.com.evil.example/cb'],['http://localhost:3000/cb'],['https://chatgpt.com/ok','https://evil.example/cb'],['https://chatgpt.com/some/other/path']]){
   const r=await reg(uris);assert.equal(r.status,400,JSON.stringify(uris));assert.equal((await r.json()).error,'invalid_redirect_uri');
  }
  const r=await fetch(AS+'/reg',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:'redirect_uris=https%3A%2F%2Fevil.example%2Fcb'});
@@ -118,18 +123,17 @@ test('sign-in pages use yeet cookies and YEET titles; identity config is off wit
 
 /** Signs in (development identity), consents to every scope and returns the token answer. */
 let signedIn;
-async function signIn(){
+async function signIn({clientId='local-chatgpt-fixture',redirect='http://127.0.0.1:38314/callback',identity='DEV:did:privy:acceptance-alice',prompt}={}){
  const cookies=jar(),verifier=randomBytes(32).toString('base64url');
  const challenge=createHash('sha256').update(verifier).digest('base64url');
- const redirect='http://127.0.0.1:38314/callback';
  const auth=new URL(AS+'/auth');
- auth.search=new URLSearchParams({client_id:'local-chatgpt-fixture',response_type:'code',redirect_uri:redirect,code_challenge:challenge,code_challenge_method:'S256',scope:SCOPES.join(' '),resource:ORIGIN,state:'s1'});
+ auth.search=new URLSearchParams({client_id:clientId,response_type:'code',redirect_uri:redirect,code_challenge:challenge,code_challenge_method:'S256',scope:SCOPES.join(' '),resource:ORIGIN,state:'s1',...(prompt?{prompt}:{})});
  const step=async(url,init={})=>{const r=await fetch(local(url),{redirect:'manual',...init,headers:{cookie:cookies.header(),...init.headers}});cookies.add(r);return r};
  const form=(body)=>({method:'POST',headers:{'content-type':'application/x-www-form-urlencoded',origin:ORIGIN},body:new URLSearchParams(body)});
  let r=await step(auth.href);assert.equal(r.status,303);
  // Login: the development identity stands in for a verified Privy token; core creates the account on first sign-in.
  let page=r.headers.get('location');let d=await (await step(page)).json();assert.equal(d.prompt,'login');assert.equal(d.identity,'YEET');
- r=await step(page,form({csrf:d.csrf,identity_token:'DEV:did:privy:acceptance-alice'}));assert.equal(r.status,303);
+ r=await step(page,form({csrf:d.csrf,identity_token:identity}));assert.equal(r.status,303);
  r=await step(r.headers.get('location'));assert.equal(r.status,303);
  page=r.headers.get('location');d=await (await step(page)).json();assert.equal(d.prompt,'consent');
  assert.deepEqual(d.consent_selection,{trade_requested:true,requires_confirm:true});
@@ -140,7 +144,7 @@ async function signIn(){
  r=await step(r.headers.get('location'));assert.equal(r.status,303);
  const callback=new URL(r.headers.get('location'));assert.equal(callback.origin+callback.pathname,redirect);
  const code=callback.searchParams.get('code');assert.ok(code);
- const token=await (await fetch(AS+'/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',code,code_verifier:verifier,redirect_uri:redirect,client_id:'local-chatgpt-fixture',resource:ORIGIN})})).json();
+ const token=await (await fetch(AS+'/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',code,code_verifier:verifier,redirect_uri:redirect,client_id:clientId,resource:ORIGIN})})).json();
  assert.ok(token.access_token,JSON.stringify(Object.keys(token)));
  assert.deepEqual(token.scope.split(' ').sort(),['yeet:read','yeet:trade','yeet:write']);
  return token;
@@ -218,4 +222,67 @@ test('add funds: sign-in carries only the fund return target; /fund is off witho
  const csrf=(await page('/account/login?next=fund')).match(/name="csrf" value="([0-9a-f]+)"/)[1];
  const r=await fetch(AS+'/account/login',{method:'POST',redirect:'manual',headers:{cookie:cookies.header(),origin:ORIGIN,'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf,next:'fund',identity_token:'DEV:did:privy:acceptance-fund'})});
  assert.equal(r.status,302);assert.equal(r.headers.get('location'),'/fund');
+});
+
+const STABLE='https://chatgpt.com/connector_platform_oauth_redirect';
+const register=async(extra={})=>{const r=await fetch(AS+'/reg',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({redirect_uris:[STABLE],response_types:['code'],grant_types:['authorization_code','refresh_token'],application_type:'web',...extra})});return {status:r.status,body:await r.json()}};
+const authorize=(clientId,redirect=STABLE)=>fetch(AS+'/auth?'+new URLSearchParams({client_id:clientId,response_type:'code',redirect_uri:redirect,scope:SCOPES.join(' '),resource:ORIGIN,code_challenge:'x'.repeat(43),code_challenge_method:'S256',state:'s'}),{redirect:'manual'});
+async function clientRow(id){const {DatabaseSync}=await import('node:sqlite');const db=new DatabaseSync(join(state,'oauth.sqlite'),{readOnly:true});try{return db.prepare("SELECT expires_at FROM models WHERE model='Client' AND id=?").get(id)}finally{db.close()}}
+
+test('discovery advertises only what ChatGPT uses: code + refresh, none and private_key_jwt, no end-session',async()=>{
+ for(const path of ['/.well-known/oauth-authorization-server','/.well-known/openid-configuration']){
+  const m=await (await fetch(AS+path)).json();
+  assert.deepEqual(m.grant_types_supported.sort(),['authorization_code','refresh_token'],path);
+  assert.deepEqual(m.response_types_supported,['code'],path);
+  assert.deepEqual(m.token_endpoint_auth_methods_supported,['none','private_key_jwt'],path);
+  assert.ok(!m.token_endpoint_auth_signing_alg_values_supported?.some(a=>a.startsWith('HS')),path);
+  assert.equal(m.end_session_endpoint,undefined,path);
+  assert.equal(m.authorization_response_iss_parameter_supported,true,path);
+ }
+ assert.equal((await fetch(AS+'/session/end')).status,404);
+ assert.equal((await fetch(AS+'/session/end',{method:'POST'})).status,404);
+});
+
+test("ChatGPT's client metadata document (verbatim shape, private_key_jwt, jwt-bearer listed) still reaches sign-in",async()=>{
+ const r=await authorize('https://cimd.test/chatgpt');
+ assert.equal(r.status,303,await r.clone().text());
+ const page=new URL(r.headers.get('location'),ORIGIN);assert.match(page.pathname,/^\/interaction\//);
+ const d=await (await fetch(AS+page.pathname,{headers:{cookie:r.headers.getSetCookie().map(c=>c.split(';')[0]).join('; ')}})).json();
+ assert.equal(d.prompt,'login');assert.equal(d.client_auth_method,'private_key_jwt');
+});
+
+test('registration: public client by default, shared-secret methods refused, no secret issued',async()=>{
+ const plain=await register();assert.equal(plain.status,201);
+ assert.equal(plain.body.token_endpoint_auth_method,'none');assert.equal(plain.body.client_secret,undefined);
+ for(const method of ['client_secret_basic','client_secret_post','client_secret_jwt']){
+  const r=await register({token_endpoint_auth_method:method});assert.equal(r.status,400,method);assert.equal(r.body.error,'invalid_client_metadata',method);
+ }
+ const implicit=await register({response_types:['id_token'],grant_types:['implicit']});assert.equal(implicit.status,400);
+ const cb=await register({redirect_uris:['https://chatgpt.com/connector/oauth/cb_1-2']});assert.equal(cb.status,201);
+});
+
+test('a registered client that never completes an authorization expires after 1 hour; one that does is kept',async()=>{
+ const {PENDING_CLIENT_TTL}=await import('../as/adapter.mjs');assert.equal(PENDING_CLIENT_TTL,3600);
+ const idle=(await register()).body.client_id;
+ const row=await clientRow(idle);assert.ok(Math.abs(row.expires_at-(Date.now()+3600000))<60000,JSON.stringify(row));
+ assert.equal((await authorize(idle)).status,303);
+ // An hour later: the client is gone and the authorization request is refused.
+ {const {DatabaseSync}=await import('node:sqlite');const db=new DatabaseSync(join(state,'oauth.sqlite'));db.prepare("UPDATE models SET expires_at=? WHERE model='Client' AND id=?").run(Date.now()-1,idle);db.close()}
+ const gone=await authorize(idle);assert.equal(gone.status,400);assert.match(await gone.text(),/Error code: invalid_client/);
+ // The next registration deletes the expired row.
+ const used=(await register()).body.client_id;
+ assert.equal(await clientRow(idle),undefined);
+ // A client that redeems a code is kept for good. prompt=consent makes the provider honour offline_access for a
+ // registered client, so this also checks a refresh that carries ChatGPT's scope parameter through /token.
+ const tok=await signIn({clientId:used,redirect:STABLE,identity:'DEV:did:privy:acceptance-dcr',prompt:'consent'});
+ assert.equal((await clientRow(used)).expires_at,null);
+ assert.ok(tok.refresh_token);
+ const refreshed=await fetch(AS+'/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'refresh_token',refresh_token:tok.refresh_token,client_id:used,resource:ORIGIN,scope:[...SCOPES,'yeet:unlisted'].join(' ')})});
+ const body=await refreshed.json();assert.equal(refreshed.status,200,JSON.stringify(body));assert.ok(body.access_token);
+});
+
+test('no oidc-provider default TTL notices and no upstream-parsed body warning',async()=>{
+ await token();
+ const bad=providerNotices.filter(m=>/ttl\.(Interaction|Session|Grant|IdToken|RefreshToken)|already parsed request body|rpInitiatedLogout/.test(m));
+ assert.deepEqual(bad,[]);
 });
