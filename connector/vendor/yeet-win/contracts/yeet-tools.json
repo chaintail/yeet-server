@@ -432,109 +432,286 @@
                 "verifyingContract",
                 "salt"
               ],
-              "additionalProperties": false
+              "additionalProperties": false,
+              "description": "The Calibur EIP-712 domain of the person's own wallet (verifyingContract is the wallet)."
             },
             "types": {
               "type": "object",
               "properties": {
                 "EIP712Domain": {
                   "type": "array",
-                  "minItems": 1,
-                  "maxItems": 8,
+                  "minItems": 5,
+                  "maxItems": 5,
                   "items": {
-                    "type": "object",
-                    "properties": {
-                      "name": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 64
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "const": "name"
+                          },
+                          "type": {
+                            "const": "string"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "type"
+                        ],
+                        "additionalProperties": false
                       },
-                      "type": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 64
+                      {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "const": "version"
+                          },
+                          "type": {
+                            "const": "string"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "type"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "const": "chainId"
+                          },
+                          "type": {
+                            "const": "uint256"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "type"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "const": "verifyingContract"
+                          },
+                          "type": {
+                            "const": "address"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "type"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "const": "salt"
+                          },
+                          "type": {
+                            "const": "bytes32"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "type"
+                        ],
+                        "additionalProperties": false
                       }
-                    },
-                    "required": [
-                      "name",
-                      "type"
-                    ],
-                    "additionalProperties": false
+                    ]
                   }
                 },
                 "SignedBatchedCall": {
                   "type": "array",
-                  "minItems": 1,
-                  "maxItems": 8,
+                  "minItems": 5,
+                  "maxItems": 5,
                   "items": {
-                    "type": "object",
-                    "properties": {
-                      "name": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 64
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "const": "batchedCall"
+                          },
+                          "type": {
+                            "const": "BatchedCall"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "type"
+                        ],
+                        "additionalProperties": false
                       },
-                      "type": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 64
+                      {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "const": "nonce"
+                          },
+                          "type": {
+                            "const": "uint256"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "type"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "const": "keyHash"
+                          },
+                          "type": {
+                            "const": "bytes32"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "type"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "const": "executor"
+                          },
+                          "type": {
+                            "const": "address"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "type"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "const": "deadline"
+                          },
+                          "type": {
+                            "const": "uint256"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "type"
+                        ],
+                        "additionalProperties": false
                       }
-                    },
-                    "required": [
-                      "name",
-                      "type"
-                    ],
-                    "additionalProperties": false
+                    ]
                   }
                 },
                 "BatchedCall": {
                   "type": "array",
-                  "minItems": 1,
-                  "maxItems": 8,
+                  "minItems": 2,
+                  "maxItems": 2,
                   "items": {
-                    "type": "object",
-                    "properties": {
-                      "name": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 64
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "const": "calls"
+                          },
+                          "type": {
+                            "const": "Call[]"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "type"
+                        ],
+                        "additionalProperties": false
                       },
-                      "type": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 64
+                      {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "const": "revertOnFailure"
+                          },
+                          "type": {
+                            "const": "bool"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "type"
+                        ],
+                        "additionalProperties": false
                       }
-                    },
-                    "required": [
-                      "name",
-                      "type"
-                    ],
-                    "additionalProperties": false
+                    ]
                   }
                 },
                 "Call": {
                   "type": "array",
-                  "minItems": 1,
-                  "maxItems": 8,
+                  "minItems": 3,
+                  "maxItems": 3,
                   "items": {
-                    "type": "object",
-                    "properties": {
-                      "name": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 64
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "const": "to"
+                          },
+                          "type": {
+                            "const": "address"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "type"
+                        ],
+                        "additionalProperties": false
                       },
-                      "type": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 64
+                      {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "const": "value"
+                          },
+                          "type": {
+                            "const": "uint256"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "type"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "const": "data"
+                          },
+                          "type": {
+                            "const": "bytes"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "type"
+                        ],
+                        "additionalProperties": false
                       }
-                    },
-                    "required": [
-                      "name",
-                      "type"
-                    ],
-                    "additionalProperties": false
+                    ]
                   }
                 }
               },
@@ -567,7 +744,8 @@
                             "pattern": "^0x[0-9a-fA-F]{40}$"
                           },
                           "value": {
-                            "const": "0"
+                            "type": "string",
+                            "pattern": "^(0|[1-9][0-9]{0,77})$"
                           },
                           "data": {
                             "type": "string",
@@ -580,10 +758,11 @@
                           "data"
                         ],
                         "additionalProperties": false
-                      }
+                      },
+                      "description": "One USDC transfer per leg, in leg order."
                     },
                     "revertOnFailure": {
-                      "const": true
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -597,15 +776,18 @@
                   "pattern": "^(0|[1-9][0-9]{0,77})$"
                 },
                 "keyHash": {
-                  "const": "0x0000000000000000000000000000000000000000000000000000000000000000"
+                  "type": "string",
+                  "pattern": "^0x[0-9a-fA-F]{64}$"
                 },
                 "executor": {
                   "type": "string",
-                  "pattern": "^0x[0-9a-fA-F]{40}$"
+                  "pattern": "^0x[0-9a-fA-F]{40}$",
+                  "description": "YEET's gas wallet: the only sender that can run this batch."
                 },
                 "deadline": {
                   "type": "string",
-                  "pattern": "^(0|[1-9][0-9]{0,77})$"
+                  "pattern": "^(0|[1-9][0-9]{0,77})$",
+                  "description": "Unix seconds; the batch cannot run after it."
                 }
               },
               "required": [
@@ -624,7 +806,8 @@
             "primary_type",
             "message"
           ],
-          "additionalProperties": false
+          "additionalProperties": false,
+          "description": "Passed to the wallet's eth_signTypedData_v4 unchanged."
         },
         "authorization": {
           "anyOf": [
@@ -653,7 +836,8 @@
               ],
               "additionalProperties": false
             }
-          ]
+          ],
+          "description": "Set only while the wallet is not yet delegated to Calibur: the one-time EIP-7702 authorization to sign."
         }
       },
       "required": [
@@ -662,7 +846,7 @@
         "authorization"
       ],
       "additionalProperties": false,
-      "description": "A Uniswap Calibur batch for the person to sign with eth_signTypedData_v4 (sign only): one USDC transfer per leg, sent and paid by YEET. When authorization is set, first sign that EIP-7702 authorization (eth_sign7702Authorization)."
+      "description": "A Base basket as one Calibur batch (EIP-7702): the person signs the batch, plus the authorization when one is set. YEET's gas wallet sends it and pays the fee."
     },
     "sign_request": {
       "type": "object",
@@ -2557,7 +2741,7 @@
   "x-yeet-scopes": {
     "yeet:read": "See wallets, coins, trades and XP.",
     "yeet:write": "Create quotes and spin.",
-    "yeet:trade": "Send USDC or coins from the YEET wallet, only after a tap in the card."
+    "yeet:trade": "Trade with your own wallet's signature, inside the card."
   },
   "x-yeet-errors": {
     "INVALID_ARGUMENT": {

@@ -297,9 +297,7 @@ html[data-theme=light]{background:#fff}
 .kv dt{color:var(--yc-mute)}
 .kv dd{margin:0;font:700 15px var(--mono);text-align:right}
 .gets{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
-.lock{display:flex;align-items:center;gap:8px;font:600 12.5px var(--mono);color:var(--yc-mute);margin:0 0 12px}
-.lock svg{width:20px;height:20px}
-.lock circle.p{stroke:var(--yc-accent)}
+.est-note{font-size:12.5px;line-height:1.35;color:var(--yc-mute);margin:0 2px 12px}
 .done-h{font-weight:800;font-stretch:75%;font-size:64px;line-height:.85;margin:4px 0 6px;letter-spacing:-.01em}
 .done-h .shim{--s1:var(--yc-fg);--s2:var(--volt);--sd:1.6s}
 .gpt[data-theme=light] .done-h .shim{--s2:var(--ultra)}
@@ -1096,7 +1094,9 @@ const END={success:'done',partial:'done',refunded:'failed',failed:'failed'};
 const OUT=new Set(['failed','not_sent']);
 const SENT=new Set(['signing','awaiting_gas','sent']);
 const HEX64=/^[0-9a-f]{64}$/;
-const sameAddress=(req,a)=>typeof a==='string'&&typeof req.wallet==='string'&&(req.kind==='evm_tx'?a.toLowerCase()===req.wallet.toLowerCase():a===req.wallet);
+const sameAddress=(req,a)=>typeof a==='string'&&typeof req.wallet==='string'&&(req.chain==='base'||req.kind==='evm_tx'?a.toLowerCase()===req.wallet.toLowerCase():a===req.wallet);
+const KINDS=new Set(['solana_tx','evm_tx','evm_7702']);
+const RESIGN=new Set(['SIGN_EXPIRED','AUTH_NONCE_STALE']);
 /** Every leg one request pays: `legs` (one Solana transaction for several coins), else just its own leg. */
 const legsOf=r=>Array.isArray(r?.legs)?r.legs:[r?.leg];
 const legOk=l=>Number.isInteger(l)&&l>=0&&l<=4;
@@ -1106,12 +1106,12 @@ const coverOk=r=>r.legs===undefined||(Array.isArray(r.legs)&&r.legs.length>=1&&r
 function requestsOf(list,trade_id){
  const seen=new Set();
  return (Array.isArray(list)?list:[]).filter(r=>r&&r.trade_id===trade_id&&legOk(r.leg)&&HEX64.test(r.attempt_id??'')
-  &&(r.kind==='solana_tx'||r.kind==='evm_tx')&&typeof r.wallet==='string'&&Number.isFinite(Date.parse(r.expires_at))&&coverOk(r))
+  &&KINDS.has(r.kind)&&typeof r.wallet==='string'&&Number.isFinite(Date.parse(r.expires_at))&&coverOk(r))
   .filter(r=>{const ls=legsOf(r);if(ls.some(l=>seen.has(l)))return false;for(const l of ls)seen.add(l);return true}).slice(0,5);
 }
 const tagged=(code,e)=>Object.assign(e instanceof Error?e:Error(String(e?.message??e??code)),{code:e?.code??code});
 function createTradeRun(d){
- const st={phase:'preparing',step:'session',trade_id:null,first:null,leg:null,legs:null,symbol:null,done_legs:0,total_legs:0,send:{},t0:d.now(),settle_t0:null,status:null,answer:null,page:null,reason:null,error:null,ended:null};
+ const st={phase:'preparing',step:'session',part:null,trade_id:null,first:null,leg:null,legs:null,symbol:null,done_legs:0,total_legs:0,send:{},t0:d.now(),settle_t0:null,status:null,answer:null,page:null,reason:null,error:null,ended:null};
  const up=p=>{Object.assign(st,p);try{d.update({...st,send:{...st.send}})}catch{/* the card repaints on the next update */}};
  const stop=(phase,reason,extra={})=>{up({phase,reason,ended:d.now(),...extra});return {kind:phase,reason,data:st.answer}};
  async function status(id){
@@ -1140,9 +1140,22 @@ function createTradeRun(d){
   return stop('failed','page_timeout');
  }
  async function sign(s,req){
+  let bodies;
+  try{bodies=wr.privyRpcBodies(req)}catch(e){throw req.kind==='evm_7702'?tagged('BATCH_REFUSED',e):e}
   const w=(await s.wallets()).find(x=>sameAddress(req,x?.address));
   if(!w)throw tagged('WALLET_MISMATCH',Error('No wallet of this sign-in matches the trade'));
-  return wr.signedFromWallet(req,await s.rpc(w.id,wr.privyRpcBody(req)));
+  const answers=[];
+  for(const b of bodies){
+   const auth=b.method==='eth_sign7702Authorization';
+   if(req.kind==='evm_7702')up({part:auth?'authorize':'batch'});
+   try{answers.push(await s.rpc(w.id,b))}
+   catch(e){
+    if(auth&&e?.code!=='TIMEOUT'&&!/^FRAME_/.test(String(e?.code??'')))throw Object.assign(tagged('WALLET_METHOD_REFUSED',e),{code:'WALLET_METHOD_REFUSED'});
+    throw e;
+   }
+  }
+  if(req.kind!=='evm_7702')return wr.signedFromWallets(req,answers);
+  try{return wr.signedFromWallets(req,answers)}catch(e){throw tagged('ANSWER_REFUSED',e)}
  }
  async function run(args){
   let s=null,inline=null;
@@ -1170,33 +1183,52 @@ function createTradeRun(d){
    if(replayed)return [];replayed=true;
    try{const r=await d.call('execute_trade',args,30000);return covering(r?.data?.sign_requests,ls)}catch{return []}
   };
+  let no7702=false;
+  const unsupported=async(i,req,ls)=>{
+   no7702=true;
+   up({phase:'sending',step:'submit',part:null});
+   let b=null;
+   try{b=(await d.call('submit_trade_signature',{trade_id:id,leg:req.leg,attempt_id:req.attempt_id,signed:'unsupported'},30000))?.data}catch{b=null}
+   let next=[];
+   if(b&&!b.error){
+    const send={...st.send};for(const l of Array.isArray(b.legs)?b.legs:[])if(Number.isInteger(l?.leg)&&typeof l.send_status==='string'&&!SENT.has(send[l.leg]))send[l.leg]=l.send_status;
+    up({send});next=covering(b.sign_requests,ls);
+   }
+   else if(!b)next=await fresh(ls);
+   next=next.filter(x=>x.kind!=='evm_7702'&&!legsOf(x).every(l=>SENT.has(st.send[l])));
+   if(!next.length){mark(ls,'not_sent',{error:b?.error??'WALLET_METHOD_REFUSED'});return}
+   supersede(i,next);reqs.push(...next);
+  };
   for(let i=0;i<reqs.length;i++){
    let req=reqs[i];
    if(legsOf(req).every(l=>SENT.has(st.send[l])))continue;
+   if(no7702&&req.kind==='evm_7702'){mark(legsOf(req),'not_sent',{error:'WALLET_METHOD_REFUSED'});continue}
    if(d.now()>Date.parse(req.expires_at)-SKEW_MS){
     const n=(await fresh(legsOf(req))).filter(x=>!legsOf(x).every(l=>SENT.has(st.send[l])));
     if(!n.length){mark(legsOf(req),'expired');continue}
     supersede(i,n);req=n[0];reqs.push(...n.slice(1));
    }
    const ls=legsOf(req);
-   up({phase:'signing',step:'wallet',leg:req.leg,legs:ls,symbol:symbols[req.leg]??null});
+   up({phase:'signing',step:'wallet',part:null,leg:req.leg,legs:ls,symbol:symbols[req.leg]??null});
    let signed;
    try{signed=await sign(s,req)}
    catch(e){
     if(e?.code==='WALLET_MISMATCH')return stop('failed','wallet');
+    if(e?.code==='BATCH_REFUSED'||e?.code==='ANSWER_REFUSED'){mark(ls,'not_sent',{part:null,error:e.code});continue}
+    if(e?.code==='WALLET_METHOD_REFUSED'&&req.kind==='evm_7702'){await unsupported(i,req,ls);continue}
     return viaPage(id,e);
    }
-   up({phase:'sending',step:'submit'});
+   up({phase:'sending',step:'submit',part:null});
    let r;
    try{r=await d.call('submit_trade_signature',{trade_id:id,leg:req.leg,attempt_id:req.attempt_id,signed},30000)}
    catch{return settle(id,null)}
    const b=r?.data;
    if(b?.error){
-    if(b.error==='SIGN_EXPIRED'&&!again.has(req.leg)){
+    if(RESIGN.has(b.error)&&!again.has(req.leg)){
      again.add(req.leg);const n=await fresh(ls);
      if(n.length){for(const x of n)again.add(x.leg);supersede(i,n);reqs.push(...n);continue}
     }
-    mark(ls,b.error==='SIGN_EXPIRED'?'expired':'not_sent',{error:b.error});continue;
+    mark(ls,RESIGN.has(b.error)?'expired':'not_sent',{error:b.error});continue;
    }
    const send={...st.send};for(const l of Array.isArray(b?.legs)?b.legs:[])if(Number.isInteger(l?.leg)&&typeof l.send_status==='string')send[l.leg]=l.send_status;
    up({send,done_legs:Object.values(send).filter(v=>v!=='awaiting_signature'&&v!=='expired').length});
@@ -1216,6 +1248,73 @@ return {createTradeRun,requestsOf,legsOf,sameAddress};
 })((()=>{
 const hex=v=>'0x'+BigInt(v).toString(16);
 const B64=/^[A-Za-z0-9+/]+={0,2}$/;
+const CALIBUR='0x000000005c84F8Fd50b21CAC312528A64437030e';
+const USDC_BASE='0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+const BASE_CHAIN=8453,ZERO32='0x'+'0'.repeat(64);
+const ADDR=/^0x[0-9a-fA-F]{40}$/,UINT=/^(0|[1-9][0-9]{0,77})$/,HEX32=/^0x[0-9a-fA-F]{1,64}$/;
+const lc=v=>String(v).toLowerCase();
+const word=v=>BigInt(v).toString(16).padStart(64,'0');
+const CALIBUR_TYPES={
+ EIP712Domain:[['name','string'],['version','string'],['chainId','uint256'],['verifyingContract','address'],['salt','bytes32']],
+ SignedBatchedCall:[['batchedCall','BatchedCall'],['nonce','uint256'],['keyHash','bytes32'],['executor','address'],['deadline','uint256']],
+ BatchedCall:[['calls','Call[]'],['revertOnFailure','bool']],
+ Call:[['to','address'],['value','uint256'],['data','bytes']],
+};
+const refuse=why=>Object.assign(TypeError(`evm_7702 batch refused: ${why}`),{code:'BATCH_REFUSED'});
+
+/** Throws (code BATCH_REFUSED) unless an evm_7702 request's batch is exactly the USDC transfers its leg summaries list. */
+function checkBatch(req){
+ if(req?.kind!=='evm_7702')throw refuse('not an evm_7702 request');
+ const p=req.payload??{},t=p.typed_data??{},d=t.domain??{},m=t.message??{},bc=m.batchedCall??{};
+ if(p.type!=='calibur_batch'||t.primary_type!=='SignedBatchedCall')throw refuse('not a Calibur SignedBatchedCall');
+ if(!ADDR.test(req.wallet??''))throw refuse('wallet');
+ if(d.name!=='Calibur'||d.version!=='1.0.0'||Number(d.chainId)!==BASE_CHAIN||!ADDR.test(d.verifyingContract??'')||lc(d.verifyingContract)!==lc(req.wallet))throw refuse('domain is not this wallet on Base');
+ const types=t.types??{};
+ if(Object.keys(types).length!==4||Object.entries(CALIBUR_TYPES).some(([k,f])=>!Array.isArray(types[k])||types[k].length!==f.length||f.some(([n,ty],i)=>types[k][i]?.name!==n||types[k][i]?.type!==ty)))throw refuse('types');
+ if(!ADDR.test(m.executor??'')||BigInt(m.executor)===0n)throw refuse('executor');
+ if(typeof m.keyHash!=='string'||lc(m.keyHash)!==ZERO32)throw refuse('keyHash');
+ if(bc.revertOnFailure!==true)throw refuse('revertOnFailure');
+ if(!UINT.test(String(m.nonce??''))||!UINT.test(String(m.deadline??''))||BigInt(m.deadline)===0n)throw refuse('nonce or deadline');
+ const ex=Date.parse(req.expires_at);
+ if(!Number.isFinite(ex)||ex>Number(m.deadline)*1000)throw refuse('expires after the batch deadline');
+ const sums=Array.isArray(req.leg_summaries)?req.leg_summaries:req.legs===undefined&&req.summary?[req.summary]:null;
+ const calls=bc.calls;
+ if(!sums||!Array.isArray(calls)||calls.length<1||calls.length>5||calls.length!==sums.length)throw refuse('one call per leg');
+ calls.forEach((c,i)=>{
+  const s=sums[i];
+  if((req.legs!==undefined&&s?.leg!==req.legs[i])||s?.asset!=='USDC'||Number(s.decimals)!==6||!ADDR.test(s.to??'')||!UINT.test(String(s.amount_raw??''))||BigInt(s.amount_raw)===0n)throw refuse(`leg ${i} summary`);
+  if(lc(c?.to)!==lc(USDC_BASE)||!UINT.test(String(c?.value??''))||BigInt(c.value)!==0n)throw refuse(`call ${i} is not a USDC call`);
+  if(lc(c.data)!==`0xa9059cbb${word(s.to)}${word(s.amount_raw)}`)throw refuse(`call ${i} is not transfer(${s.to}, ${s.amount_raw})`);
+ });
+ const a=p.authorization;
+ if(a!==null&&a!==undefined&&(lc(a.contract)!==lc(CALIBUR)||Number(a.chain_id)!==BASE_CHAIN||!Number.isInteger(a.nonce)||a.nonce<0))throw refuse('authorization is not for Calibur on Base');
+ return true;
+}
+
+/** Every Privy wallet RPC body a sign request needs, in order (one, or two for a first evm_7702 basket). */
+function privyRpcBodies(req){
+ if(req?.kind!=='evm_7702')return [privyRpcBody(req)];
+ checkBatch(req);
+ const a=req.payload.authorization,out=[];
+ if(a)out.push({method:'eth_sign7702Authorization',chain_type:'ethereum',params:{contract:a.contract,chain_id:BASE_CHAIN,nonce:a.nonce}});
+ out.push({method:'eth_signTypedData_v4',chain_type:'ethereum',params:{typed_data:req.payload.typed_data}});
+ return out;
+}
+
+/** The `signed` argument from the answers to privyRpcBodies(req), in the same order. */
+function signedFromWallets(req,answers){
+ if(req?.kind!=='evm_7702')return signedFromWallet(req,answers?.[0]);
+ const a=req.payload?.authorization,list=Array.isArray(answers)?answers:[];
+ if(list.length!==(a?2:1))throw TypeError('one wallet answer per call');
+ const sig=(list.at(-1)?.data??list.at(-1))?.signature;
+ if(typeof sig!=='string'||!/^0x[0-9a-fA-F]{130}$/.test(sig))throw TypeError('no 65-byte batch signature in the wallet answer');
+ if(!a)return sig.toLowerCase();
+ const z=(list[0]?.data??list[0])?.authorization;
+ const y=Number(z?.y_parity);
+ if(!z||lc(z.contract)!==lc(a.contract)||Number(z.chain_id)!==BASE_CHAIN||Number(z.nonce)!==a.nonce||(y!==0&&y!==1)||!HEX32.test(z.r??'')||!HEX32.test(z.s??''))
+  throw TypeError('the wallet answered a different authorization');
+ return (sig+word(z.r)+word(z.s)+(y?'01':'00')).toLowerCase();
+}
 
 /** The Privy wallet RPC body for a sign request (POST /v1/wallets/{wallet_id}/rpc, or js-sdk-core rpc). */
 function privyRpcBody(req){
@@ -1231,6 +1330,7 @@ function privyRpcBody(req){
    to:p.to,data:p.data,value:hex(p.value),chain_id:Number(p.chainId),nonce:Number(p.nonce),type:2,
    gas_limit:hex(p.gas),max_fee_per_gas:hex(p.maxFeePerGas),max_priority_fee_per_gas:hex(p.maxPriorityFeePerGas)}}};
  }
+ if(req?.kind==='evm_7702')throw TypeError('evm_7702 needs privyRpcBodies (one or two wallet calls)');
  throw TypeError(`unknown sign request kind ${req?.kind}`);
 }
 
@@ -1260,7 +1360,7 @@ function signedFromWallet(req,answer){
  throw TypeError(`unknown sign request kind ${req?.kind}`);
 }
 
-return {privyRpcBody,reactSdkArgs,signedFromWallet};})());   // src/trade-signing.js over src/vendor/wallet-request.mjs
+return {privyRpcBody,privyRpcBodies,checkBatch,reactSdkArgs,signedFromWallet,signedFromWallets};})());   // src/trade-signing.js over src/vendor/wallet-request.mjs
 const signerCfg={"app_id":null,"script":null,"page":null};  // {app_id,script,page}: build-time; a result's _meta['yeet/signer'] overrides
 const CONFIRM_KEY='yeet/confirm',SIGNER_KEY='yeet/signer';
 const POLL_MS=5000,POLL_MAX=360,SKEW_MS=2000,MAX_PARTS=99,AMOUNT_MAX=25,MORE_USDC='5';
@@ -1364,7 +1464,20 @@ function takeConfirm(p,meta){
  if(c&&typeof c.code==='string'&&CODE.test(c.code)&&Number.isFinite(expires)&&!spent.has(key))confirm={proposal_id:p.proposal_id,revision:p.revision,code:c.code,expires,at:now()};
  else if(confirm&&(confirm.proposal_id!==p.proposal_id||confirm.revision!==p.revision))confirm=null;
  window.clearTimeout(expiryTimer);
- if(confirm){const left=confirm.expires-SKEW_MS-now();if(left>0)expiryTimer=window.setTimeout(render,Math.min(left+50,2147483000))}
+ if(confirm){const left=confirm.expires-SKEW_MS-now();if(left>0)expiryTimer=window.setTimeout(onExpiry,Math.min(left+50,2147483000))}
+}
+const freshened=new Set();
+function onExpiry(){
+ const p=current?.kind==='basket'?current.data:null;
+ const idle=!busy&&!quoting&&!draft&&amountDraft===null&&!hold&&!signin&&TRADE.phase==='idle';
+ if(p&&idle&&canCall()&&!document.hidden&&!freshened.has(p.proposal_id)){freshened.add(p.proposal_id);freshen(p)}
+ render();
+}
+async function freshen(p){
+ let u;try{u=unwrap(await callTool('yeet_quote',{proposal_id:p.proposal_id}))}catch{return}
+ const cur=current?.kind==='basket'?current.data:null;
+ const idle=!busy&&!quoting&&!draft&&amountDraft===null&&!hold&&!signin&&TRADE.phase==='idle';
+ if(cur&&idle&&kindOf(u.data)==='basket'&&u.data.proposal_id===cur.proposal_id&&u.data.revision>cur.revision&&u.data.direction===cur.direction)show(u.data,u.meta);
 }
 function show(data,meta){
  let kind=kindOf(data);
@@ -1563,7 +1676,7 @@ function holdFor(p,parts,symbols,usdc=p.amount_usdc){
  let need=(min*BigInt(sum)+BigInt(fewest)-1n)/BigInt(fewest);need=(need+9999n)/10000n*10000n;
  const names=low.map(k=>symbols[k]??'?');const one=names.length===1;
  const said=listOf(low.map(k=>`${symbols[k]??'?'} (${usdFloor(shares[k])})`));
- const most=BigInt(AMOUNT_MAX)*1000000n;
+ const most=BigInt(Math.floor(capOf(p)*100))*10000n;
  const fix=need<=most?`, or raise the amount to at least ${usdMicro(need)}.`:` or set ${one?'it':'them'} to 0.`;
  return {title:ERRORS.AMOUNT_TOO_SMALL?.[0]??'A coin gets too little',
   text:`${said} ${one?'is':'are'} under the ${usdMicro(min)} minimum per coin. Give ${one?names[0]:'them'} more parts${need<=most?`, set ${one?'it':'them'} to 0`:''}${fix}`};
@@ -1596,10 +1709,17 @@ function estimates(p,parts){
  return {rows,get};
 }
 const trimAmount=n=>String(Math.round(n*100)/100);
+/** The person's per-trade limit from the server (25, 100 or 500); 25 when the data carries none. */
+function perTrade(p){const n=Number(p?.limits?.per_trade_usdc);return typeof p?.limits?.per_trade_usdc==='string'&&Number.isFinite(n)&&n>0?n:AMOUNT_MAX}
+/** The most one buy may be: the per-trade limit, and never more than is left today. */
+function capOf(p){const per=perTrade(p),raw=p?.limits?.left_today_usdc,left=Number(raw);return typeof raw==='string'&&Number.isFinite(left)&&left>=0?Math.min(per,Math.floor(left*100)/100):per}
+/** The amount chips of a tier: Noob 10/15/20/25, Winner 25/50/75/100, VIP 50/100/250/500. */
+const presetsOf=per=>per>=500?[50,100,250,500]:per>=100?[25,50,75,100]:[10,15,20,25];
 function amountBounds(p,parts){
  const coins=Math.max(1,parts.filter(x=>x>0).length),leg=Number(p.min_leg_usdc)||3,cur=Number(p.amount_usdc)||0;
  let min=Math.ceil(leg*coins);if(cur>0&&cur<min)min=Math.max(1,Math.floor(cur));
- return {min,max:Math.max(AMOUNT_MAX,Math.ceil(cur),min)};
+ const cap=capOf(p);
+ return {min,max:Math.max(cap,min),cap};
 }
 function touchAmount(){confirm=null;window.clearTimeout(expiryTimer);inlineError=null;note=null}
 /** While digits are typed in the amount chip: repaint each coin's dollars, the total and what you get, in place. No quote yet. */
@@ -1616,6 +1736,7 @@ function onAmountInput(raw){
  set(ui.total,usdFmt.format(v));set(ui.pay,`${v.toFixed(2)} USDC`);
  const e=estimates(p,parts),syms=roster.symbols;
  for(const g of ui.gets?.children??[]){const k=g.dataset.k?.slice(4);const i=syms.indexOf(k);if(i>=0&&e.rows[i])set(g,`≈ ${e.rows[i].amt??'—'} ${k}`)}
+ if(ui.mins)ui.mins.replaceChildren(el('span','num','—'));
  if(ui.note)ui.note.textContent='New amount. The quote updates when you leave the field.';
 }
 /** The field was left, or a chip was picked: ask for a quote at the new amount. */
@@ -1653,7 +1774,7 @@ const yeetMore=(symbol,button)=>fromHolding('yeet_propose',{amount_usdc:MORE_USD
 function goBack(){if(!back||busy)return;current=back;back=null;draft=null;amountDraft=null;hold=null;note=null;inlineError=null;window.clearTimeout(expiryTimer);render()}
 const BASE_XP=Number.isInteger(SPIN?.base_xp)?SPIN.base_xp:0;
 /** The catalog's coins, for a wheel drawn before the server has named one (an older home block without stamps). */
-const CATALOG=Object.keys(COINS).filter(s=>s!=='USDC');
+const CATALOG=Object.keys(COINS).filter(s=>s!=='USDC'&&s!=='SOL');
 let wcard=null;
 const spinsLeft=x=>Number.isInteger(x?.spins_available)?x.spins_available:x?.spin_available===true?1:0;
 function wheelCard(){
@@ -1863,8 +1984,7 @@ function route(direction,symbols,state){
  box.append(skeet?coins():usdc(),wire(),node(near,'NEAR','Intents'),wire(),skeet?usdc():coins());
  return box;
 }
-const landsIn=s=>Number.isInteger(s)?(s<120?`~${s} sec`:`~${Math.round(s/60)} min`):'—';
-const holdsFor=ms=>{const s=Math.max(0,Math.ceil(ms/1000));return s<60?`${s}s`:`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`};
+const landsIn=s=>Number.isInteger(s)&&s>=240?`About ${Math.round(s/60)} minutes`:'Usually 2 to 3 minutes';
 function renderBasket(p){
  const skeet=p.direction==='skeet';
  if(!skeet&&(!roster||roster.proposal_id!==p.proposal_id))keepRoster(p);
@@ -1874,11 +1994,11 @@ function renderBasket(p){
  const sum=parts.reduce((a,b)=>a+b,0),amt=amountOf(p),shares=skeet?null:split(micro(amt),parts);
  const ests=skeet?null:estimates(p,parts);
  const c=card('basket',skeet?'SKEET to USDC':'Your basket',skeet?'Solana → USDC':'USDC → Solana');c.dataset.direction=skeet?'skeet':'yeet';
- const ui={rows:[],gets:null,pay:null,total:null,trade:null,note:null,field:null,chips:[],bounds:null,lock:null};
+ const ui={rows:[],gets:null,pay:null,total:null,trade:null,note:null,field:null,chips:[],bounds:null,mins:null};
  if(!skeet){
   const b=amountBounds(p,parts),cur=Number(amt)||0;ui.bounds=b;
   const box=mark(el('div','amts'),'amts');box.setAttribute('role','group');box.setAttribute('aria-label','Amount');
-  const presets=[10,15,20,25].filter(v=>v>=b.min&&v<=b.max);if(presets.length>3)presets.splice(presets.indexOf(cur===20?15:20),1);
+  const presets=presetsOf(perTrade(p)).filter(v=>v>=b.min&&v<=b.cap);if(presets.length>3)presets.splice(cur===presets[2]?1:2,1);
   const off=busy||!canCall();
   for(const v of presets){const x=el('button',null,`$${v}`);x.type='button';x.setAttribute('aria-pressed',String(v===cur));x.disabled=off;x.onclick=()=>onAmountPick(v);box.append(x);ui.chips.push([v,x])}
   const lab=el('label',presets.includes(cur)?null:'on');lab.append(el('span',null,'$'));
@@ -1926,18 +2046,19 @@ function renderBasket(p){
   const gets=el('dd','gets');rows.forEach((r,i)=>{if(parts[i]>0&&r.sym)gets.append(num(null,`≈ ${ests.rows[i]?.amt??'—'} ${r.sym}`,`get:${r.sym}`))});
   const d=el('div');d.append(el('dt',null,'You get'),gets);kv.append(d);ui.gets=gets;
  }
+ {const stale=amountDraft!==null||!!draft,legs=rows.filter((r,i)=>r.sym&&(skeet||parts[i]>0)).map(r=>r.leg);
+  const ok=legs.length>0&&legs.every(l=>typeof l?.min_out==='string'&&DECIMAL.test(l.min_out)&&Number(l.min_out)>0);
+  if(ok){const dd=el('dd','gets');dd.dataset.role='min';
+   if(stale)dd.append(num(null,'—'));
+   else if(skeet)dd.append(num(null,usdFmt.format(legs.reduce((a,l)=>a+Number(l.min_out),0)),'min'));
+   else for(const r of rows)if(r.sym&&legs.includes(r.leg))dd.append(num(null,`${amount(r.leg.min_out)??'—'} ${r.sym}`,`min:${r.sym}`));
+   const d=el('div');d.append(el('dt',null,'At least'),dd);kv.append(d);ui.mins=dd}}
  kv.append(kvRow('Cost',num((p.warnings||[]).includes('COST_HIGH')?'cost high':'cost',pct(t.cost_pct)??'—','cost')));
  kv.append(kvRow('Lands in',document.createTextNode(landsIn(t.time_estimate_s))));
  if(amountDraft!==null||draft)kv.classList.add('stale');
  c.append(kv);
  const live=canTap(p);
- if(live&&confirm){
-  const lock=mark(el('div','lock'),'lock');const span=Math.max(1,confirm.expires-SKEW_MS-confirm.at);
-  const ring=svg('circle',{class:'p',cx:'10',cy:'10',r:'8',fill:'none','stroke-width':'2.6','stroke-linecap':'round','stroke-dasharray':'50.27','stroke-dashoffset':'0',transform:'rotate(-90 10 10)'});
-  lock.append(svg('svg',{viewBox:'0 0 20 20','aria-hidden':'true'},[svg('circle',{cx:'10',cy:'10',r:'8',fill:'none',stroke:'currentColor','stroke-opacity':'.2','stroke-width':'2.6'}),ring]));
-  const left=confirm.expires-SKEW_MS-now();const s=el('span','num',holdsFor(left));const say=el('span');say.append(document.createTextNode('Price holds for '),s);lock.append(say);
-  ui.lock={s,ring,span};c.append(lock);paintLock(ui.lock);
- }
+ {const e=mark(el('p','est-note',`Estimate. The live price is taken when you ${skeet?'SKEET':'YEET'}.`),'estimate',true);e.dataset.role='estimate';c.append(e)}
  if(signin&&TRADE.key===`${p.proposal_id}:${p.revision}`)c.append(signinBox());
  else if(live&&canCall()&&signerCfg.script&&!signerP)loadSigner().then(s=>s?.session()).catch(()=>{});
  const primary=tradeButton(p,live);ui.trade=primary;if(!signin)c.append(primary);
@@ -1953,14 +2074,13 @@ function renderBasket(p){
  else if(signin)said=null;
  else if(busy)said=noteLine(TRADE.phase==='preparing'?'Getting your trade ready…':'Sending your trade…');
  else if(!canCall())said=noteLine('Open this card in the chat to trade.');
- else if(expired)said=noteLine('Quote expired. Refresh for live numbers.');
+ else if(expired)said=noteLine('Ask again for a fresh basket.');
  if(said){ui.note=said;c.append(said)}
  const cap=!skeet?limitsLine(p.limits):null;if(cap)c.append(mark(el('p','fine caps',cap),'caps',true));
- c.append(el('p','fine','Meme coins can go to zero.'));
+ if(!skeet)c.append(el('p','fine','Meme coins can go to zero.'));
  basketUi=skeet?null:ui;
  return c;
 }
-function paintLock(l){if(!l)return;const left=confirm?confirm.expires-SKEW_MS-now():0;l.s.textContent=holdsFor(left);l.ring.setAttribute('stroke-dashoffset',String((50.27*(1-Math.max(0,left)/l.span)).toFixed(2)))}
 const TRADE_TITLE={signing:'Signing',submitted:'Sent',settling:'Swapping',success:'YEETED.',partial:'Partly done',refunded:'Refunded',failed:'Didn’t go through',requote_required:'Price moved'};
 /** Where a leg's funds are at each status: [YEET, SKEET]. FAILED has no line; the refund reason covers it. */
 const FUNDS_AT={not_sent:['still in your Base wallet','still in your Solana wallet'],sent:['on the way to the 1Click deposit address','on the way to the 1Click deposit address'],PENDING_DEPOSIT:['on the way to the 1Click deposit address','on the way to the 1Click deposit address'],KNOWN_DEPOSIT_TX:['at the 1Click deposit address','at the 1Click deposit address'],INCOMPLETE_DEPOSIT:['at the 1Click deposit address, short of the quote','at the 1Click deposit address, short of the quote'],PROCESSING:['being swapped on NEAR Intents','being swapped on NEAR Intents'],SUCCESS:['in your Solana wallet','in your Base wallet'],REFUNDED:['refunded to your Base wallet','refunded to your Solana wallet']};
@@ -2023,7 +2143,7 @@ function paintSettle(u){
  if(!u)return;const ms=(u.since.to??now())-u.since.from;
  u.meta.textContent=`${u.n} of ${u.total} landed · ${mmss(ms)}`;
  if(u.bar)u.bar.style.transform=`scaleX(${(0.04+0.92*Math.min(1,ms/SETTLE_MS)).toFixed(3)})`;
- if(u.say)u.say.textContent=u.page?'Sign on the YEET page in your browser, then come back here.':ms<SETTLE_MS?'Each coin is its own swap on NEAR Intents. Usually 1 to 4 minutes.':'Taking longer than usual. It keeps going, and this card follows it.';
+ if(u.say)u.say.textContent=u.page?'Sign on the YEET page in your browser, then come back here.':ms<SETTLE_MS?'Each coin is its own swap on NEAR Intents. Usually 2 to 3 minutes.':'Taking longer than usual. It keeps going, and this card follows it.';
 }
 function renderReceipt(t){
  const skeet=t.direction==='skeet';const final=FINAL.has(t.status);const legs=Array.isArray(t.legs)?t.legs.slice(0,5):[];
@@ -2194,8 +2314,7 @@ function render(){
  reportHeight();
  if(entering)entrance(node);
  window.clearInterval(lockTimer);lockTimer=null;
- if(basketUi?.lock)lockTimer=window.setInterval(()=>{if(!basketUi?.lock?.s.isConnected){window.clearInterval(lockTimer);return}paintLock(basketUi.lock)},1000);
- else if(settleUi)lockTimer=window.setInterval(()=>{if(!settleUi?.meta.isConnected){window.clearInterval(lockTimer);return}paintSettle(settleUi)},1000);
+ if(settleUi)lockTimer=window.setInterval(()=>{if(!settleUi?.meta.isConnected){window.clearInterval(lockTimer);return}paintSettle(settleUi)},1000);
  if(shareOpen&&moving){const p=node.querySelector('.share-panel');p?.scrollIntoView?.({block:'nearest',behavior:'smooth'})}
 }
 
