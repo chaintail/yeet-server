@@ -1326,6 +1326,11 @@
         "spin_available"
       ],
       "additionalProperties": false
+    },
+    "signed_usd": {
+      "type": "string",
+      "pattern": "^-?(0|[1-9][0-9]{0,8})(\\.[0-9]{1,2})?$",
+      "description": "US dollars as a decimal string, negative for a loss."
     }
   },
   "tools": {
@@ -2564,8 +2569,21 @@
           "board": {
             "enum": [
               "xp",
-              "week"
-            ]
+              "week",
+              "winners",
+              "best_trade",
+              "losers",
+              "coins"
+            ],
+            "description": "Default xp. week is xp over 7d."
+          },
+          "window": {
+            "enum": [
+              "today",
+              "7d",
+              "all"
+            ],
+            "description": "today is the current UTC day. Default: all for xp, today for the others."
           }
         },
         "required": [],
@@ -2598,12 +2616,27 @@
                 "xp": {
                   "type": "integer",
                   "minimum": 0
+                },
+                "usd": {
+                  "$ref": "#/$defs/signed_usd"
+                },
+                "pct": {
+                  "type": "number",
+                  "minimum": -100,
+                  "maximum": 1000000
+                },
+                "symbol": {
+                  "$ref": "#/$defs/symbol"
+                },
+                "people": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "coins board: how many people yeeted this coin."
                 }
               },
               "required": [
                 "rank",
-                "name",
-                "xp"
+                "name"
               ],
               "additionalProperties": false
             },
@@ -2627,6 +2660,17 @@
               "xp": {
                 "type": "integer",
                 "minimum": 0
+              },
+              "usd": {
+                "$ref": "#/$defs/signed_usd"
+              },
+              "pct": {
+                "type": "number",
+                "minimum": -100,
+                "maximum": 1000000
+              },
+              "symbol": {
+                "$ref": "#/$defs/symbol"
               }
             },
             "required": [
@@ -2634,6 +2678,36 @@
               "xp"
             ],
             "additionalProperties": false
+          },
+          "board": {
+            "enum": [
+              "xp",
+              "winners",
+              "best_trade",
+              "losers",
+              "coins"
+            ]
+          },
+          "window": {
+            "enum": [
+              "today",
+              "7d",
+              "all"
+            ]
+          },
+          "unit": {
+            "enum": [
+              "xp",
+              "usd",
+              "pct"
+            ],
+            "description": "Which row field ranks this board."
+          },
+          "measure": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "description": "How this board is measured, in one sentence. The card prints it under the rows."
           },
           "guidance": {
             "$ref": "#/$defs/guidance"

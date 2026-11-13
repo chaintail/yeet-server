@@ -96,7 +96,7 @@ export function openXp({file=':memory:',secret,now=Date.now,coins,luckyCoins}={}
   /** Internal: one extra spin for `who` on `day` (spin.mjs grantSpin). The lucky wheel's claim calls spin.grantSpin. */
   grantSpin:(who,day,reason,uniqueRef)=>spin.grantSpin(who,day,reason,uniqueRef),
   /** names(accountId): the name a row shows; the default name when left out. */
-  board:(kind,who,names)=>leaderboard(db,{kind,me:who,at:now(),...(names?{names}:{})}),
+  board:(kind,who,names,since=null)=>leaderboard(db,{kind,me:who,at:now(),since,...(names?{names}:{})}),
  };
 }
 

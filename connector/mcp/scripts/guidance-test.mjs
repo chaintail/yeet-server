@@ -98,6 +98,12 @@ test('yeet_overview: offer the suggestions in order, never a coin; the lead foll
  for(const k of Object.keys(COPY.yeet_overview))assert.doesNotMatch(COPY.yeet_overview[k],/wallet|Base|Solana|chain/i,k);
 });
 
+test('yeet_checkin: a spin waiting, or done for today with the streak',()=>{
+ assert.equal(g('yeet_checkin',{checkin:{total:5,streak_days:1,spin_available:true,spins_available:1}}),COPY.yeet_checkin.open);
+ assert.equal(g('yeet_checkin',{checkin:{total:9,streak_days:4,spin_available:false,spins_available:0}}),"YEET text.");
+ assert.match(g('yeet_checkin',{checkin:{total:9,streak_days:1,spin_available:false}}),/their streak is 1 day:/);
+});
+
 test('funding is described for both networks: no string says USDC can only be added or held on Base',()=>{
  for(const [label,text] of entries)assert.doesNotMatch(text,/adds USDC on Base|Add USDC on Base|USDC on Base\.$/,label);
  for(const k of ['needs_funds_spin','needs_funds','needs_funds_no_wheel'])assert.match(COPY.yeet_home[k],/YEET/,k);
@@ -173,6 +179,20 @@ test('yeet_leaderboard and yeet_set_username',()=>{
 });
 
 const spin=(over={})=>({xp_won:30,draw_xp:25,streak_xp:0,total:35,streak_days:1,next_spin_at:'2026-11-13T00:00:00Z',stamp:{coin:'BONK',count_after:3,slots:7,card:1,filled:3,set_completed:false},set_bonus_xp:0,spins_available:0,spin_reason:null,...over});
+test('leaderboards from finished SKEETs and the coins board: ranked, not on it, empty; never a promise or a push to trade',()=>{
+ const b=(board,rows,me={rank:null,xp:5})=>g('yeet_leaderboard',{rows,me,board,window:'today',unit:'usd',measure:'m'});
+ const c=COPY.yeet_leaderboard;
+ for(const board of ['winners','best_trade','losers']){
+  assert.equal(b(board,[{rank:1,name:'a',usd:'5.00'}],{rank:1,xp:5,usd:'5.00'}),fill(c.result_ranked,{rank:1}),board);
+  assert.equal(b(board,[{rank:1,name:'a',usd:'5.00'}]),c.result_unranked,board);
+  assert.equal(b(board,[]),c.result_empty,board);
+ }
+ assert.equal(b('coins',[{rank:1,name:'WIF',symbol:'WIF',usd:'5.00',people:1}]),c.coins);assert.equal(b('coins',[]),c.coins_empty);
+ // The XP board keeps its own lines, with or without the new fields.
+ assert.equal(g('yeet_leaderboard',{rows:[],me:{rank:2,xp:40},board:'xp',window:'7d',unit:'xp',measure:'m'}),fill(c.ranked,{rank:2,xp:40}));
+ for(const k of ['result_ranked','result_unranked','result_empty','coins','coins_empty'])rules(`yeet_leaderboard.${k}`,c[k].replace(/\{[a-z_]+\}/g,'7'));
+});
+
 test('daily_spin: names the coin stamp and how many of 7, a completed set, more spins, the lucky wheel or tomorrow',()=>{
  assert.equal(g('daily_spin',spin()),'Name the BONK stamp: 3 of 7 on their BONK card, plus 30 XP. YEET daily_spin.lucky.');
  assert.equal(g('daily_spin',spin({spins_available:2})),'Name the BONK stamp: 3 of 7 on their BONK card, plus 30 XP. They have 2 more spins today; offer it.');

@@ -80,6 +80,12 @@ export const COPY=Object.freeze({
  yeet_leaderboard:{
   ranked:"YEET yeet_leaderboard.ranked: {rank} {xp}.",
   unranked:"YEET yeet_leaderboard.unranked.",
+
+  result_ranked:"YEET yeet_leaderboard.result_ranked: {rank}.",
+  result_unranked:"YEET yeet_leaderboard.result_unranked.",
+  result_empty:"YEET yeet_leaderboard.result_empty.",
+  coins:"YEET yeet_leaderboard.coins.",
+  coins_empty:"YEET yeet_leaderboard.coins_empty.",
  },
 
  yeet_checkin:{
@@ -230,7 +236,12 @@ const BY_TOOL={
  execute_trade:execute,
  submit_trade_signature:trade,trade_status:trade,
  yeet_portfolio:portfolio,
- yeet_leaderboard:r=>Number.isInteger(r.me?.rank)?fill(COPY.yeet_leaderboard.ranked,{rank:r.me.rank,xp:r.me.xp}):COPY.yeet_leaderboard.unranked,
+ yeet_leaderboard:r=>{
+  const c=COPY.yeet_leaderboard,empty=!(r.rows?.length>0);
+  if(r.board==='coins')return empty?c.coins_empty:c.coins;
+  if(r.board&&r.board!=='xp')return empty?c.result_empty:Number.isInteger(r.me?.rank)?fill(c.result_ranked,{rank:r.me.rank}):c.result_unranked;
+  return Number.isInteger(r.me?.rank)?fill(c.ranked,{rank:r.me.rank,xp:r.me.xp}):c.unranked;
+ },
  yeet_checkin:r=>{const c=r.checkin??{},left=Number.isInteger(c.spins_available)?c.spins_available:c.spin_available?1:0;return left>0?COPY.yeet_checkin.open:fill(COPY.yeet_checkin.done,{days:c.streak_days,s:plural(c.streak_days)})},
  daily_spin:spin,
  yeet_set_username:r=>fill(COPY.yeet_set_username.set,{username:r.username}),

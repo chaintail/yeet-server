@@ -181,6 +181,25 @@ test('YEET_P2=1 end to end: home -> spin -> leaderboard, then a settled trade sh
  }
  assert.equal((await alice.call('yeet_home')).structuredContent.xp.total,total);
 
+ // The boards from settled trades, through the connector: the coins alice's YEET landed in, an empty winners board
+ // (nothing was sold), the 7-day XP board, each naming its measure; a board or window outside the contract is refused.
+ const coinsBoard=await bob.call('yeet_leaderboard',{board:'coins'});
+ assert.equal(coinsBoard.isError,undefined,JSON.stringify(coinsBoard.content));
+ const cb=coinsBoard.structuredContent;
+ assert.deepEqual([cb.board,cb.window,cb.unit],['coins','today','usd']);
+ assert.deepEqual(cb.rows.map(r=>[r.rank,r.name,r.usd,r.people]),[[1,'WIF','12.00',1],[2,'BOME','8.00',1]]);
+ assert.match(cb.measure,/^USDC yeeted into each coin today \(UTC\), from YEETs that landed\.$/);
+ assert.match(cb.guidance,/YEET/);
+ const winners=await alice.call('yeet_leaderboard',{board:'winners',window:'7d'});
+ assert.deepEqual(winners.structuredContent.rows,[]);assert.deepEqual(winners.structuredContent.me,{rank:null,xp:total});
+ assert.match(winners.structuredContent.measure,/^USDC made on SKEETs in the last 7 days: /);assert.match(winners.structuredContent.guidance,/YEET/);
+ const xp7=await alice.call('yeet_leaderboard',{board:'xp',window:'7d'});
+ assert.deepEqual([xp7.structuredContent.board,xp7.structuredContent.window,xp7.structuredContent.me.rank],['xp','7d',1]);
+ assert.equal((await alice.call('yeet_leaderboard',{board:'week'})).structuredContent.window,'7d');
+ for(const bad of [{board:'whales'},{board:'xp',window:'month'}])assert.equal((await alice.call('yeet_leaderboard',bad)).isError,true,JSON.stringify(bad));
+ for(const b of ['xp','week','winners','best_trade','losers','coins']){assert.equal(core.routeScope('GET',`/leaderboard/${b}`),'yeet:read',b);for(const win of ['today','7d','all'])assert.equal(core.routeScope('GET',`/leaderboard/${b}/${win}`),'yeet:read')}
+ for(const bad of ['/leaderboard','/leaderboard/whales','/leaderboard/xp/month','/leaderboard/xp/today/x'])assert.equal(core.routeScope('GET',bad),null,bad);
+
  // yeet_overview, the entry tool: the person in one answer, USDC as one number, no wallet or network, the follow-ups.
  const o=await alice.call('yeet_overview');
  assert.equal(o.isError,undefined,JSON.stringify(o.content));

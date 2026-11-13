@@ -347,6 +347,10 @@ html[data-theme=light]{background:#fff}
 .lb li.me{background:var(--night)!important;color:var(--cloud);margin-top:8px;box-shadow:0 0 0 2px var(--volt)}
 .lb li.me .rk{color:var(--volt)}
 .lb li.me .xp{color:var(--volt)}
+.lb .hn small{font:600 11.5px var(--mono);color:var(--yc-mute)}.lb li.me .hn small{color:inherit;opacity:.7}
+.lb .xp.dn{color:var(--rose)}.lb[aria-busy=true]{opacity:.5}
+.lb-empty{margin:4px 2px 12px;font-size:14.5px;color:var(--yc-mute)}
+.leaderboard .tabs{margin-bottom:8px}.leaderboard .tabs+.tabs{margin-bottom:12px}.leaderboard .tabs button{padding:0 2px;min-width:0}.leaderboard .tabs button:disabled{cursor:default}
 .lb .mv{font:700 11px var(--mono);color:var(--mint);margin-left:6px}
 .fine{margin:12px 2px 0;font-size:12.5px;color:var(--yc-mute);display:flex;gap:6px;align-items:center}
 .fine svg{width:14px;height:14px}
@@ -1421,21 +1425,54 @@ function renderCheckin(d){
 }
 function renderSpin(){return wheelSection(null)}
 function renderLucky(){return wheelSection(null)}
+const BOARDS=[['xp','XP'],['winners','Winners'],['best_trade','Best %'],['losers','Losers'],['coins','Coins']];
+const WINDOWS=[['today','Today'],['7d','7 days'],['all','All time']];
+const BOARD_UNIT={xp:'XP',winners:'USDC made',best_trade:'One SKEET',losers:'USDC lost',coins:'USDC yeeted'};
+const BOARD_EMPTY={xp:'No XP on this board yet. A daily check-in puts you on it.',winners:'No winning SKEET in this window yet. The first one takes the top spot.',
+ best_trade:'No winning SKEET in this window yet. The first one takes the top spot.',losers:'Nobody has lost on a SKEET in this window.',coins:'No YEET has landed in this window yet.'};
+let lbBusy=false;
+const signedUsd=v=>{const m=money(typeof v==='string'?v.replace(/^-/,''):null);return m?`${v.startsWith('-')?'−':'+'}${m}`:null};
+const signedPct=n=>typeof n==='number'&&Number.isFinite(n)?`${n<0?'−':'+'}${pct(Math.abs(n))}`:null;
+async function pickBoard(board,win){
+ if(lbBusy||!canCall())return;lbBusy=true;note=null;render();
+ let u;try{u=unwrap(await callTool('yeet_leaderboard',{board,window:win}))}catch{u={data:{error:'TEMPORARILY_UNAVAILABLE'}}}
+ lbBusy=false;
+ if(kindOf(u.data)==='leaderboard')show(u.data,null);else{note='That board couldn’t load. Try again in a minute.';render()}
+}
 function renderLeaderboard(d){
  const c=el('section','yc leaderboard');
- const hd=mark(el('div','yc-h'),'head',true);const crown=use('i-crown');crown.style.cssText='width:24px;height:24px;color:var(--ember)';hd.append(crown,el('span','tt','Leaderboard'),el('span','meta','XP'));c.append(hd);
- const list=el('ol','lb');
+ const board=BOARDS.some(([k])=>k===d.board)?d.board:'xp',win=WINDOWS.some(([k])=>k===d.window)?d.window:'all',unit=d.unit==='usd'||d.unit==='pct'?d.unit:'xp';
+ c.dataset.board=board;c.dataset.window=win;
+ const hd=mark(el('div','yc-h'),'head',true);const crown=use('i-crown');crown.style.cssText='width:24px;height:24px;color:var(--ember)';hd.append(crown,el('span','tt','Leaderboard'),el('span','meta',BOARD_UNIT[board]));c.append(hd);
+ if(canCall()){
+  const tabs=(items,cur,label,go)=>{const t=mark(el('div','tabs'),`tabs:${label}`);t.setAttribute('role','group');t.setAttribute('aria-label',label);
+   for(const [k,text] of items){const b=el('button',null,text);b.type='button';b.dataset.tab=k;b.setAttribute('aria-pressed',String(k===cur));b.disabled=lbBusy;b.onclick=()=>{if(k!==cur)go(k)};t.append(b)}return t};
+  c.append(tabs(BOARDS,board,'Board',k=>pickBoard(k,k==='xp'?(win==='today'?'all':win):win==='all'?'today':win)),tabs(WINDOWS.filter(([k])=>k!=='all'||board==='xp'),win,'Window',k=>pickBoard(board,k)));
+ }
+ const value=r=>board==='coins'?money(r.usd):unit==='usd'?signedUsd(r.usd):unit==='pct'?signedPct(r.pct):Number.isInteger(r.xp)?r.xp.toLocaleString('en-US'):null;
+ const list=el('ol','lb');if(lbBusy)list.setAttribute('aria-busy','true');
  (Array.isArray(d.rows)?d.rows:[]).slice(0,50).forEach((r,i)=>{
   const name=typeof r.name==='string'?r.name.slice(0,32):'—';
-  const li=mark(el('li','stag'),`lr:${i}`);const av=el('span','av ltr',name.slice(0,1).toUpperCase());av.style.background=coinFill(name);av.setAttribute('aria-hidden','true');
-  const xp=el('span','xp num',Number.isInteger(r.xp)?r.xp.toLocaleString('en-US'):'—');if(Number.isInteger(r.xp))xp.dataset.countTo=String(r.xp);
-  li.append(el('span','rk',Number.isInteger(r.rank)?String(r.rank):'—'),av,el('span','hn',name),xp);list.append(li);
+  const li=mark(el('li','stag'),`lr:${i}`);const coin=board==='coins'?safeSymbol(r.symbol):null;
+  let av;if(coin){av=el('span','av');av.append(cv(coin))}else{av=el('span','av ltr',name.slice(0,1).toUpperCase());av.style.background=coinFill(name)}av.setAttribute('aria-hidden','true');
+  const xp=el('span',`xp num${unit!=='xp'&&(r.usd??'').startsWith('-')?' dn':''}`,value(r)??'—');if(unit==='xp'&&Number.isInteger(r.xp))xp.dataset.countTo=String(r.xp);
+  const hn=el('span','hn',name);
+  if(board==='best_trade'&&safeSymbol(r.symbol))hn.append(el('small',null,` ${r.symbol}`));
+  if(board==='coins'&&Number.isInteger(r.people))hn.append(el('small',null,` ${r.people} ${r.people===1?'person':'people'}`));
+  li.append(el('span','rk',Number.isInteger(r.rank)?String(r.rank):'—'),av,hn,xp);list.append(li);
  });
+ const rows=list.childElementCount;
  const me=d.me||{};
- const li=mark(el('li','me stag'),'me');const av=el('span','av');av.append(use('c-volt'));
- const xp=el('span','xp num',Number.isInteger(me.xp)?me.xp.toLocaleString('en-US'):'0');if(Number.isInteger(me.xp))xp.dataset.countTo=String(me.xp);
- li.append(el('span','rk',Number.isInteger(me.rank)?String(me.rank):'—'),av,el('span','hn',Number.isInteger(me.rank)?'you':'you · not ranked yet'),xp);list.append(li);
+ if(board!=='coins'){
+  const li=mark(el('li','me stag'),'me');const av=el('span','av');av.append(use('c-volt'));
+  const mine=unit==='xp'?(Number.isInteger(me.xp)?me.xp.toLocaleString('en-US'):'0'):value(me)??'—';
+  const xp=el('span','xp num',mine);if(unit==='xp'&&Number.isInteger(me.xp))xp.dataset.countTo=String(me.xp);
+  li.append(el('span','rk',Number.isInteger(me.rank)?String(me.rank):'—'),av,el('span','hn',Number.isInteger(me.rank)?'you':'you · not ranked yet'),xp);list.append(li);
+ }
+ if(!rows){const e=mark(el('p','lb-empty',BOARD_EMPTY[board]),'empty',true);e.dataset.role='empty';c.append(e)}
  c.append(list);
+ if(typeof d.measure==='string'&&d.measure){const m=mark(el('p','fine',d.measure.slice(0,240)),'measure',true);m.dataset.role='measure';c.append(m)}
+ if(note)c.append(noteLine(note));
  return c;
 }
 const REFRESHABLE=new Set(['REQUOTE_REQUIRED','CONFIRMATION_REQUIRED','COST_TOO_HIGH','TEMPORARILY_UNAVAILABLE']);

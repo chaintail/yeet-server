@@ -20,7 +20,7 @@ const ROUTES={
  trade_status:({trade_id})=>[`/trades/${trade_id}`],
  yeet_portfolio:()=>['/portfolio'],
  skeet_propose:args=>['/proposals/skeet',args],
- yeet_leaderboard:({board='xp'})=>[`/leaderboard/${board}`],
+ yeet_leaderboard:({board='xp',window})=>[`/leaderboard/${board}${window?`/${window}`:''}`],
  yeet_checkin:()=>['/checkin'],
  daily_spin:()=>['/spin',{}],
  lucky_wheel:()=>['/lucky'],

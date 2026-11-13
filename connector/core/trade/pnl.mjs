@@ -39,6 +39,19 @@ export function walk(db,catalog,{accountId=null}={}){
  }
  return {positions,sales};
 }
+/** Every SKEET sale with a known cost that settled at or after `since` (ms; null: all), every account. */
+export const sales=(db,catalog,{since=null}={})=>walk(db,catalog).sales.filter(s=>since===null||s.at>=since);
+/** Settled YEET legs at or after `since`, per coin: [{symbol, usdc, people}] (USDC spent, distinct accounts). */
+export function yeeted(db,catalog,{since=null}={}){
+ const rows=db.prepare(`${SETTLED} AND t.direction='yeet'${since===null?'':' AND l.updated_at>=?'}`).all(...(since===null?[]:[since]));
+ const by=new Map();
+ for(const r of rows){
+  if(coinDecimals(catalog,r.symbol)===null)continue;
+  let usdc;try{usdc=units(r.amount_in_raw,6)}catch{continue}
+  const c=by.get(r.symbol)??{symbol:r.symbol,micro:0,accounts:new Set()};c.micro+=Math.round(usdc*1e6);c.accounts.add(r.account_id);by.set(r.symbol,c);
+ }
+ return [...by.values()].map(c=>({symbol:c.symbol,usdc:Math.round(c.micro/1e4)/100,people:c.accounts.size}));
+}
 /** One account's average YEET price per held coin: Map(symbol -> USD per coin). */
 export function averageCost(db,catalog,accountId){
  const out=new Map();

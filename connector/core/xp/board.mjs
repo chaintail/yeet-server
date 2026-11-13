@@ -28,8 +28,9 @@ export function rankRows(rows){
 }
 
 /** `kind` 'xp' (all time) or 'week' (last 7 days to `at`). Returns the contract shape {rows, me}. */
-export function leaderboard(db,{kind='xp',me,at=Date.now(),names=handle}={}){
- const since=kind==='week'?new Date(at-WEEK_MS).toISOString():null;
+export function leaderboard(db,{kind='xp',me,at=Date.now(),names=handle,since:from=null}={}){
+ // `since` (an ISO time) narrows the xp board to a window (boards.mjs: today, 7d); 'week' is the older name for 7d.
+ const since=from??(kind==='week'?new Date(at-WEEK_MS).toISOString():null);
  const sums=db.prepare(`SELECT identity_id id,SUM(points) xp FROM xp_event ${since?'WHERE ts>=?':''} GROUP BY identity_id HAVING SUM(points)>0`)
   .all(...(since?[since]:[]));
  const rows=rankRows(sums.map(r=>({id:r.id,xp:Number(r.xp),name:names(r.id)})));

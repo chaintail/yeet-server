@@ -16,6 +16,7 @@ import {homeWithFundUrl,failureWithFundUrl} from './fund-link.mjs';
 import {versionInfo} from './version.mjs';
 import {overview} from './overview.mjs';
 import {winnerOf} from './trade/pnl.mjs';
+import {boardAnswer} from './xp/boards.mjs';
 // Accounts are created on the first verified sign-in (identity-store.mjs). The identity app is Privy in
 // production and the development stub only under TEST_PROFILE=1 with DEV_IDENTITY_STUB=1.
 const devStub=TEST&&process.env.DEV_IDENTITY_STUB==='1';
@@ -131,7 +132,7 @@ export const ROUTE_SCOPES=Object.freeze([
  ['POST',/^\/trades\/t_[a-z0-9]{20}\/signature$/,'yeet:trade'],
  ['GET',/^\/trades\/t_[a-z0-9]{20}$/,'yeet:read'],
  ['GET',/^\/portfolio$/,'yeet:read'],
- ['GET',/^\/leaderboard\/(xp|week)$/,'yeet:read'],
+ ['GET',/^\/leaderboard\/(xp|week|winners|best_trade|losers|coins)(\/(today|7d|all))?$/,'yeet:read'],
  ['GET',/^\/checkin$/,'yeet:read'],
  ['POST',/^\/spin$/,'yeet:write'],
  ['GET',/^\/lucky$/,'yeet:read'],
@@ -244,7 +245,11 @@ function xpRoute(tool,fn){
 }
 /** The name a board shows: the username the person set, otherwise the default name. */
 export function boardName(id){return usernameOf(id)??handle(id)}
-app.get('/leaderboard/:board',xpRoute('yeet_leaderboard',(x,who,a)=>x.board(a.board??'xp',who,boardName)));
+// Boards by XP and, from settled trades, by USDC made, best single SKEET, USDC lost and most yeeted coins (xp/boards.mjs).
+app.get('/leaderboard/:board{/:window}',xpRoute('yeet_leaderboard',async(x,who,a)=>{
+ const e=await tradeEngine();
+ return boardAnswer({x,db:e.db,catalog:e.catalog,who,board:a.board,window:a.window,names:boardName});
+}));
 // yeet_checkin: the daily wheel on its own card (a check-in). The same XP summary yeet_home carries in `xp`.
 app.get('/checkin',xpRoute('yeet_checkin',(x,who)=>({checkin:homeXp(x.summary(who),HOME_XP_KEYS)})));
 app.post('/spin',xpRoute('daily_spin',(x,who)=>x.doSpin(who)));
