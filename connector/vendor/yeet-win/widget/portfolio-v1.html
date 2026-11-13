@@ -34,6 +34,10 @@ button{font:inherit;color:inherit}
 .who{display:flex;flex-direction:column;min-width:0}
 .sym{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .name{color:var(--muted);font-size:.75rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.share{color:var(--yellow);font-size:.75rem;font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums}
+/* A coin at 0 parts: dimmed and out of the trade; its stepper stays usable so it can come back. */
+.row.off>.avatar,.row.off>.who,.row.off>.est{opacity:.45}
+.row.off .share{color:var(--muted);font-weight:400}
 .est{display:flex;flex-direction:column;align-items:flex-end;text-align:right;white-space:nowrap;font-size:.8125rem}
 .est .amt{font-weight:700}
 .est .usd,.est.muted{color:var(--muted);font-size:.75rem}
@@ -185,7 +189,7 @@ display:flex;flex-direction:column}
 // Rendering uses textContent only. The one-time confirm code lives in one closure variable and nowhere else.
 const document=window.document;
 const VIEW="portfolio";
-const ERRORS={"INVALID_ARGUMENT":["Check the request","A value in the request is not valid, so check the coins, parts and amount.",false],"COIN_NOT_SUPPORTED":["Coin not available","One of these coins can’t be traded on YEET right now, so pick another from the coin list.",false],"PARTS_NOT_TEN":["Parts must add up to 10","Give each coin whole parts so the basket adds up to exactly 10.",false],"AMOUNT_TOO_SMALL":["Amount too small","Each coin needs at least the minimum per coin, so raise the amount or use fewer coins.",false],"COST_TOO_HIGH":["Fees too high right now","Swap costs for this basket are above the YEET limit, so try a larger amount or fewer coins.",true],"LIMIT_EXCEEDED":["Over your limit","This trade would go over the per-trade or daily USDC limit.",false],"BALANCE_LOW":["Not enough funds","Your YEET wallet doesn’t hold enough for this trade, so add funds or lower the amount.",false],"WALLET_NOT_READY":["Wallet not ready","Your YEET wallet isn’t set up for trading yet, so finish sign-in and try again.",false],"CONFIRMATION_REQUIRED":["Tap to confirm","Trades only run from your tap in the card, so refresh the quote and tap again.",true],"REQUOTE_REQUIRED":["Price moved","The price moved past your minimum, so refresh the quote to see the new numbers.",true],"TRADING_PAUSED":["Trading is paused","YEET has paused trading for now and your funds stay in your wallet.",true],"REAUTH_REQUIRED":["Reconnect YEET","ChatGPT needs your permission again, so reconnect YEET when it asks.",false],"TEMPORARILY_UNAVAILABLE":["Try again in a minute","YEET couldn’t reach a service it needs and nothing was traded.",true]};
+const ERRORS={"INVALID_ARGUMENT":["Check the request","A value in the request is not valid, so check the coins, parts and amount.",false],"COIN_NOT_SUPPORTED":["Coin not available","One of these coins can’t be traded on YEET right now, so pick another from the coin list.",false],"PARTS_EMPTY":["Pick at least one coin","Every coin is at 0 parts, so give at least one coin 1 or more parts.",false],"AMOUNT_TOO_SMALL":["A coin gets too little","Each coin needs at least the minimum per coin (3 USDC), so raise the amount, give the smallest coin more parts or set it to 0.",false],"COST_TOO_HIGH":["Fees too high right now","Swap costs for this basket are above the YEET limit, so try a larger amount or fewer coins.",true],"LIMIT_EXCEEDED":["Over your limit","This trade would go over the per-trade or daily USDC limit.",false],"BALANCE_LOW":["Not enough funds","Your YEET wallet doesn’t hold enough for this trade, so add funds or lower the amount.",false],"WALLET_NOT_READY":["Wallet not ready","Your YEET wallet isn’t set up for trading yet, so finish sign-in and try again.",false],"CONFIRMATION_REQUIRED":["Tap to confirm","Trades only run from your tap in the card, so refresh the quote and tap again.",true],"REQUOTE_REQUIRED":["Price moved","The price moved past your minimum, so refresh the quote to see the new numbers.",true],"TRADING_PAUSED":["Trading is paused","YEET has paused trading for now and your funds stay in your wallet.",true],"REAUTH_REQUIRED":["Reconnect YEET","ChatGPT needs your permission again, so reconnect YEET when it asks.",false],"TEMPORARILY_UNAVAILABLE":["Try again in a minute","YEET couldn’t reach a service it needs and nothing was traded.",true]};
 const COINS={"USDC":"USD Coin (Solana)","SOL":"Solana","WIF":"dogwifhat","BOME":"BOOK OF MEME","TRUMP":"Official Trump","PENGU":"Pudgy Penguins","MELANIA":"Official Melania Meme","SPX":"SPX6900","TURBO":"Turbo","LOUD":"Loud","NEARKAT":"NearKat"};
 const SPIN={"base_xp":5,"streak_bonus_xp":25,"streak_draw":true,"parts":"xp_won = base_xp + draw_xp + streak_xp; draw_xp is one bonus_xp value; streak_xp is 0, or on a streak milestone streak_bonus_xp plus a second, independent bonus_xp draw","bonus_xp":[0,2,5,7,9,12,15,19,24,31,40]};
 const Wheel=(function yeetWheelFactory(window){
@@ -707,7 +711,7 @@ return {createWheel,geometry,wheelFit,landingFor,rotationAt,snapAt,ease,easeVelo
  BAND,EASE_POWER,SNAP_BACK,MIN_TURNS,WHEEL_ZOOM,DEFAULT_V0,TARGET_S,BULBS,SOUND_KEY};
 })(window);
 const CONFIRM_KEY='yeet/confirm';
-const POLL_MS=5000,POLL_MAX=360,SKEW_MS=2000,TOTAL_PARTS=10;
+const POLL_MS=5000,POLL_MAX=360,SKEW_MS=2000,MAX_PARTS=99;
 const FINAL=new Set(['success','partial','refunded','failed']);
 const SYMBOL=/^[A-Z0-9]{2,12}$/,DECIMAL=/^-?(0|[1-9][0-9]*)(\.[0-9]+)?$/;
 const PROPOSAL_ID=/^p_[a-z0-9]{20}$/,TRADE_ID=/^t_[a-z0-9]{20}$/,CODE=/^[A-Za-z0-9_-]{43}$/;
@@ -723,6 +727,8 @@ let current=null;          // {kind,data}: what the card shows
 let confirm=null;          // {proposal_id,revision,code,expires}: memory only, cleared on use or change
 const spent=new Set();     // proposal revisions already tapped; their code is never accepted again
 let draft=null,busy=false,quoting=false,queuedQuote=null,inlineError=null,note=null,spinWon=null;
+let roster=null;           // {proposal_id,symbols}: every coin of the YEET basket, also those stepped to 0 parts
+let hold=null;             // {title,text}: why the stepped parts can't be quoted yet (a coin under the minimum, or no parts)
 let wheel=null,wheelBox=null,spinBusy=false,spinLanding=null,spinRecalled=false;
 spinWon=VIEW==='home'&&state.spin?state.spin:null;
 let expiryTimer=null,pollTimer=null,polls=0,pollFailures=0,lastKey=null,lastHeight=-1,heightFrame=null;
@@ -801,7 +807,7 @@ function show(data,meta){
   const cur=current?.kind==='basket'?current.data:null;
   if(cur&&cur.proposal_id===data.proposal_id&&data.revision<cur.revision)return;
   if(state.trade_id&&state.proposal_id===data.proposal_id){current={kind:'receipt',data:{trade_id:state.trade_id,direction:data.direction,status:'submitted',legs:[]}};render();poll(0);return}
-  takeConfirm(data,meta);draft=null;inlineError=null;
+  takeConfirm(data,meta);keepRoster(data);if(!hold)draft=null;inlineError=null;
  }
  if(kind==='receipt'&&data.status==='requote_required'&&data.requote){note='The price moved. Check the new quote, then tap again.';return show(data.requote,meta)}
  if(kind==='receipt'&&TRADE_ID.test(data.trade_id)){if(state.trade_id!==data.trade_id){polls=0;pollFailures=0}saveState({trade_id:data.trade_id,...(PROPOSAL_ID.test(data.proposal_id??'')?{proposal_id:data.proposal_id}:{})});if(!FINAL.has(data.status))poll(POLL_MS);else window.clearTimeout(pollTimer)}
@@ -846,21 +852,49 @@ async function requestQuote(args){
  if(current?.kind==='basket'){inlineError=typeof u.data?.error==='string'?u.data.error:'TEMPORARILY_UNAVAILABLE';render();return}
  current={kind:'error',data:u.data,proposal_id:args.proposal_id};render();
 }
-function refresh(proposal_id){confirm=null;draft=null;note=null;if(current?.kind!=='basket')current={kind:'waiting'};requestQuote({proposal_id})}
-// Stepper rule: parts stay whole, at least 1 each, and always sum to 10. "+" takes one part from the largest
-// other row that can give one; "−" gives one part to the largest other row. Ties go to the upper row.
-function largestOther(parts,i,ok){let j=-1;parts.forEach((v,k)=>{if(k!==i&&ok(v)&&(j<0||v>parts[j]))j=k});return j}
-function step(parts,i,delta){
- const p=parts.slice();
- if(delta>0){const j=largestOther(p,i,v=>v>1);if(j<0)return null;p[i]+=1;p[j]-=1}
- else{if(p[i]<=1)return null;const j=largestOther(p,i,()=>true);if(j<0)return null;p[i]-=1;p[j]+=1}
- return p;
+function refresh(proposal_id){confirm=null;draft=null;hold=null;note=null;if(current?.kind!=='basket')current={kind:'waiting'};requestQuote({proposal_id})}
+// Stepper rule: parts are a free ratio of whole numbers, 0 to 99 per coin; a coin's share is parts / sum(parts).
+// "+" and "−" only change their own coin. A coin at 0 is dimmed and left out of the trade, and stays on the card.
+function step(parts,i,delta){const p=parts.slice();const v=(p[i]??0)+delta;if(v<0||v>MAX_PARTS)return null;p[i]=v;return p}
+function keepRoster(p){
+ if(p.direction!=='yeet'){roster=null;return}
+ const syms=p.legs.map(l=>safeSymbol(l.symbol)).filter(Boolean).slice(0,5);
+ if(!roster||roster.proposal_id!==p.proposal_id){roster={proposal_id:p.proposal_id,symbols:syms};draft=null;hold=null;return}
+ for(const s of syms)if(!roster.symbols.includes(s)&&roster.symbols.length<5){roster.symbols.push(s);if(draft)draft.push(p.legs.find(l=>l.symbol===s)?.parts??0)}
+}
+const legOf=(p,sym)=>p.legs.find(l=>l.symbol===sym)||null;
+function partsOf(p){return draft||(roster?roster.symbols.map(s=>legOf(p,s)?.parts??0):p.legs.map(l=>l.parts))}
+// Money math in USDC micro-units, the same split the server makes: floor(total*parts/sum), remainder to the largest leg.
+function micro(v){const m=typeof v==='string'?/^(0|[1-9][0-9]*)(?:\.([0-9]{1,6}))?$/.exec(v):null;return m?BigInt(m[1])*1000000n+BigInt((m[2]??'').padEnd(6,'0')):null}
+function split(total,parts){
+ const sum=parts.reduce((a,b)=>a+b,0);if(total===null||sum<=0)return null;
+ const shares=parts.map(x=>total*BigInt(x)/BigInt(sum));let rest=total-shares.reduce((a,b)=>a+b,0n);
+ let big=0;parts.forEach((x,k)=>{if(x>parts[big])big=k});shares[big]+=rest;return shares;
+}
+const usdMicro=raw=>usdFmt.format(Number(raw)/1e6);
+const listOf=a=>a.length<2?a.join(''):`${a.slice(0,-1).join(', ')} and ${a.at(-1)}`;
+/** Why these parts can't be quoted, in words that say what to change; null when they can. */
+function holdFor(p,parts,symbols){
+ const sum=parts.reduce((a,b)=>a+b,0);
+ if(sum<=0)return {title:ERRORS.PARTS_EMPTY?.[0]??'Pick at least one coin',text:'Every coin is at 0 parts. Tap + on a coin to put it back in the basket.'};
+ const min=micro(p.min_leg_usdc),total=micro(p.amount_usdc),shares=split(total,parts);
+ if(min===null||!shares)return null;
+ const low=parts.map((x,k)=>k).filter(k=>parts[k]>0&&shares[k]<min);
+ if(!low.length)return null;
+ const fewest=Math.min(...low.map(k=>parts[k]));
+ let need=(min*BigInt(sum)+BigInt(fewest)-1n)/BigInt(fewest);need=(need+9999n)/10000n*10000n;
+ const names=low.map(k=>symbols[k]??'?');const one=names.length===1;
+ const said=listOf(low.map(k=>`${symbols[k]??'?'} (${usdMicro(shares[k])})`));
+ return {title:ERRORS.AMOUNT_TOO_SMALL?.[0]??'A coin gets too little',
+  text:`${said} ${one?'is':'are'} under the ${usdMicro(min)} minimum per coin. Give ${one?names[0]:'them'} more parts, set ${one?'it':'them'} to 0, or ask in the chat for at least ${usdMicro(need)} in total.`};
 }
 function onStep(i,delta){
- const p=current?.data;if(current?.kind!=='basket'||busy)return;
- const parts=draft||p.legs.map(l=>l.parts);const next=step(parts,i,delta);if(!next)return;
- draft=next;confirm=null;window.clearTimeout(expiryTimer);
- requestQuote({proposal_id:p.proposal_id,legs:p.legs.map((l,k)=>({symbol:l.symbol,parts:next[k]}))});
+ const p=current?.data;if(current?.kind!=='basket'||busy||!roster)return;
+ const next=step(partsOf(p),i,delta);if(!next)return;
+ draft=next;confirm=null;window.clearTimeout(expiryTimer);inlineError=null;
+ hold=holdFor(p,next,roster.symbols);
+ if(hold){queuedQuote=null;render();return}
+ requestQuote({proposal_id:p.proposal_id,legs:roster.symbols.map((s,k)=>({symbol:s,parts:next[k]}))});
 }
 function poll(delay){
  window.clearTimeout(pollTimer);
@@ -984,22 +1018,31 @@ function noteLine(text,cls='note'){const n=el('p',cls,text);n.setAttribute('role
 // ---- Views -------------------------------------------------------------------------------------
 const WARN={COST_HIGH:'Cost is above 3%',LEG_SMALL:'One coin is near the minimum',BALANCE_LOW:'Not enough funds yet',SIGNER_MISSING:'Wallet needs set-up'};
 function renderBasket(p){
- const skeet=p.direction==='skeet';const parts=draft||p.legs.map(l=>l.parts);const legs=p.legs.slice(0,5);
+ const skeet=p.direction==='skeet';
+ if(!skeet&&(!roster||roster.proposal_id!==p.proposal_id))keepRoster(p);
+ const parts=skeet?[]:partsOf(p);
+ const rows=skeet?p.legs.slice(0,5).map(l=>({sym:safeSymbol(l.symbol),leg:l})):roster.symbols.map(s=>({sym:s,leg:legOf(p,s)}));
+ const inTrade=skeet?rows.length:parts.filter(x=>x>0).length;
+ const sum=parts.reduce((a,b)=>a+b,0);const shares=skeet?null:split(micro(p.amount_usdc),parts);
  const card=el('section','card basket');card.dataset.direction=skeet?'skeet':'yeet';
- card.append(head(skeet?'SKEET to USDC':'⚡ YEET basket',skeet?`${legs.length} coin${legs.length>1?'s':''} → USDC`:`${amount(p.amount_usdc)??"—"} USDC · ${legs.length} coin${legs.length>1?'s':''}`));
+ card.append(head(skeet?'SKEET to USDC':'⚡ YEET basket',skeet?`${inTrade} coin${inTrade>1?'s':''} → USDC`:`${amount(p.amount_usdc)??"—"} USDC · ${inTrade} coin${inTrade===1?'':'s'}`));
  const list=el('ul','rows');
- legs.forEach((l,i)=>{
-  const sym=safeSymbol(l.symbol);const li=el('li','row');li.append(avatar(sym));
-  const who=el('div','who');who.append(el('span','sym',sym??'?'));const name=coinName(sym);if(name)who.append(el('span','name',name));li.append(who);
+ rows.forEach(({sym,leg:l},i)=>{
+  const off=!skeet&&parts[i]===0;
+  const li=el('li',off?'row off':'row');li.append(avatar(sym));
+  const who=el('div','who');who.append(el('span','sym',sym??'?'));
+  if(!skeet){const share=el('span','share',off?'0% · not in this trade':`${pct(sum>0?parts[i]*100/sum:NaN)??'—'} · ${shares?usdMicro(shares[i]):'—'}`);share.dataset.role='share';who.append(share)}
+  const name=coinName(sym);if(name)who.append(el('span','name',name));li.append(who);
   const est=el('div','est');
   if(skeet){est.append(el('span','amt',`${amount(l.amount_in)??'—'} ${sym??''}`.trim()),el('span','usd',`≈ ${money(l.est_out_usd)??'—'}`))}
+  else if(off||!l){est.classList.add('muted');est.append(el('span','amt','—'))}
   else{est.append(el('span','amt',`≈ ${amount(l.est_out)??'—'}`),el('span','usd',money(l.est_out_usd)??'—'))}
   li.append(est);
   if(!skeet&&Number.isInteger(parts[i])){
    const s=el('div','stepper');s.setAttribute('role','group');s.setAttribute('aria-label',`${sym} parts`);
    const minus=button('step','−',()=>onStep(i,-1));minus.setAttribute('aria-label',`Less ${sym}`);minus.disabled=busy||!step(parts,i,-1);
    const plus=button('step','+',()=>onStep(i,1));plus.setAttribute('aria-label',`More ${sym}`);plus.disabled=busy||!step(parts,i,1);
-   const v=el('output','parts',String(parts[i]));v.setAttribute('aria-label',`${parts[i]} of ${TOTAL_PARTS} parts`);
+   const v=el('output','parts',String(parts[i]));v.setAttribute('aria-label',`${parts[i]} of ${sum} parts`);
    s.append(minus,v,plus);li.append(s);
   }
   list.append(li);
@@ -1010,7 +1053,8 @@ function renderBasket(p){
  card.append(totals);
  const warns=(Array.isArray(p.warnings)?p.warnings:[]).filter(w=>Object.hasOwn(WARN,w)&&w!=='COST_HIGH');
  if(warns.length){const box=el('div','chips');for(const w of warns)box.append(el('span','chip',WARN[w]));card.append(box)}
- if(inlineError){const e=ERRORS[inlineError]||ERRORS.TEMPORARILY_UNAVAILABLE;const box=el('div','inline-error');box.setAttribute('role','alert');box.append(el('strong',null,e[0]),el('span',null,e[1]));card.append(box)}
+ if(hold){const box=el('div','inline-error');box.setAttribute('role','alert');box.dataset.role='hold';box.append(el('strong',null,hold.title),el('span',null,hold.text));card.append(box)}
+ else if(inlineError){const e=ERRORS[inlineError]||ERRORS.TEMPORARILY_UNAVAILABLE;const box=el('div','inline-error');box.setAttribute('role','alert');box.append(el('strong',null,e[0]),el('span',null,e[1]));card.append(box)}
  const actions=el('div','actions');
  const live=canTap(p);
  const primary=button(`primary ${skeet?'skeet':'yeet'}`,busy?'Sending…':skeet?'SKEET':'⚡ YEET',()=>tap());primary.disabled=!live;primary.dataset.role='trade';
@@ -1019,6 +1063,7 @@ function renderBasket(p){
  if(expired&&canCall()){const r=button('quiet','Refresh quote',()=>refresh(p.proposal_id));r.dataset.role='refresh';actions.append(r)}
  card.append(actions);
  if(note)card.append(noteLine(note));
+ else if(hold)card.append(noteLine('Change the parts above to get a new quote.'));
  else if(quoting||draft)card.append(noteLine('Updating quote…'));
  else if(busy)card.append(noteLine('Sending your trade…'));
  else if(!canCall())card.append(noteLine('Open this card in the chat to trade.'));

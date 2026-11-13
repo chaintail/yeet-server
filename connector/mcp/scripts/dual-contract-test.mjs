@@ -19,7 +19,7 @@ test('shared pieces follow plan 2.1',()=>{
  assert.doesNotThrow(()=>p('symbol').parse('WIF'));assert.throws(()=>p('symbol').parse('$WIF'));assert.throws(()=>p('symbol').parse('W'));
  assert.doesNotThrow(()=>p('proposal_id').parse('p_abcdefghij0123456789'));assert.throws(()=>p('proposal_id').parse('p_ABC'));
  assert.doesNotThrow(()=>p('trade_id').parse('t_abcdefghij0123456789'));
- assert.throws(()=>p('leg_in').parse({symbol:'WIF',parts:11}));assert.throws(()=>p('leg_in').parse({symbol:'WIF',parts:1,extra:1}));
+ assert.doesNotThrow(()=>p('leg_in').parse({symbol:'WIF',parts:0}));assert.doesNotThrow(()=>p('leg_in').parse({symbol:'WIF',parts:99}));assert.throws(()=>p('leg_in').parse({symbol:'WIF',parts:100}));assert.throws(()=>p('leg_in').parse({symbol:'WIF',parts:1,extra:1}));
  const input=zodSchema(z,toolSchemas.yeet_propose.input);
  assert.doesNotThrow(()=>input.parse({request_id:'r',amount_usdc:'20',legs:[{symbol:'WIF',parts:10}]}));
  assert.throws(()=>input.parse({request_id:'r',amount_usdc:'20',legs:[]}));
@@ -32,7 +32,7 @@ test('shared pieces follow plan 2.1',()=>{
 test('the error enum and x-yeet-errors catalogue agree; every code has a card; retryable codes as the contract says',async()=>{
  const {TOOL_ERRORS}=await import('#contracts/errors');
  const codes=contract.$defs.failure.properties.error.enum;
- assert.deepEqual(codes,['INVALID_ARGUMENT','COIN_NOT_SUPPORTED','PARTS_NOT_TEN','AMOUNT_TOO_SMALL','COST_TOO_HIGH','LIMIT_EXCEEDED','BALANCE_LOW','WALLET_NOT_READY','CONFIRMATION_REQUIRED','REQUOTE_REQUIRED','TRADING_PAUSED','REAUTH_REQUIRED','TEMPORARILY_UNAVAILABLE']);
+ assert.deepEqual(codes,['INVALID_ARGUMENT','COIN_NOT_SUPPORTED','PARTS_EMPTY','AMOUNT_TOO_SMALL','COST_TOO_HIGH','LIMIT_EXCEEDED','BALANCE_LOW','WALLET_NOT_READY','CONFIRMATION_REQUIRED','REQUOTE_REQUIRED','TRADING_PAUSED','REAUTH_REQUIRED','TEMPORARILY_UNAVAILABLE']);
  assert.deepEqual(Object.keys(TOOL_ERRORS).sort(),[...codes].sort());
  for(const code of codes){
   const result=JSON.parse(toolError({error:code}).content[0].text);

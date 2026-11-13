@@ -30,6 +30,22 @@ test('propose: dry plan, contract-shaped proposal, confirm code beside it; idemp
  assert.notEqual(other.proposal_id,p.proposal_id,'idempotency is per account and client');
 });
 
+test('parts are a free ratio: any total, a coin at 0 is left out, USDC split in micro-units with the remainder on the largest leg',async()=>{
+ const {engine}=await fakeEngine();
+ const p=await engine.propose(alice,{request_id:'ratio',amount_usdc:'20',legs:[{symbol:'WIF',parts:3},{symbol:'BOME',parts:1},{symbol:'TRUMP',parts:1}]});
+ out('yeet_propose').parse(strip(p));
+ assert.deepEqual(p.legs.map(l=>[l.symbol,l.parts,l.amount_in]),[['WIF',3,'12'],['BOME',1,'4'],['TRUMP',1,'4']]);
+ assert.equal(p.min_leg_usdc,'3');
+ const odd=await engine.propose(alice,{request_id:'odd',amount_usdc:'10',legs:[{symbol:'WIF',parts:1},{symbol:'BOME',parts:2}]});
+ assert.deepEqual(odd.legs.map(l=>l.amount_in),['3.333333','6.666667']);
+ const q=await engine.quote(alice,{proposal_id:p.proposal_id,legs:[{symbol:'WIF',parts:6},{symbol:'BOME',parts:0},{symbol:'TRUMP',parts:2}]});
+ out('yeet_quote').parse(strip(q));
+ assert.deepEqual(q.legs.map(l=>[l.symbol,l.parts,l.amount_in]),[['WIF',6,'15'],['TRUMP',2,'5']]);
+ await code(engine.quote(alice,{proposal_id:p.proposal_id,legs:[{symbol:'WIF',parts:0},{symbol:'TRUMP',parts:0}]}),'PARTS_EMPTY');
+ // 6 and 1 of 20 USDC gives TRUMP 2.857142: under the 3 USDC minimum.
+ await code(engine.quote(alice,{proposal_id:p.proposal_id,legs:[{symbol:'WIF',parts:6},{symbol:'TRUMP',parts:1}]}),'AMOUNT_TOO_SMALL');
+});
+
 test('B-1 code single-use, and replay of a used code returns the same trade without a second transfer',async()=>{
  const {engine,signer}=await fakeEngine();
  const p=await engine.propose(alice,basket);
@@ -105,7 +121,10 @@ test('B-1 limits: minimum per coin, per-trade cap, cost ceiling, parts, coins, l
  const {engine,oneclick}=await fakeEngine();
  await code(engine.propose(alice,{request_id:'a',amount_usdc:'10',legs:[{symbol:'WIF',parts:8},{symbol:'BOME',parts:2}]}),'AMOUNT_TOO_SMALL');
  await code(engine.propose(alice,{request_id:'b',amount_usdc:'25.000001',legs:[{symbol:'WIF',parts:10}]}),'LIMIT_EXCEEDED');
- await code(engine.propose(alice,{request_id:'c',amount_usdc:'20',legs:[{symbol:'WIF',parts:5},{symbol:'BOME',parts:4}]}),'PARTS_NOT_TEN');
+ await code(engine.propose(alice,{request_id:'c',amount_usdc:'20',legs:[{symbol:'WIF',parts:0},{symbol:'BOME',parts:0}]}),'PARTS_EMPTY');
+ await code(engine.propose(alice,{request_id:'c2',amount_usdc:'20',legs:[{symbol:'WIF',parts:100}]}),'INVALID_ARGUMENT');
+ await code(engine.propose(alice,{request_id:'c3',amount_usdc:'20',legs:[{symbol:'WIF',parts:-1},{symbol:'BOME',parts:4}]}),'INVALID_ARGUMENT');
+ await code(engine.propose(alice,{request_id:'c4',amount_usdc:'20',legs:[{symbol:'WIF',parts:6},{symbol:'BOME',parts:1}]}),'AMOUNT_TOO_SMALL');
  await code(engine.propose(alice,{request_id:'d',amount_usdc:'20',legs:[{symbol:'DOGE',parts:10}]}),'COIN_NOT_SUPPORTED');
  await code(engine.propose(alice,{request_id:'e',amount_usdc:'20',legs:[{symbol:'WIF',parts:5},{symbol:'wif',parts:5}]}),'INVALID_ARGUMENT');
  await code(engine.propose(alice,{request_id:'f',amount_usdc:'20',legs:['WIF','BOME','TRUMP','PENGU','SPX','TURBO'].map(symbol=>({symbol,parts:symbol==='WIF'?5:1}))}),'INVALID_ARGUMENT');

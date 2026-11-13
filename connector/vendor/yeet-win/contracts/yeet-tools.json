@@ -109,9 +109,9 @@
         },
         "parts": {
           "type": "integer",
-          "minimum": 1,
-          "maximum": 10,
-          "description": "Whole parts out of 10."
+          "minimum": 0,
+          "maximum": 99,
+          "description": "Whole parts, 0-99. A coin's share is its parts divided by the basket's total parts (6 and 4 = 60% and 40%; 3, 1 and 1 = 60%, 20% and 20%). 0 leaves the coin out; at least one coin needs 1 or more."
         }
       },
       "required": [
@@ -131,7 +131,7 @@
             {
               "type": "integer",
               "minimum": 1,
-              "maximum": 10
+              "maximum": 99
             },
             {
               "type": "null"
@@ -230,6 +230,10 @@
             "Tap ⚡ YEET in the card",
             "Tap SKEET in the card"
           ]
+        },
+        "min_leg_usdc": {
+          "$ref": "#/$defs/usdc",
+          "description": "Minimum USDC each coin in a YEET basket must get (the card warns before a coin goes under it)."
         }
       },
       "required": [
@@ -252,7 +256,7 @@
           "enum": [
             "INVALID_ARGUMENT",
             "COIN_NOT_SUPPORTED",
-            "PARTS_NOT_TEN",
+            "PARTS_EMPTY",
             "AMOUNT_TOO_SMALL",
             "COST_TOO_HIGH",
             "LIMIT_EXCEEDED",
@@ -626,7 +630,7 @@
         "REAUTH_REQUIRED",
         "TEMPORARILY_UNAVAILABLE",
         "COIN_NOT_SUPPORTED",
-        "PARTS_NOT_TEN",
+        "PARTS_EMPTY",
         "AMOUNT_TOO_SMALL",
         "COST_TOO_HIGH",
         "LIMIT_EXCEEDED",
@@ -685,7 +689,7 @@
         "REAUTH_REQUIRED",
         "TEMPORARILY_UNAVAILABLE",
         "COIN_NOT_SUPPORTED",
-        "PARTS_NOT_TEN",
+        "PARTS_EMPTY",
         "AMOUNT_TOO_SMALL",
         "COST_TOO_HIGH",
         "LIMIT_EXCEEDED",
@@ -1378,7 +1382,7 @@
     "basket": {
       "uri": "ui://yeet/basket-v1.html",
       "title": "YEET basket",
-      "description": "A quoted basket: coins, parts out of 10, estimated amounts, cost, and the ⚡ YEET or SKEET button."
+      "description": "A quoted basket: coins with their parts, each coin's share in percent and USDC, estimated amounts, cost, and the ⚡ YEET or SKEET button."
     },
     "receipt": {
       "uri": "ui://yeet/receipt-v1.html",
@@ -1435,14 +1439,14 @@
       "message": "One of these coins can’t be traded on YEET right now, so pick another from the coin list.",
       "retryable": false
     },
-    "PARTS_NOT_TEN": {
-      "title": "Parts must add up to 10",
-      "message": "Give each coin whole parts so the basket adds up to exactly 10.",
+    "PARTS_EMPTY": {
+      "title": "Pick at least one coin",
+      "message": "Every coin is at 0 parts, so give at least one coin 1 or more parts.",
       "retryable": false
     },
     "AMOUNT_TOO_SMALL": {
-      "title": "Amount too small",
-      "message": "Each coin needs at least the minimum per coin, so raise the amount or use fewer coins.",
+      "title": "A coin gets too little",
+      "message": "Each coin needs at least the minimum per coin (3 USDC), so raise the amount, give the smallest coin more parts or set it to 0.",
       "retryable": false
     },
     "COST_TOO_HIGH": {

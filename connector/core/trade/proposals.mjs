@@ -2,7 +2,7 @@
 // yeet_quote adds a revision with a fresh dry quote. Idempotent on (account, client, request_id): the same request
 // returns the same proposal, a different payload under the same request_id is INVALID_ARGUMENT. Every answer carries
 // a new one-time confirm code that the connector moves to the card-only `_meta`.
-import {buildYeetPlan,buildSkeetPlan,PlanValidationError,PlanQuoteError,CATALOG,findToken,parseUnits,formatUnits,splitByParts} from './router.mjs';
+import {buildYeetPlan,buildSkeetPlan,PlanValidationError,PlanQuoteError,CATALOG,findToken,parseUnits,formatUnits,splitByParts,MAX_PARTS} from './router.mjs';
 import {checkKillSwitch,checkLegCount,checkBasket,checkCost,checkDaily,costBps,COST_WARN_BPS} from './limits.mjs';
 import {refuse,sha256,newId,iso,usd,usdRaw,TradeError} from './util.mjs';
 import {tx} from './db.mjs';
@@ -37,10 +37,13 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
   checkLegCount(limits,legs?.length);
   const seen=new Set();
   const tokens=legs.map(l=>{const t=coin(l.symbol);if(seen.has(t.assetId))refuse('INVALID_ARGUMENT','duplicate coin');seen.add(t.assetId);return t});
-  if(legs.some(l=>!Number.isInteger(l.parts)||l.parts<1||l.parts>10))refuse('INVALID_ARGUMENT','parts');
-  if(legs.reduce((a,l)=>a+l.parts,0)!==10)refuse('PARTS_NOT_TEN');
+  // Parts are a free ratio of whole numbers: 0-99 per coin, each coin gets parts / sum(parts), a coin at 0 is left out.
+  if(legs.some(l=>!Number.isInteger(l.parts)||l.parts<0||l.parts>MAX_PARTS))refuse('INVALID_ARGUMENT','parts');
+  if(!legs.some(l=>l.parts>0))refuse('PARTS_EMPTY');
   return tokens;
  }
+ /** USDC per coin that is in the trade (parts > 0), split in micro-units like the router: remainder to the largest leg. */
+ const legShares=(total,legs)=>splitByParts(total,legs.filter(l=>l.parts>0).map(l=>l.parts));
  function amountRaw(amount){
   let raw;try{raw=parseUnits(amount,6)}catch{refuse('INVALID_ARGUMENT','amount')}
   if(raw<=0n)refuse('INVALID_ARGUMENT','amount');
@@ -83,6 +86,7 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
   return {
    proposal_id:p.id,revision,direction:p.direction,
    amount_usdc:p.direction==='yeet'?formatUnits(BigInt(p.amount_in_raw),6):usd(formatUnits(sumUsdRaw(legs,'in_usd'),12)),
+   ...(p.direction==='yeet'?{min_leg_usdc:formatUnits(limits.minLegRaw,6)}:{}),
    legs:legs.map(l=>({symbol:l.symbol,parts:l.parts,amount_in:l.amount_in,est_out:l.dry_out,est_out_usd:usd(l.out_usd),min_out:l.dry_min_out})),
    totals:{in_usd:usd(formatUnits(sumUsdRaw(legs,'in_usd'),12)),out_usd:usd(formatUnits(sumUsdRaw(legs,'out_usd'),12)),cost_pct:bps/100,time_estimate_s:Math.max(0,...legs.map(l=>l.time_estimate_s))},
    quoted_at:iso(Math.max(...legs.map(l=>l.quoted_at))),
@@ -157,7 +161,7 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
    if(existing)return present(existing,existing.revision,ctx,await wallets.resolve(ctx.accountId));
    validateYeetLegs(legs);
    const total=amountRaw(amount_usdc);
-   checkBasket(limits,splitByParts(total,legs.map(l=>l.parts)));
+   checkBasket(limits,legShares(total,legs));
    checkDaily(db,limits,ctx.accountId,now(),total);
    const w=await wallets.require(ctx.accountId);
    const plan=await yeetPlan(w,amount_usdc,legs,slippage);
@@ -195,7 +199,7 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
     validateYeetLegs(nextLegs);
     const amount=amount_usdc??formatUnits(total,6);
     total=amountRaw(amount);
-    checkBasket(limits,splitByParts(total,nextLegs.map(l=>l.parts)));
+    checkBasket(limits,legShares(total,nextLegs));
     checkDaily(db,limits,ctx.accountId,now(),total);
     rows=legRows(await yeetPlan(w,amount,nextLegs,p.slippage_bps));
    }else{

@@ -85,7 +85,7 @@ function printPlan(plan) {
     const t = plan.totals;
     rows.push([
         "total",
-        plan.direction === "yeet" ? "10" : "-",
+        plan.direction === "yeet" ? String(plan.legs.reduce((a, l) => a + (l.parts ?? 0), 0)) : "-",
         t.amountInFormatted ? short(t.amountInFormatted) : "-",
         t.amountOutFormatted ? short(t.amountOutFormatted) : "-",
         t.minAmountOutFormatted ? short(t.minAmountOutFormatted) : "-",

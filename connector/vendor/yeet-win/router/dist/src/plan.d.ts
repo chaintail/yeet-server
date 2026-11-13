@@ -1,6 +1,7 @@
 import { type CatalogEntry } from "./catalog.js";
 import { OneClickError, type OneClickClient } from "./oneclick.js";
-export declare const TOTAL_PARTS = 10;
+/** Most parts one coin can have. Parts are a free ratio: a coin's share is parts / sum(parts); 0 leaves it out. */
+export declare const MAX_PARTS = 99;
 export declare const DEFAULT_SLIPPAGE_BPS = 100;
 export declare const MAX_SLIPPAGE_BPS = 1000;
 export declare const DEFAULT_DEADLINE_MINUTES = 30;

@@ -3,7 +3,8 @@ import { isBurnEvmAddress, isEvmAddress, isSolanaAddress } from "./address.js";
 import { CATALOG, FUNDING, findToken, knownTokenAddresses } from "./catalog.js";
 import { OneClickError } from "./oneclick.js";
 import { formatUnits, parseUnits, sumUsd } from "./units.js";
-export const TOTAL_PARTS = 10;
+/** Most parts one coin can have. Parts are a free ratio: a coin's share is parts / sum(parts); 0 leaves it out. */
+export const MAX_PARTS = 99;
 export const DEFAULT_SLIPPAGE_BPS = 100;
 export const MAX_SLIPPAGE_BPS = 1_000;
 export const DEFAULT_DEADLINE_MINUTES = 30;
@@ -235,18 +236,19 @@ export async function buildYeetPlan(input, deps) {
     if (!Array.isArray(input.legs) || input.legs.length === 0)
         throw new PlanValidationError("legs", "at least one leg is required");
     const seen = new Set();
-    const resolved = input.legs.map((l, i) => {
-        if (!Number.isInteger(l.parts) || l.parts < 1)
-            throw new PlanValidationError(`legs[${i}].parts`, "must be a positive integer");
+    const all = input.legs.map((l, i) => {
+        if (!Number.isInteger(l.parts) || l.parts < 0 || l.parts > MAX_PARTS)
+            throw new PlanValidationError(`legs[${i}].parts`, `must be a whole number from 0 to ${MAX_PARTS}`);
         const token = resolveSolToken(`legs[${i}].symbol`, l.symbol, catalog);
         if (seen.has(token.assetId))
             throw new PlanValidationError(`legs[${i}].symbol`, `${token.symbol} appears twice`);
         seen.add(token.assetId);
         return { token, parts: l.parts };
     });
-    const partsSum = resolved.reduce((a, l) => a + l.parts, 0);
-    if (partsSum !== TOTAL_PARTS)
-        throw new PlanValidationError("legs", `parts must sum to ${TOTAL_PARTS}, got ${partsSum}`);
+    // A coin at 0 parts is left out of the trade; the rest split the USDC by parts / sum(parts).
+    const resolved = all.filter((l) => l.parts > 0);
+    if (resolved.length === 0)
+        throw new PlanValidationError("legs", "at least one coin needs 1 or more parts");
     const shares = splitByParts(total, resolved.map((l) => l.parts));
     shares.forEach((s, i) => {
         if (s <= 0n)
