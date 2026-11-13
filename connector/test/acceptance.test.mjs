@@ -244,6 +244,59 @@ test('B-1 end to end through the connector with a real token: propose, quote, ex
  }finally{configureTradeEngine({})}
 });
 
+test('card signing: signer script and /sign page on the public origin; the page signs only its own account\'s trade',async()=>{
+ const tok=await token();
+ const call=async(name,args)=>(await (await rpc({jsonrpc:'2.0',id:6,method:'tools/call',params:{name,arguments:args}},tok.access_token)).json()).result;
+ const {configureTradeEngine}=await import('../core/trade/runtime.mjs');
+ const {fakeRuntime,signAs}=await import('../core/pipeline/fakes.mjs');
+ const {accountCount}=await import('../core/identity-store.mjs');
+ const {signerAsset}=await import('#shared/signing.mjs');
+ const asset=signerAsset();
+ const page=(path,body)=>fetch(AS+'/sign/api/'+path,{method:'POST',headers:{'content-type':'application/json',origin:ORIGIN},body:JSON.stringify(body)});
+ const f=fakeRuntime(),{feePayer,wallet}=f;
+ configureTradeEngine(f.overrides);
+ process.env.PRIVY_APP_ID='cmzyxwvutsrqponmlkjihgfed';
+ try{
+  // The connector tells the card where the signer and the page are (RESOURCE is the public origin here).
+  const p=await call('yeet_propose',{request_id:'sign-1',amount_usdc:'10',legs:[{symbol:'WIF',parts:5},{symbol:'BOME',parts:5}]});
+  assert.deepEqual(p._meta['yeet/signer'],{privy_app_id:'cmzyxwvutsrqponmlkjihgfed',script_url:`${ORIGIN}${asset.path}`,sign_page_url:`${ORIGIN}/sign`});
+  const x=await call('execute_trade',{proposal_id:p.structuredContent.proposal_id,revision:1,confirm:p._meta['yeet/confirm'].code});
+  assert.equal(x.structuredContent.status,'awaiting_signature',JSON.stringify(x.content));
+  assert.equal(x._meta['yeet/signer'].script_url,`${ORIGIN}${asset.path}`);
+  const id=x.structuredContent.trade_id,reqs=x.structuredContent.sign_requests;
+  // The sign-in server serves the script and the page on the same origin.
+  const js=await fetch(AS+asset.path);assert.equal(js.status,200);assert.equal(js.headers.get('access-control-allow-origin'),'*');
+  const html=await (await fetch(`${AS}/sign?trade_id=${id}`)).text();
+  assert.match(html,new RegExp(`data-app-id="cmzyxwvutsrqponmlkjihgfed" data-trade-id="${id}"`));assert.match(html,new RegExp(asset.path.replace('.','\\.')));
+  // The person signed in on the page as the same Privy user: the same open requests as the card got.
+  const alice={trade_id:id,identity_token:'DEV:did:privy:acceptance-alice'};
+  const open=await page('requests',alice);assert.equal(open.status,200);
+  const o=await open.json();
+  assert.deepEqual(o.sign_requests.map(r=>r.attempt_id),reqs.map(r=>r.attempt_id));
+  assert.deepEqual(o.legs.map(l=>[l.symbol,l.send_status]),[['WIF','awaiting_signature'],['BOME','awaiting_signature']]);
+  // Another existing account, an identity with no account, a forged credential: refused, nothing created.
+  await signIn({identity:'DEV:did:privy:acceptance-bob'});
+  const n=accountCount();
+  for(const [identity_token,status] of [['DEV:did:privy:acceptance-bob',404],['DEV:did:privy:acceptance-nobody',404],['not-a-credential',401]]){
+   const r=await page('requests',{trade_id:id,identity_token});assert.equal(r.status,status,identity_token);
+   const s=await page('signature',{trade_id:id,identity_token,leg:0,attempt_id:reqs[0].attempt_id,signed:signAs(wallet,reqs[0])});assert.equal(s.status,status,identity_token);
+  }
+  assert.equal(accountCount(),n,'the page never creates an account');
+  assert.equal(feePayer.calls,0,'nothing was co-signed for a refused caller');
+  assert.equal((await fetch(AS+'/sign/api/requests',{method:'POST',headers:{'content-type':'application/json',origin:'https://evil.example'},body:JSON.stringify(alice)})).status,403);
+  // The page submits each leg through the same engine call as the card.
+  for(const r of o.sign_requests){
+   const s=await page('signature',{...alice,leg:r.leg,attempt_id:r.attempt_id,signed:signAs(wallet,r)});
+   assert.equal(s.status,200);assert.equal((await s.json()).legs[r.leg].send_status,'signing');
+  }
+  assert.equal(feePayer.calls,2);
+  // Nothing left to sign; the card reads the same trade through trade_status.
+  assert.deepEqual((await (await page('requests',alice)).json()).sign_requests,[]);
+  const st=await call('trade_status',{trade_id:id});assert.equal(st.isError,undefined,JSON.stringify(st.content));assert.equal(st.structuredContent.trade_id,id);
+  assert.ok(st._meta['yeet/signer']);
+ }finally{delete process.env.PRIVY_APP_ID;configureTradeEngine({})}
+});
+
 test('operator trades (ops/first-trade.mjs): only with the operator secret, only for an account in YEET_LIVE_ACCOUNTS, same engine',async()=>{
  const tok=await token();
  const me=await (await fetch(AS+'/me',{headers:{authorization:`Bearer ${tok.access_token}`}})).json();

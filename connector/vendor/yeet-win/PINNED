@@ -1,10 +1,9 @@
 repo: chaintail/yeet-win
-branch: gas-sol-feepayer
-commit: 4c81c7897a08dc466daa78d1fe22f8621d9f9002
-built: router (tsc 7.0.2), widget (node build.mjs)
-note: 4c81c78 is 4e3f971 plus a contracts/-only change; router and widget output are the 4e3f971 build unchanged
+branch: int/cards-signing
+commit: 19986a51fcad4e128bccff25b435b41209f600e2
+built: router (tsc 7.0.2), widget (node build.mjs), signer (scripts/build-signer.mjs, esbuild 0.28.2, @privy-io/js-sdk-core 0.78.0, sha256 0a7eae048a25)
 files:
   contracts/yeet-tools.json
-  widget/basket-v1.html home-v1.html leaderboard-v1.html portfolio-v1.html receipt-v1.html templates.json 
+  widget/basket-v1.html home-v1.html leaderboard-v1.html portfolio-v1.html receipt-v1.html templates.json yeet-signer.js 
   router/dist/src/**
   router/test/fixtures/*.json

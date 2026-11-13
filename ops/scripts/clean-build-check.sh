@@ -16,6 +16,7 @@ git -C "$repo" archive --format=tar "$commit" | docker build -f ops/Dockerfile -
 # Every role's entry module loads its imports, and the sign-in bundle is in the image.
 docker run --rm --network none --entrypoint sh "$tag" -c '
   test -s login/dist/login.js && test -s login/dist/fund.js &&
-  node --input-type=module -e "await import(\"./as/security-policy.mjs\"); await import(\"./as/body-replay.mjs\"); await import(\"./core/trade/limits.mjs\"); await import(\"./scope-catalog.mjs\")"
+  test -s vendor/yeet-win/widget/yeet-signer.js && test -s as/viewer/sign/sign.js && test -s as/viewer/sign/sign.css &&
+  node --input-type=module -e "await import(\"./as/security-policy.mjs\"); await import(\"./as/body-replay.mjs\"); await import(\"./core/trade/limits.mjs\"); await import(\"./scope-catalog.mjs\"); const s=await import(\"./shared/signing.mjs\"); if(!s.signerAsset())throw Error(\"signer not in the image\")"
 ' >>"$log" 2>&1 || fail "image check"
-echo "PASS clean build of $commit: image built from git archive, bundles present, modules load ($(( $(date +%s) - started ))s, log $log)"
+echo "PASS clean build of $commit: image built from git archive, bundles and card signer present, modules load ($(( $(date +%s) - started ))s, log $log)"

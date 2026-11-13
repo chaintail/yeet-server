@@ -61,6 +61,8 @@ services:
       RESOURCE: ${RESOURCE:-}
       PUBLIC_MODE: ${PUBLIC_MODE:-}
       PRIVY_LOGIN: ${PRIVY_LOGIN:-}
+      # Public Privy app id: trade results tell the card which Privy app signs (_meta['yeet/signer']).
+      PRIVY_APP_ID: ${PRIVY_APP_ID:-}
       AS_INTERNAL: ${AS_INTERNAL:-}
       CORE_INTERNAL: ${CORE_INTERNAL:-}
       YEET_P2: ${YEET_P2:-}

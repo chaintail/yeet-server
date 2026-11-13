@@ -1,0 +1,39 @@
+/* The signing page: the trade card's look (yeet-win packages/widget/src/yeet-card.css, Marlin palette), minimal. */
+:root{
+  --night:#09071C;--night-2:#131032;--night-3:#1D1947;--night-4:#2A2560;
+  --volt:#E5FF3C;--ultra:#6A48FF;--ultra-2:#8E77FF;
+  --cloud:#F4F2FF;--fog:#9C98C8;--slate:#5F5A8C;
+  --mint:#2EF0A6;--rose:#FF5C8A;--ember:#FF8A3D;
+  --disp:'Bricolage Grotesque',ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--night);color:var(--cloud);font:17px/1.45 var(--disp);-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%}
+main{min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:max(24px,env(safe-area-inset-top)) 16px 32px}
+.card{width:100%;max-width:420px;background:var(--night-2);border:1px solid var(--night-4);border-radius:22px;padding:20px 18px 18px;box-shadow:0 24px 60px -28px rgba(0,0,0,.9)}
+.top{display:flex;align-items:baseline;gap:10px;margin:0 0 14px}
+.mark{font-weight:800;font-style:italic;letter-spacing:.02em;color:var(--volt);font-size:15px}
+h1{margin:0;font-size:22px;font-weight:700;letter-spacing:-.01em}
+p{margin:0 0 10px}
+.line{color:var(--fog);font-size:15px}
+.line.ok{color:var(--mint)}.line.bad{color:var(--rose)}
+.fine{color:var(--slate);font-size:13px;margin-top:12px}
+.total{display:flex;justify-content:space-between;align-items:baseline;margin:0 0 10px}
+.total .side{font-weight:800;font-style:italic;font-size:20px}
+.total .side.yeet{color:var(--volt)}.total .side.skeet{color:var(--rose)}
+.total .amt{font-family:var(--mono);font-size:16px}
+ul.rows{list-style:none;margin:0 0 14px;padding:0;border-top:1px solid var(--night-4)}
+ul.rows li{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--night-4);font-size:15px}
+.sym{font-weight:700}.amt{font-family:var(--mono);color:var(--fog)}
+.state{font-size:13px;color:var(--fog);text-align:right}
+.state.ok{color:var(--mint)}.state.bad{color:var(--rose)}.state.run{color:var(--volt)}
+label{display:block;font-size:13px;color:var(--fog);margin:10px 0 6px}
+input{width:100%;font:inherit;font-size:17px;padding:12px 14px;border-radius:14px;border:1px solid var(--night-4);background:var(--night-3);color:var(--cloud);outline:none}
+input:focus{border-color:var(--ultra-2)}
+button{font:inherit;font-weight:700;font-size:17px;width:100%;margin-top:12px;padding:14px 16px;border:0;border-radius:18px;background:var(--volt);color:var(--night);cursor:pointer}
+button.yeet{background:var(--volt)}button.skeet{background:var(--rose);color:var(--night)}
+button.quiet{background:transparent;color:var(--fog);border:1px solid var(--night-4);font-weight:600;font-size:15px;padding:10px 14px}
+button:disabled{opacity:.55;cursor:default}
+a.back{display:block;text-align:center;margin-top:12px;color:var(--ultra-2);font-weight:600;text-decoration:none}
+[hidden]{display:none!important}

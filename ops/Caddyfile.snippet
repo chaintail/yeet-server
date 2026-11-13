@@ -35,6 +35,30 @@ handle @yeet_conn {
 			import cf_https_proto
 		}
 	}
+	# Card signing (connector/as/sign-page.mjs, served by the sign-in server). The trade card loads the Privy signer
+	# cross-origin from its sandbox origin; the hashed name never changes content, so it is cached a year. `>` replaces
+	# the blanket no-store above (otherwise both values go out and no-store wins). /sign sets its own CSP, so the `?`
+	# default above stays off there; it keeps no-store.
+	@yeet_signer_hashed {
+		method GET HEAD
+		path_regexp ^/cards/yeet-signer-[0-9a-f]{12}\.js$
+	}
+	handle @yeet_signer_hashed {
+		header >Cache-Control "public, max-age=31536000, immutable"
+		reverse_proxy 127.0.0.1:38860 {
+			import cf_https_proto
+		}
+	}
+	@yeet_signer_stable {
+		method GET HEAD
+		path /cards/yeet-signer.js
+	}
+	handle @yeet_signer_stable {
+		header >Cache-Control "public, max-age=300"
+		reverse_proxy 127.0.0.1:38860 {
+			import cf_https_proto
+		}
+	}
 	@yeet_connector_get {
 		method GET HEAD
 		path /.well-known/oauth-protected-resource /health

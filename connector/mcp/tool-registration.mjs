@@ -4,6 +4,7 @@ import {toolError} from './errors.mjs';
 import {toolSchemas,toolSpecs,zodSchema} from './tool-contract.mjs';
 import {registerWidgets,toolMeta,CONFIRM_META_KEY} from './widgets.mjs';
 import {instructions} from './instructions.mjs';
+import {SIGNER_META_KEY,signerMetaFromEnv} from '#shared/signing.mjs';
 
 /** Core route per tool: route(args) -> [core route, body or undefined for GET]. Everything else about a tool (title,
  * description, schemas, annotations, scope, card, visibility, widget access, card-only confirm) is the contract's. */
@@ -40,9 +41,15 @@ export const registeredTools=(env=process.env)=>Object.values(toolSpecs).filter(
 export const TOOLS=Object.freeze(Object.values(toolSpecs).map(t=>Object.freeze({...t,route:ROUTES[t.name]})));
 for(const t of TOOLS)if(!t.route)throw Error(`No core route for contract tool ${t.name}`);
 
+/** Results that carry `_meta['yeet/signer']` (CARD-SIGNING.md section 2.3a): the proposals the card trades from and the
+ * trade answers it signs and follows. Card-only, like the confirm code; never in structuredContent or content. */
+export const SIGNER_TOOLS=new Set(['yeet_propose','yeet_quote','skeet_propose','execute_trade','submit_trade_signature','trade_status']);
 export function createMcpServer({token,callCore,env=process.env}) {
  const server=new McpServer({name:'yeet',version:'0.2.0'},{instructions});
- registerWidgets(server);
+ // Signing set up here (https RESOURCE, PRIVY_APP_ID, vendored signer): the signing cards declare the signing domains
+ // and the trade results tell the card where the signer and the signing page are. Otherwise both stay off.
+ const signer=signerMetaFromEnv(env);
+ registerWidgets(server,{signOrigin:signer?new URL(signer.sign_page_url).origin:null});
  const meta=scope=>({securitySchemes:[{type:'oauth2',scopes:[scope]}]});
  for(const tool of registeredTools(env)){
   const {name,scope}=tool,schemas=toolSchemas[name],route=ROUTES[name];
@@ -62,7 +69,8 @@ export function createMcpServer({token,callCore,env=process.env}) {
     const parsed=output.safeParse(data);
     if(!parsed.success)return toolError({error:'TEMPORARILY_UNAVAILABLE'});
     const text=TEXT[name]?TEXT[name](result):JSON.stringify(parsed.data);
-    return {structuredContent:parsed.data,...(confirm?{_meta:{[CONFIRM_META_KEY]:confirm}}:{}),content:[{type:'text',text}]};
+    const cardMeta={...(confirm?{[CONFIRM_META_KEY]:confirm}:{}),...(signer&&SIGNER_TOOLS.has(name)?{[SIGNER_META_KEY]:signer}:{})};
+    return {structuredContent:parsed.data,...(Object.keys(cardMeta).length?{_meta:cardMeta}:{}),content:[{type:'text',text}]};
    }catch(e){return toolError(e)}
   });
  }

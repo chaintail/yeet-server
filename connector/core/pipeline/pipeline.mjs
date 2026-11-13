@@ -324,6 +324,15 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
  return {
   limits,wallets,proposals,tracker,codes,ledger,drivers,buyChain,sellChain,
   execute,submit,cancel,landings:()=>Promise.allSettled([...watches]),signRequests:async(ctx,id)=>signRequests(owned(ctx,id)),recoverTrade,
+  /** The first-party signing page: the trade's legs and its open sign requests, for the account's own trade only.
+   * Recovery runs first (as a replayed code does), so a paused system, a closed sign window or a near deadline ends
+   * the leg as not_sent instead of issuing a request. */
+  async pageRequests(ctx,id){
+   const t=owned(ctx,id);
+   await recoverTrade(t.id);
+   const cur=trade(t.id),sign_requests=await signRequests(cur);
+   return {trade_id:cur.id,direction:cur.direction,status:cur.status,legs:legsOf(cur.id).map(l=>({leg:l.idx,symbol:l.symbol,send_status:l.send_status})),sign_requests};
+  },
   /** driver-interface recover over every driver (ops). */
   async recover(){const out=[];for(const d of Object.values(drivers))out.push(...await d.recover({now:now()}));return out},
   propose:(ctx,body)=>proposals.propose(ctx,body),

@@ -11,6 +11,8 @@
 # 3. Results go to connector/vendor/yeet-win/:
 #      contracts/yeet-tools.json   tool schemas, card list and the x-yeet-errors catalogue
 #      widget/*.html, widget/templates.json
+#      widget/yeet-signer.js        the card's Privy signer (packages/widget/scripts/build-signer.mjs), served by the
+#                                   sign-in server at /cards/yeet-signer-<sha256:12>.js (as/sign-page.mjs)
 #      router/dist/**               compiled @yeet/router (dist/src only: index, 1Click client, plan, receipt, catalogue)
 #      router/test/fixtures/*.json  recorded 1Click quote/status payloads (the engine tests' fake 1Click answers from them)
 #      PINNED                       the yeet-win commit every file above came from
@@ -38,18 +40,23 @@ fi
   # The widget build also writes the landing page's wheel.js/wheel.css into apps/landing/ (not vendored).
   mkdir -p apps/landing
   (cd packages/widget && node build.mjs)
+  # The Privy signer the trade card loads by <script> (too big to inline: about 855 KB). esbuild and
+  # @privy-io/js-sdk-core come from this repo's lock-pinned connector/login install (npm run build:login first).
+  if [ -f packages/widget/scripts/build-signer.mjs ]; then
+    (cd packages/widget && YEET_CONNECTOR_DIR="$root/connector" node scripts/build-signer.mjs)
+  fi
 )
 
 mkdir -p "$dest/contracts" "$dest/widget" "$dest/router/dist" "$dest/router/test/fixtures"
 cp "$build/contracts/yeet-tools.json" "$dest/contracts/yeet-tools.json"
-rsync -a --delete --include='*.html' --include='templates.json' --exclude='*' "$build/packages/widget/dist/" "$dest/widget/"
+rsync -a --delete --include='*.html' --include='templates.json' --include='yeet-signer.js' --exclude='*' "$build/packages/widget/dist/" "$dest/widget/"
 rsync -a --delete "$build/packages/router/dist/src/" "$dest/router/dist/src/"
 rsync -a --delete --include='*.json' --exclude='*' "$build/packages/router/test/fixtures/" "$dest/router/test/fixtures/"
 cat >"$dest/PINNED" <<EOF
 repo: chaintail/yeet-win
 branch: $ref
 commit: $sha
-built: router (tsc $("$build/node_modules/.bin/tsc" --version | awk '{print $2}')), widget (node build.mjs)
+built: router (tsc $("$build/node_modules/.bin/tsc" --version | awk '{print $2}')), widget (node build.mjs)$(test -f "$dest/widget/yeet-signer.js" && echo ", signer (scripts/build-signer.mjs, esbuild $(node -p "require('$root/connector/login/node_modules/esbuild/package.json').version"), @privy-io/js-sdk-core $(node -p "require('$root/connector/login/node_modules/@privy-io/js-sdk-core/package.json').version"), sha256 $(sha256sum "$dest/widget/yeet-signer.js" | cut -c1-12))")
 files:
   contracts/yeet-tools.json
   widget/$(cd "$dest/widget" && ls | tr '\n' ' ')

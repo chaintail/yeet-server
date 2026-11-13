@@ -234,6 +234,9 @@
         "min_leg_usdc": {
           "$ref": "#/$defs/usdc",
           "description": "Minimum USDC each coin in a YEET basket must get (the card warns before a coin goes under it)."
+        },
+        "limits": {
+          "$ref": "#/$defs/limits"
         }
       },
       "required": [
@@ -494,6 +497,36 @@
       },
       "minItems": 0,
       "maxItems": 5
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "tier": {
+          "enum": [
+            "Noob",
+            "Winner",
+            "VIP"
+          ],
+          "description": "The person's XP tier."
+        },
+        "per_trade_usdc": {
+          "$ref": "#/$defs/usdc"
+        },
+        "daily_limit_usdc": {
+          "$ref": "#/$defs/usdc"
+        },
+        "left_today_usdc": {
+          "$ref": "#/$defs/usdc"
+        }
+      },
+      "required": [
+        "tier",
+        "per_trade_usdc",
+        "daily_limit_usdc",
+        "left_today_usdc"
+      ],
+      "additionalProperties": false,
+      "description": "BUY caps of the person's XP tier, per trade and per UTC day. Sells are never capped."
     }
   },
   "tools": {
@@ -646,6 +679,9 @@
             },
             "minItems": 0,
             "maxItems": 3
+          },
+          "limits": {
+            "$ref": "#/$defs/limits"
           }
         },
         "required": [
@@ -1838,8 +1874,8 @@
       "retryable": false
     },
     "CONFIRMATION_REQUIRED": {
-      "title": "Tap to confirm",
-      "message": "Trades only run from your tap in the card, so refresh the quote and tap again.",
+      "title": "Quote expired",
+      "message": "That quote is old. Refresh it and try again.",
       "retryable": true
     },
     "REQUOTE_REQUIRED": {

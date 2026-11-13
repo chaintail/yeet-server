@@ -13,6 +13,7 @@ import { document, credentials, html, renewableConsentCopy, expiredAuthorization
 import express from "express";
 import { providerCsp } from "./provider-csp.mjs";
 import { fundRoutes, privyPageCsp, afterSignIn, nextField } from "./fund-page.mjs";
+import { signRoutes } from "./sign-page.mjs";
 import { ACCOUNT_TITLE, USERNAME_PATH, accountBody, usernameMessage } from "./account-page.mjs";
 import {
   compatibilityClient,
@@ -51,6 +52,7 @@ import {
   read,
   write,
   verifyIdentity,
+  lookupAccount,
   secret,
   coreCall,
   coreEnsureWallets,
@@ -346,6 +348,7 @@ if (PUBLIC) {
   app.use("/interaction", limit(64));
   app.use("/reg", limit(20));
   app.use("/auth", limit(60));
+  app.use("/sign/api", limit(60));
 }
 // Body parsers run only on this server's own forms; oidc-provider reads its routes' bodies itself.
 const formBody = express.urlencoded({ extended: false, limit: "32kb" });
@@ -592,6 +595,15 @@ app.post(USERNAME_PATH, formBody, async (q, r) => {
 });
 // Add funds: USDC on Base through Privy funding (Coinbase Onramp). Needs a YEET sign-in session and the Privy sign-in.
 fundRoutes(app, { enabled: () => process.env.PRIVY_LOGIN === "1", session });
+// Card signing (sign-page.mjs): the signer script the trade card loads, and the first-party signing page with its two
+// routes. The page's caller is the Privy user signed in on the page, matched to the account already linked to it.
+signRoutes(app, {
+  enabled: () => process.env.PRIVY_LOGIN === "1" || (TEST && process.env.DEV_IDENTITY_STUB === "1"),
+  appId: () => process.env.PRIVY_APP_ID ?? "",
+  lookup: lookupAccount,
+  core: (route, account, body, timeoutMs) => coreSend(route, account, secret("core-as"), body, timeoutMs),
+  originOK,
+});
 // Browsers ask for /favicon.ico on their own; answer with the YEET icon the pages link to.
 const ICON = fs.readFileSync(new URL("./viewer/icon.svg", import.meta.url));
 app.get("/favicon.ico", (_q, r) => r.set("Cache-Control", "public, max-age=86400").type("image/svg+xml").send(ICON));

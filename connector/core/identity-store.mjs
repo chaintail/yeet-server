@@ -73,6 +73,14 @@ export function resolveIdentity(value, { now = Date.now() } = {}) {
     throw e;
   }
 }
+/** Verified identity -> the account it is already linked to, or undefined. Never creates an account (the signing
+ *  page: a Privy sign-in there may only reach an account that exists). */
+export function lookupIdentity(value) {
+  if (!appId || !validIdentity(value)) return undefined;
+  return database()
+    .prepare("SELECT account_id FROM identity_links WHERE provider=? AND app_id=? AND did=?")
+    .get(value.provider, value.app_id, value.did)?.account_id;
+}
 /** An existing account reached through a link for the configured app; undefined otherwise. */
 export function account(id) {
   if (!appId || !validAccount(id)) return undefined;

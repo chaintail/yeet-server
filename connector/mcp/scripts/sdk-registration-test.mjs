@@ -73,7 +73,10 @@ test('resources: the five vendored card templates are served with the app MIME t
   assert.deepEqual(resources.map(r=>r.uri).sort(),[BASKET_UI_URI,HOME_UI_URI,LEADERBOARD_UI_URI,PORTFOLIO_UI_URI,RECEIPT_UI_URI].sort());
   for(const r of resources){
    const {contents:[c]}=await client.readResource({uri:r.uri});
-   assert.equal(c.mimeType,TEMPLATE_MIME);assert.match(c.text,/<script>/);assert.doesNotMatch(c.text,/yeet\/confirm.{0,40}[A-Za-z0-9_-]{43}/);assert.ok(c.text.length<300_000);
+   assert.equal(c.mimeType,TEMPLATE_MIME);assert.match(c.text,/<script>/);assert.doesNotMatch(c.text,/yeet\/confirm.{0,40}[A-Za-z0-9_-]{43}/);
+   // The card package's own cap (yeet-win test/templates.test.mjs): under 300 KiB.
+   assert.ok(Buffer.byteLength(c.text)<300*1024,`${r.uri}: ${Buffer.byteLength(c.text)} B`);
+   // Signing is not configured in this server (env {}): every card keeps the closed CSP (signing-meta-test.mjs has the rest).
    assert.deepEqual(c._meta.ui.csp,{connectDomains:[],resourceDomains:[]});
   }
  }finally{await close()}

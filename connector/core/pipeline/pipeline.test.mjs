@@ -413,6 +413,28 @@ test('pipeline refusal details: another account, another trade of the same accou
  await assert.rejects(p.submit(ALICE,{trade_id:y.trade_id,leg:0,attempt_id:r.attempt_id,signed}),e=>e.code==='INVALID_ARGUMENT'&&e.detail==='unknown attempt');
 });
 
+test('signing page (pageRequests): the account\'s own trade only; the open requests; a paused system issues none',async()=>{
+ const f=fakePipeline();const {p,db,env,now}=f;
+ const x=await exec(p,ALICE,await p.propose(ALICE,basket));
+ const page=await p.pageRequests(ALICE,x.trade_id);
+ assert.equal(page.trade_id,x.trade_id);assert.equal(page.status,'signing');
+ assert.deepEqual(page.legs.map(l=>[l.leg,l.send_status]),[[0,'awaiting_signature'],[1,'awaiting_signature']]);
+ assert.deepEqual(page.sign_requests.map(r=>r.attempt_id),x.sign_requests.map(r=>r.attempt_id),'the same open attempts as the card');
+ await assert.rejects(p.pageRequests(BOB,x.trade_id),e=>e.code==='INVALID_ARGUMENT'&&e.detail==='unknown trade');
+ await assert.rejects(p.pageRequests(ALICE,'t_abcdefghij0123456789'),e=>e.code==='INVALID_ARGUMENT');
+ // A signed leg drops out of the page's requests.
+ const r0=x.sign_requests[0];await sub(p,ALICE,r0,signAs(aliceWallet,r0));
+ assert.deepEqual((await p.pageRequests(ALICE,x.trade_id)).sign_requests.map(r=>r.leg),[1]);
+ // Past the attempt's expiry the page gets a fresh attempt, like a replayed code.
+ now.advance(70_000);
+ const fresh=(await p.pageRequests(ALICE,x.trade_id)).sign_requests;
+ assert.equal(fresh.length,1);assert.notEqual(fresh[0].attempt_id,x.sign_requests[1].attempt_id);
+ // Kill switch: recovery runs first, the open leg ends not_sent and nothing is issued.
+ env.YEET_KILL_SWITCH='1';
+ const paused=await p.pageRequests(ALICE,x.trade_id);
+ assert.deepEqual(paused.sign_requests,[]);assert.equal(leg(db,x.trade_id,1).send_status,'not_sent');
+});
+
 test('live gate is read per call, not at boot',()=>{
  const env={YEET_LIVE:'1'};
  assert.equal(limitsFromEnv(env).live,true);

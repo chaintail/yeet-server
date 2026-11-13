@@ -3,6 +3,8 @@
 // descriptions come from the contract's `x-yeet-cards`; the template file per URI from the widget's templates.json.
 import {readFileSync} from 'node:fs';
 import {CARDS,META_KEYS,toolSpecs} from './tool-contract.mjs';
+import {SIGNING_VIEWS,signingCsp} from '#shared/signing.mjs';
+export {SIGNING_VIEWS};
 
 /** Card-only result `_meta` keys: the card reads these, the model reads structuredContent. */
 export const CARD_META_KEY = META_KEYS.card;
@@ -29,14 +31,21 @@ export function widgetHtml(view) {
   return html.get(view);
 }
 
-/** Resource `_meta` for every card: bordered, inline only, no network access from the frame. */
-export function resourceMeta(view) {
+/**
+ * Resource `_meta` for every card: bordered, inline only. Without `signOrigin`, or for a card that never signs (home,
+ * leaderboard), no network access from the frame. With it, a signing card (basket, portfolio, receipt) declares the
+ * signing domains (shared/signing.mjs signingCsp: Privy's auth and wallet API, the connector origin for the signer
+ * script and the signing page, Privy's wallet iframe). `ui.domain` is never set: the card origin ChatGPT derives from
+ * the connector URL is the one on the Privy allowed list.
+ */
+export function resourceMeta(view, {signOrigin = null} = {}) {
+  const c = signOrigin && SIGNING_VIEWS.includes(view) ? signingCsp(signOrigin) : null;
   return {
-    ui: {prefersBorder: true, csp: {connectDomains: [], resourceDomains: []}},
+    ui: {prefersBorder: true, csp: c ? {connectDomains: c.connect, resourceDomains: c.resource, frameDomains: c.frame} : {connectDomains: [], resourceDomains: []}},
     'openai/ui': {availableDisplayModes: ['inline']},
     'openai/widgetDescription': CARDS[view].description,
     'openai/widgetPrefersBorder': true,
-    'openai/widgetCSP': {connect_domains: [], resource_domains: []},
+    'openai/widgetCSP': c ? {connect_domains: c.connect, resource_domains: c.resource, frame_domains: c.frame, redirect_domains: c.redirect} : {connect_domains: [], resource_domains: []},
   };
 }
 
@@ -54,12 +63,12 @@ export function toolMeta(name) {
   };
 }
 
-/** Registers the card resources on a server (McpServer.registerResource). */
-export function registerWidgets(server) {
+/** Registers the card resources on a server (McpServer.registerResource). `signOrigin`: see resourceMeta. */
+export function registerWidgets(server, {signOrigin = null} = {}) {
   for (const [view, spec] of Object.entries(CARDS)) {
     const text = widgetHtml(view);
     server.registerResource(`yeet-${view}-card`, spec.uri, {mimeType: TEMPLATE_MIME, title: spec.title, description: spec.description}, async () => ({
-      contents: [{uri: spec.uri, mimeType: TEMPLATE_MIME, text, _meta: resourceMeta(view)}],
+      contents: [{uri: spec.uri, mimeType: TEMPLATE_MIME, text, _meta: resourceMeta(view, {signOrigin})}],
     }));
   }
 }

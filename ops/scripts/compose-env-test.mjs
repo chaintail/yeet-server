@@ -70,7 +70,7 @@ for (const [role, dirs] of Object.entries(roles)) {
     (n) => !passed.has(n) && !IN_IMAGE.includes(n) && !SECRETS[role].includes(n) && !OPERATOR_ONLY[role].includes(n),
   );
   // shared/ is read by every role; a name only some roles need is listed here.
-  const sharedOnly = { mcp: ["PRIVY_APP_ID", "PRIVY_JWKS_URL", "DEV_IDENTITY_STUB", "TEST_PROFILE", "STATE_DIR", "SECRETS_DIR"], core: ["PUBLIC_MODE", "DEV_IDENTITY_STUB", "TEST_PROFILE", "CORE_INTERNAL"], as: ["AS_INTERNAL"] };
+  const sharedOnly = { mcp: ["PRIVY_JWKS_URL", "DEV_IDENTITY_STUB", "TEST_PROFILE", "STATE_DIR", "SECRETS_DIR"], core: ["PUBLIC_MODE", "DEV_IDENTITY_STUB", "TEST_PROFILE", "CORE_INTERNAL"], as: ["AS_INTERNAL"] };
   const real = missing.filter((n) => !sharedOnly[role].includes(n));
   assert.deepEqual(real, [], `${role} reads names compose does not pass: ${real.join(", ")}`);
   for (const s of SECRETS[role]) assert.ok(!passed.has(s), `${role}: secret ${s} must come from env_file, not compose`);
@@ -79,4 +79,6 @@ for (const [role, dirs] of Object.entries(roles)) {
 // only to report wallets that still carry the old signer (ops/remove-yeet-signer.mjs removes it).
 assert.ok(!env.as.has("YEET_SIGNER_ID"));
 assert.ok(env.core.has("YEET_PRIVY_KEY_QUORUM_ID"));
+// Card signing: the connector names the public Privy app id in trade results; the sign-in server serves the page.
+assert.ok(env.mcp.has("PRIVY_APP_ID") && env.as.has("PRIVY_APP_ID") && env.mcp.has("RESOURCE"));
 console.log(`PASS compose passes every setting each service reads (${Object.keys(roles).join(", ")})`);

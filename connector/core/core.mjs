@@ -1,4 +1,4 @@
-import {initializeIdentityStore,resolveIdentity,account,didFor,usernameOf,setUsername} from './identity-store.mjs';
+import {initializeIdentityStore,resolveIdentity,lookupIdentity,account,didFor,usernameOf,setUsername} from './identity-store.mjs';
 import {usernameFailure} from './username.mjs';
 import {handle} from './xp/board.mjs';
 import {createWalletEnsurer,walletSetupConfig,walletSetupMessage} from './trade/wallet-ensure.mjs';
@@ -35,6 +35,9 @@ const VERSION=Object.freeze(versionInfo());
 app.get('/version',(_q,r)=>r.json(VERSION));
 app.use((q,r,next)=>{const token=q.headers.authorization?.replace(/^Bearer /,'');q.role=['mcp','as','operator'].find(role=>equal(token,secret(`core-${role}`)));if(!q.role)return r.sendStatus(401);next()});
 app.post('/identity/resolve',(q,r)=>{if(q.role!=='as')return r.sendStatus(403);const id=resolveIdentity(q.body);if(!id||read('policy.json')[id]?.suspended)return r.sendStatus(403);if(p2On())xpSafe('sign_in',()=>xpRuntime().signIn(id));r.json({id})});
+// The signing page (as/sign-page.mjs): the sign-in server verified a Privy access token and asks which account that
+// identity is ALREADY linked to. Unlike /identity/resolve this never creates an account and awards nothing.
+app.post('/identity/lookup',(q,r)=>{if(q.role!=='as')return r.sendStatus(403);const id=lookupIdentity(q.body);if(!id)return r.sendStatus(404);if(read('policy.json')[id]?.suspended)return r.sendStatus(403);r.json({id})});
 app.post('/policy',(q,r)=>{if(q.role!=='operator')return r.sendStatus(403);const {account,client,suspended,disconnect,reconnect}=q.body;if(!user(account))return r.sendStatus(400);const p=read('policy.json');const row=p[account]||{clients:{}};if(typeof suspended==='boolean')row.suspended=suspended;if(disconnect||reconnect){if(typeof client!=='string'||!client)return r.sendStatus(400);row.clients[client]=!!disconnect}p[account]=row;write('policy.json',p);r.json({ok:true})});
 app.get('/policy',(q,r)=>{if(q.role!=='as')return r.sendStatus(403);const subject=q.headers['x-yeet-subject'];const exists=!!user(subject);r.json({...read('policy.json')[subject],exists,eligible:exists})});
 // Operator trades (ops/first-trade.mjs): the operator starts a trade for one account from the box, without ChatGPT,
@@ -157,6 +160,28 @@ app.get('/trades/:id',trade(null,(e,ctx,_a,q)=>{
  return p2On()?{...view,xp_award:xpSafe('trade',()=>xpRuntime().tradeAward(ctx.accountId,view),null)}:view;
 }));
 app.get('/portfolio',trade('yeet_portfolio',(e,ctx)=>e.portfolio(ctx)));
+// The first-party signing page (as/sign-page.mjs, CARD-SIGNING.md section 2.5). Only the sign-in server reaches these,
+// and only after it verified the person's Privy access token and looked up the account already linked to it: that
+// account is `x-yeet-subject` (checked to exist and not be suspended above). The engine then answers only for a trade
+// of that account (pipeline.owned: trades.account_id) and a sign attempt of that account (ledger attempt.account_id);
+// the signed bytes must be the server's own request for the account's wallet (driver.submit). Client id `sign-page`.
+const PAGE_CLIENT='sign-page',TRADE_ID=/^t_[a-z0-9]{20}$/;
+function pageTrade(fn){
+ return async(q,r)=>{
+  if(q.role!=='as')return r.sendStatus(403);
+  if(!TRADE_ID.test(q.params.id))return r.status(400).json(failure('INVALID_ARGUMENT'));
+  try{r.json(await fn(await tradeEngine(),{accountId:q.subject,clientId:PAGE_CLIENT},q))}
+  catch(e){
+   if(e?.name==='TradeError'){console.error(JSON.stringify({event:'sign_page_refused',route:q.route?.path,code:e.code,detail:String(e.detail??'').slice(0,200)}));return r.status(CODE_STATUS[e.code]??409).json(withUserMessage(failure(e.code),e))}
+   console.error(JSON.stringify({event:'sign_page_failed',route:q.route?.path,error:String(e?.message??e).slice(0,200)}));
+   unavailable(r);
+  }
+ };
+}
+/** The trade's open sign requests (the same ones execute_trade answers; a stale attempt is renewed within the window). */
+app.post('/sign/trades/:id/requests',pageTrade((e,ctx,q)=>e.pageRequests(ctx,q.params.id)));
+/** submit_trade_signature from the page: the same engine call as the tool. */
+app.post('/sign/trades/:id/signature',pageTrade((e,ctx,q)=>{const a=inputs.submit_trade_signature.safeParse({...q.body,trade_id:q.params.id});if(!a.success)throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});return e.submit(ctx,a.data)}));
 // Leaderboard and daily spin (P2): answered only with YEET_P2=1, otherwise a typed retryable failure.
 function xpRoute(tool,fn){
  return (q,r)=>{
