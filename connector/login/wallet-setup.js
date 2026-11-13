@@ -1,5 +1,6 @@
-// Wallet setup after sign-in, without React or the network: find the person's YEET embedded wallets, create the
-// ones that are missing, and give the YEET signer access to both. src.jsx passes in the Privy 3.47.0 calls:
+// Wallet setup after sign-in, without React: the YEET server creates the missing wallets with the YEET signer attached
+// (requestServerSetup; no browser wallet call). ensureWallets (browser creation) is kept for reference only and is not
+// used by the page. src.jsx passes in the Privy 3.47.0 calls:
 //   createBase   = useCreateWallet().createWallet            (Ethereum; resolves with the Wallet)
 //   createSolana = useCreateWallet().createWallet from "@privy-io/react-auth/solana" (resolves with {wallet})
 //   refreshUser  = useUser().refreshUser                      (resolves with the User)
@@ -92,15 +93,53 @@ export async function ensureWallets({
 }
 
 /**
+ * Asks the YEET server to set up the wallets (POST /account/wallets): it creates whichever wallet is missing, owned by
+ * the person, with the YEET signer attached. Resolves with {ready, chains: {base, solana}: {address, created, signer}}.
+ * A network failure or a server error is retried (`attempts` calls, `delayMs` apart); the call is idempotent. A
+ * refusal throws a SetupError whose `serverMessage` is the server's plain text for the page.
+ */
+export async function requestServerSetup({ getAccessToken, fetch = globalThis.fetch, attempts = 3, delayMs = 1500, sleep = pause }) {
+  for (let i = 1; ; i++) {
+    const token = await getAccessToken();
+    if (!token) throw new SetupError("no-token");
+    let res, body;
+    try {
+      res = await fetch("/account/wallets", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ privy_access_token: token }),
+      });
+      body = await res.json().catch(() => null);
+    } catch (e) {
+      if (i >= attempts) throw new SetupError("server-unreachable", e);
+      await sleep(delayMs);
+      continue;
+    }
+    if (res.ok && body && typeof body.ready === "boolean") return body;
+    if (res.status >= 500 && i < attempts) {
+      await sleep(delayMs);
+      continue;
+    }
+    const error = new SetupError(typeof body?.code === "string" ? body.code : `server-${res.status}`);
+    error.serverMessage = typeof body?.message === "string" ? body.message : "";
+    throw error;
+  }
+}
+
+/** Chains whose wallet exists but does not carry the YEET signer yet (the page adds it with addSigners). */
+export const chainsMissingSigner = (result) => CHAINS.filter((c) => result?.chains?.[c]?.signer !== "attached");
+
+/**
  * Lets the YEET server sign for both embedded wallets, within the YEET policies (one policy per chain). Runs when
  * /account/identity-config returns a signer id, so sign-in keeps working before the signer is registered. A wallet
  * that already has a delegated signer is left as it is, so a retry after a partial failure only adds what is missing.
- * Returns the latest user (addSigners answers with it).
+ * `chains` limits it to the chains the server reported without the signer. Returns the latest user.
  */
-export async function attachYeetSigner({ config, user, addSigners }) {
+export async function attachYeetSigner({ config, user, addSigners, chains = CHAINS }) {
   if (!config.signerId) return user;
   let current = user;
-  for (const chain of CHAINS) {
+  for (const chain of chains) {
     const wallet = embeddedWallets(current)[chain];
     if (!wallet) throw new SetupError("wallets-not-ready");
     if (wallet.delegated) continue;

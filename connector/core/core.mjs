@@ -1,4 +1,5 @@
-import {initializeIdentityStore,resolveIdentity,account} from './identity-store.mjs';
+import {initializeIdentityStore,resolveIdentity,account,didFor} from './identity-store.mjs';
+import {createWalletEnsurer,walletSetupConfig,walletSetupMessage} from './trade/wallet-ensure.mjs';
 import express from 'express';
 import {introspectBearer,validatePrincipal} from '#shared/introspection.mjs';
 import {secret,equal,read,write,port,TEST,DEV_APP_ID} from '#shared/common.mjs';
@@ -51,6 +52,16 @@ export const ROUTE_SCOPES=Object.freeze([
 ]);
 export const routeScope=(method,path)=>ROUTE_SCOPES.find(([m,p])=>m===method&&p.test(path))?.[2]??null;
 app.use((q,r,next)=>{if(q.role==='mcp'){const needed=routeScope(q.method,q.path);if(!needed||!q.principal.scopes.has(needed))return r.sendStatus(403)}next()});
+// Wallet setup at sign-in (trade/wallet-ensure.mjs): only the sign-in server asks, after it verified the Privy identity.
+let walletEnsurer;
+app.post('/wallets/ensure',async(q,r)=>{
+ if(q.role!=='as')return r.sendStatus(403);
+ const config=walletSetupConfig();
+ if(!config)return r.status(503).json({code:'WALLET_SETUP_UNAVAILABLE',message:walletSetupMessage('WALLET_SETUP_UNAVAILABLE')});
+ walletEnsurer??=createWalletEnsurer({config});
+ try{r.json(await walletEnsurer.ensure(q.subject,didFor(q.subject)))}
+ catch(e){const code=typeof e?.code==='string'?e.code:'WALLET_SETUP_FAILED';r.status(502).json({code,chain:e?.chain??null,privy_status:e?.status??null,message:walletSetupMessage(code)})}
+});
 app.get('/coins',(_q,r)=>r.json(coins()));
 // Trade engine (lane B). Only the connector reaches these routes; each answer is the tool's structuredContent, plus
 // `confirm` for the card-only `_meta` where the contract has one. A refusal is the contract `failure` shape.

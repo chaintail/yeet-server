@@ -52,6 +52,7 @@ import {
   verifyIdentity,
   secret,
   coreCall,
+  coreEnsureWallets,
   equal,
   port,
   TEST,
@@ -339,6 +340,7 @@ function limit(max) {
 }
 if (PUBLIC) {
   app.use("/account/login", limit(20));
+  app.use("/account/wallets", limit(30));
   app.use("/interaction", limit(64));
   app.use("/reg", limit(20));
   app.use("/auth", limit(60));
@@ -507,6 +509,32 @@ app.post("/account/login", formBody, async (q, r) => {
     r.redirect(afterSignIn(q.body.next));
   } catch {
     r.status(401).json({ error: "sign in failed" });
+  }
+});
+// Server-side wallet setup: the sign-in page posts its Privy access token; after the token is verified, core creates
+// whichever wallet is missing with the YEET signer attached (core/trade/wallet-ensure.mjs). Safe to call again.
+const WALLET_SETUP_FAILED = "YEET could not set up your wallets. Nothing was charged. Tap Try again.";
+app.post("/account/wallets", express.json({ limit: "32kb" }), async (q, r) => {
+  r.set("Cache-Control", "no-store");
+  if (process.env.PRIVY_LOGIN !== "1" && !TEST) return r.sendStatus(404);
+  if (!originOK(q)) return r.sendStatus(403);
+  let id;
+  try {
+    id = await verifyIdentity(q.body ?? {});
+  } catch {
+    return r.status(401).json({ code: "SIGN_IN_REQUIRED", message: "Your sign in expired. Please sign in again." });
+  }
+  if (!(await eligible(id))) return r.status(403).json({ code: "NOT_ELIGIBLE", message: "This account cannot use YEET." });
+  try {
+    const { status, body } = await coreEnsureWallets(id, secret("core-as"));
+    if (status === 200 && body && typeof body.ready === "boolean")
+      return r.json({ ready: body.ready, chains: body.chains });
+    r.status(status >= 400 && status < 500 ? 409 : 502).json({
+      code: typeof body?.code === "string" ? body.code : "WALLET_SETUP_FAILED",
+      message: typeof body?.message === "string" ? body.message : WALLET_SETUP_FAILED,
+    });
+  } catch {
+    r.status(502).json({ code: "WALLET_SETUP_FAILED", message: WALLET_SETUP_FAILED });
   }
 });
 app.post("/account/logout", (q, r) => {

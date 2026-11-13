@@ -9,6 +9,8 @@ import {
   setupComplete,
   setupErrorReport,
   walletAlreadyExists,
+  requestServerSetup,
+  chainsMissingSigner,
 } from "./wallet-setup.js";
 
 const BASE = { type: "wallet", walletClientType: "privy", chainType: "ethereum", address: "0xb45e", delegated: false };
@@ -176,4 +178,49 @@ test("wallet setup: the waiting screen names each step in product words", () => 
     ["Creating your Base wallet", "Creating your Solana wallet", "Linking to YEET"],
   );
   for (const s of STEPS) assert.doesNotMatch(s.text, /\b(demo|mock|sample|placeholder)\b/i);
+});
+
+// Server setup (POST /account/wallets): the page only posts its Privy access token and reads the answer.
+const answer = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
+const READY = { ready: true, chains: { base: { signer: "attached" }, solana: { signer: "attached" } } };
+
+test("server setup posts the Privy access token and returns the server's answer", async () => {
+  const calls = [];
+  const out = await requestServerSetup({
+    getAccessToken: async () => "tok",
+    fetch: async (url, init) => (calls.push({ url, init }), answer(200, READY)),
+  });
+  assert.equal(out.ready, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "/account/wallets");
+  assert.equal(calls[0].init.method, "POST");
+  assert.deepEqual(JSON.parse(calls[0].init.body), { privy_access_token: "tok" });
+  assert.deepEqual(chainsMissingSigner(out), []);
+});
+
+test("server setup retries a server error and a network failure, then succeeds", async () => {
+  const seq = [() => answer(502, { code: "PRIVY_HTTP_500", message: "x" }), () => { throw TypeError("net"); }, () => answer(200, READY)];
+  let i = 0;
+  const out = await requestServerSetup({ getAccessToken: async () => "tok", fetch: async () => seq[i++](), sleep: async () => {} });
+  assert.equal(out.ready, true);
+  assert.equal(i, 3);
+});
+
+test("server setup surfaces the server's plain text after the last attempt", async () => {
+  await assert.rejects(
+    requestServerSetup({
+      getAccessToken: async () => "tok",
+      fetch: async () => answer(502, { code: "PRIVY_HTTP_429", message: "Too many wallet requests right now." }),
+      sleep: async () => {},
+    }),
+    (e) => e.code === "PRIVY_HTTP_429" && e.serverMessage === "Too many wallet requests right now.",
+  );
+  await assert.rejects(
+    requestServerSetup({ getAccessToken: async () => "tok", fetch: async () => answer(401, { code: "SIGN_IN_REQUIRED", message: "m" }) }),
+    (e) => e.code === "SIGN_IN_REQUIRED",
+  );
+});
+
+test("chains whose wallet lacks the YEET signer are the ones the page links", () => {
+  assert.deepEqual(chainsMissingSigner({ chains: { base: { signer: "attached" }, solana: { signer: "missing" } } }), ["solana"]);
 });

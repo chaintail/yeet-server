@@ -19,11 +19,12 @@ export function privyConfig() {
       walletList: [],
     },
     loginMethods: [...LOGIN_METHODS],
-    // PrivyClientConfig.embeddedWallets (3.47.0): one Ethereum (Base) and one Solana wallet for every user at login.
+    // PrivyClientConfig.embeddedWallets (3.47.0): the browser never creates wallets; the YEET server creates the Base
+    // and Solana wallets with the YEET signer attached (POST /account/wallets), so a login-time create cannot race it.
     embeddedWallets: {
       disableAutomaticMigration: true,
-      ethereum: { createOnLogin: "all-users" },
-      solana: { createOnLogin: "all-users" },
+      ethereum: { createOnLogin: "off" },
+      solana: { createOnLogin: "off" },
     },
     externalWallets: { walletConnect: { enabled: false } },
   };

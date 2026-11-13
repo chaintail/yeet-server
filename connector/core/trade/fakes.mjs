@@ -200,6 +200,44 @@ export function fakePrivy({confirmAfter=1,rpcFailures=[],policyIds=FAKE_POLICY_I
 }
 
 /**
+ * Fake Privy users and wallet creation (a `fetch`), for wallet-ensure.mjs. Models docs.privy.io api-reference/wallets/
+ * create: POST /v1/wallets {chain_type, owner:{user_id}, additional_signers} answers the Wallet and links it to the
+ * user as an embedded wallet; a key seen before replays its answer (2xx and 4xx/5xx alike). GET /v1/users/{did} and
+ * GET /v1/wallets/{id}. `users`: {did: [linked account]}; `createFailures`: [{at: create index, status}].
+ */
+export function fakePrivyWallets({users={},createFailures=[],existingSigners={}}={}){
+ const keys=new Map(),wallets=new Map(),calls=[];let n=0,creates=0;
+ for(const [did,list] of Object.entries(users))for(const a of list)wallets.set(a.id,{id:a.id,address:a.address,chain_type:a.chain_type,owner_id:did,additional_signers:existingSigners[a.id]??[]});
+ const p={calls,wallets,users,get creates(){return calls.filter(c=>c.method==='POST'&&c.path==='/v1/wallets')}};
+ const reply=(status,body)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json'}});
+ p.fetch=async(url,init={})=>{
+  const u=new URL(String(url)),path=u.pathname,method=init.method??'GET',headers=init.headers??{};
+  const call={path,method,key:headers['privy-idempotency-key'],body:init.body?JSON.parse(init.body):undefined,signed:'privy-authorization-signature' in headers};calls.push(call);
+  let m;
+  if(method==='GET'&&(m=path.match(/^\/v1\/users\/(did:privy:[^/]+)$/))){
+   if(!users[m[1]])return reply(404,{error:'User not found'});
+   return reply(200,{id:m[1],linked_accounts:users[m[1]]});
+  }
+  if(method==='GET'&&(m=path.match(/^\/v1\/wallets\/([^/]+)$/))){const w=wallets.get(m[1]);return w?reply(200,w):reply(404,{error:'Wallet not found'})}
+  if(method==='POST'&&path==='/v1/wallets'){
+   if(call.key&&keys.has(call.key)){const s=keys.get(call.key);return reply(s.status,s.body)}
+   const i=creates++,fail=createFailures.find(f=>f.at===i);
+   if(fail){const s={status:fail.status,body:{error:'Internal server error'}};if(call.key)keys.set(call.key,s);return reply(s.status,s.body)}
+   const did=call.body?.owner?.user_id;
+   if(!users[did])return reply(400,{error:'Invalid owner'});
+   const id=`wallet-${++n}`,address=call.body.chain_type==='ethereum'?`0x${hex(id).slice(0,40)}`:base58Encode(createHash('sha256').update(id).digest());
+   const w={id,address,chain_type:call.body.chain_type,owner_id:did,policy_ids:[],additional_signers:(call.body.additional_signers??[]).map(s=>({signer_id:s.signer_id,override_policy_ids:s.override_policy_ids??[]})),created_at:Date.now()};
+   wallets.set(id,w);
+   users[did].push({type:'wallet',wallet_client_type:'privy',chain_type:w.chain_type,address,id,delegated:false,imported:false});
+   const s={status:200,body:w};if(call.key)keys.set(call.key,s);
+   return reply(200,w);
+  }
+  return reply(404,{error:'not found'});
+ };
+ return p;
+}
+
+/**
  * Fake chain reader for the balance check (accounting.mjs): the fake balances minus what the fake signer broadcast,
  * so before/after reads move like the chain would. `adjust[asset]` adds to a balance (negative: an unexplained
  * debit), `failReads` makes the next n reads throw.

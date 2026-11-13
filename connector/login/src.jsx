@@ -3,7 +3,6 @@ import { createRoot } from "react-dom/client";
 import {
   PrivyProvider,
   usePrivy,
-  useCreateWallet,
   useLoginWithEmail,
   useLoginWithOAuth,
   useLoginWithTelegram,
@@ -11,15 +10,14 @@ import {
   useSigners,
   useUser,
 } from "@privy-io/react-auth";
-// Privy 3.47.0: the Solana embedded wallet is created through the /solana entry's useCreateWallet.
-import { useCreateWallet as useCreateSolanaWallet } from "@privy-io/react-auth/solana";
 import { privyConfig } from "./privy-app.jsx";
 import { NO_METHOD_LINE, enabledMethods, introLine } from "./login-methods.js";
 import {
   CHAINS,
   attachYeetSigner,
+  chainsMissingSigner,
   embeddedWallets,
-  ensureWallets,
+  requestServerSetup,
   setupErrorReport,
 } from "./wallet-setup.js";
 import { SetupProgress } from "./setup-screen.jsx";
@@ -30,9 +28,8 @@ const CONFIG_WAIT_MS = 5000;
 // How long wallet setup may run before the page shows the "taking longer" notice and a Try again button.
 const WALLET_WAIT_MS = 20000;
 
-// Right after sign-in Privy may still be creating the wallets itself (createOnLogin). The page waits this long and
-// re-reads the user before it creates a missing wallet; a create that meets an existing wallet counts as done.
-const LOGIN_CREATE_GRACE_MS = 2500;
+// The server sets up both wallets in one call; the step list moves to the Solana step after this long.
+const STEP_TICK_MS = 1200;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function EndSession() {
@@ -273,8 +270,6 @@ function FinishSignIn({ config }) {
   const { ready, user, getAccessToken, logout } = usePrivy();
   const { refreshUser } = useUser();
   const { addSigners } = useSigners();
-  const { createWallet: createBase } = useCreateWallet();
-  const { createWallet: createSolana } = useCreateSolanaWallet();
   const userRef = useRef(user);
   userRef.current = user;
   const wallets = embeddedWallets(user);
@@ -285,35 +280,48 @@ function FinishSignIn({ config }) {
     [attempt, setAttempt] = useState(0),
     [slow, setSlow] = useState(false),
     [setupFailed, setSetupFailed] = useState(false),
+    [failMessage, setFailMessage] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const running = useRef(false);
 
-  async function runSetup(first) {
+  /** Server setup, then the YEET signer on any wallet the server reports without it (wallets made before). */
+  async function serverSetup() {
+    const result = await requestServerSetup({ getAccessToken });
+    const missing = chainsMissingSigner(result);
+    if (missing.length) {
+      const current = (await refreshUser().catch(() => null)) || userRef.current;
+      await attachYeetSigner({ config, user: current, addSigners, chains: missing });
+    }
+  }
+
+  async function runSetup() {
     running.current = true;
     setSetupFailed(false);
-    setStep("check");
+    setFailMessage("");
+    setDone([]);
+    setStep("base");
+    const tick = setTimeout(() => {
+      setDone(["base"]);
+      setStep("solana");
+    }, STEP_TICK_MS);
     try {
-      if (first) await new Promise((resolve) => setTimeout(resolve, LOGIN_CREATE_GRACE_MS));
-      let current = (await refreshUser().catch(() => null)) || userRef.current;
-      current = await ensureWallets({
-        user: current,
-        createBase: () => createBase(),
-        createSolana: () => createSolana(),
-        refreshUser,
-        onStep: (chain) => {
-          setStep(chain);
-          setDone(CHAINS.slice(0, CHAINS.indexOf(chain)));
-        },
-      });
+      const result = await requestServerSetup({ getAccessToken });
+      clearTimeout(tick);
       setDone([...CHAINS]);
       setStep("link");
-      await attachYeetSigner({ config, user: current, addSigners });
+      const missing = chainsMissingSigner(result);
+      if (missing.length) {
+        const current = (await refreshUser().catch(() => null)) || userRef.current;
+        await attachYeetSigner({ config, user: current, addSigners, chains: missing });
+      }
       setDone([...CHAINS, "link"]);
       await submitSession(getAccessToken);
     } catch (e) {
+      clearTimeout(tick);
       // No client-error endpoint on the server yet: a structured, secret-free line in the browser console.
       console.error(JSON.stringify(setupErrorReport(e, userRef.current)));
+      setFailMessage(e?.serverMessage || "");
       setSetupFailed(true);
     } finally {
       running.current = false;
@@ -322,7 +330,7 @@ function FinishSignIn({ config }) {
 
   useEffect(() => {
     if (!setup || !ready || running.current) return;
-    runSetup(attempt === 0);
+    runSetup();
     // runSetup reads the latest hooks; it runs once per attempt.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setup, ready, attempt]);
@@ -344,14 +352,15 @@ function FinishSignIn({ config }) {
     setBusy(true);
     setError("");
     try {
-      await attachYeetSigner({ config, user, addSigners });
+      await serverSetup();
     } catch (e) {
       console.error(JSON.stringify(setupErrorReport(e, user)));
       setSetupFailed(true);
       setError(
-        e?.code === "wallets-not-ready"
-          ? "Your YEET wallets are still being set up. Try again in a moment."
-          : "YEET could not finish setting up trading on your wallets. Nothing was charged. Tap Try again.",
+        e?.serverMessage ||
+          (e?.code === "wallets-not-ready"
+            ? "Your YEET wallets are still being set up. Try again in a moment."
+            : "YEET could not finish setting up trading on your wallets. Nothing was charged. Tap Try again."),
       );
       setBusy(false);
       return;
@@ -369,7 +378,7 @@ function FinishSignIn({ config }) {
     return (
       <>
         <p>You are signed in. YEET sets up your wallets on Base and Solana, then you go back to ChatGPT.</p>
-        <SetupProgress step={step} done={done} slow={slow} failed={setupFailed} onRetry={retry} />
+        <SetupProgress step={step} done={done} slow={slow} failed={setupFailed} message={failMessage} onRetry={retry} />
         <button type="button" className="secondary" onClick={logout}>
           Use another account
         </button>
