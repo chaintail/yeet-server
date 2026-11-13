@@ -123,6 +123,44 @@ export const MIGRATIONS=Object.freeze([
   ALTER TABLE trades ADD COLUMN stale_at INTEGER;                  -- (+) tracking stopped without a final status
   ALTER TABLE confirm_codes ADD COLUMN minted_at INTEGER;          -- (+) per-account minting rate limit
   CREATE INDEX confirm_codes_account ON confirm_codes(account_id,minted_at);`,
+ // 3: accounting (audit.mjs, accounting.mjs). trade_events is append-only (triggers refuse UPDATE and DELETE): one row
+ // per trades.status / trade_legs.send_status change, written in the transaction of the change, plus 'review' rows
+ // for accounting flags. trade_balance_checks holds the source balance before signing and after settlement.
+ // trade_alerts is the ops outbox, one row per dedup key.
+ `CREATE TABLE trade_events(
+   id INTEGER PRIMARY KEY,
+   trade_id TEXT NOT NULL,
+   leg_id INTEGER,                                                 -- trade_legs.idx; null for the trade itself
+   kind TEXT NOT NULL CHECK(kind IN('trade','leg','review')),
+   from_status TEXT,                                               -- null when the row is created
+   to_status TEXT NOT NULL,
+   evidence_json TEXT,
+   at INTEGER NOT NULL) STRICT;
+  CREATE INDEX trade_events_trade ON trade_events(trade_id,id);
+  CREATE TRIGGER trade_events_no_update BEFORE UPDATE ON trade_events BEGIN SELECT RAISE(ABORT,'trade_events is append-only'); END;
+  CREATE TRIGGER trade_events_no_delete BEFORE DELETE ON trade_events BEGIN SELECT RAISE(ABORT,'trade_events is append-only'); END;
+  CREATE TABLE trade_balance_checks(
+   trade_id TEXT PRIMARY KEY REFERENCES trades(id),
+   chain TEXT NOT NULL CHECK(chain IN('base','solana')),
+   address TEXT NOT NULL,
+   legs_json TEXT NOT NULL,                                        -- {leg idx: asset key}
+   before_json TEXT,                                               -- {asset key: raw}; null when the read failed
+   before_at INTEGER NOT NULL,
+   after_json TEXT,
+   after_at INTEGER,
+   verdict TEXT NOT NULL CHECK(verdict IN('pending','ok','needs_review','unavailable')),
+   detail_json TEXT,
+   attempts INTEGER NOT NULL DEFAULT 0) STRICT;
+  CREATE INDEX trade_balance_checks_pending ON trade_balance_checks(verdict);
+  CREATE TABLE trade_alerts(
+   id INTEGER PRIMARY KEY,
+   dedup_key TEXT NOT NULL UNIQUE,
+   trade_id TEXT NOT NULL,
+   kind TEXT NOT NULL CHECK(kind IN('stuck','stale','partial','balance_mismatch')),
+   detail_json TEXT NOT NULL,
+   created_at INTEGER NOT NULL,
+   acked_at INTEGER) STRICT;
+  CREATE INDEX trade_alerts_open ON trade_alerts(acked_at,id);`,
 ]);
 
 /** Opens (and migrates) the trade database. `file` defaults to $STATE_DIR/trade.sqlite; ':memory:' for tests. */

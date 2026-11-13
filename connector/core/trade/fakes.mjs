@@ -6,6 +6,7 @@ import {openTradeDb} from './db.mjs';
 import {createEngine} from './engine.mjs';
 import {refuse} from './util.mjs';
 import {base58Encode} from './router.mjs';
+import {USDC_KEY} from './accounting.mjs';
 
 const fixture=name=>JSON.parse(readFileSync(new URL(`../../vendor/yeet-win/router/test/fixtures/${name}`,import.meta.url),'utf8'));
 // Well-formed addresses (the router tests' own: random bytes, not funded wallets).
@@ -104,13 +105,30 @@ export function fakeBalances({usdc='100',holdings=[]}={}){
  return b;
 }
 
+/**
+ * Fake chain reader for the balance check (accounting.mjs): the fake balances minus what the fake signer broadcast,
+ * so before/after reads move like the chain would. `adjust[asset]` adds to a balance (negative: an unexplained
+ * debit), `failReads` makes the next n reads throw.
+ */
+export function fakeChain({balances,signer,adjust={},failReads=0}={}){
+ const c={adjust,reads:0,set failReads(v){failReads=v},
+  async source({chain,address,assets}){
+   c.reads++;
+   if(failReads>0){failReads--;throw Error('fake: rpc unavailable')}
+   const sentOn=(ch,pred)=>(signer?.sent??[]).filter(x=>x.chain===ch&&pred(x)).reduce((a,x)=>a+BigInt(x.amountRaw),0n);
+   if(chain==='base')return {[USDC_KEY]:balances.usdcRaw-sentOn('base',()=>true)+BigInt(c.adjust[USDC_KEY]??0)};
+   return Object.fromEntries(assets.map(a=>[a,balances.holdings.filter(h=>h.mint===a).reduce((s,h)=>s+h.raw,0n)-sentOn('solana',x=>x.mint===a)+BigInt(c.adjust[a]??0)]));
+  }};
+ return c;
+}
+
 /** A clock tests can move. */
 export function fakeClock(start=Date.parse('2026-11-12T12:00:00.000Z')){let t=start;const now=()=>t;now.advance=ms=>{t+=ms};now.set=ms=>{t=ms};return now}
 
 /** An engine over an in-memory database with fakes for every external system. */
-export async function fakeEngine({env={YEET_LIVE:'1'},oneclick,signer,balances,now=fakeClock(),onSettled,budgetMs,hooks}={}){
+export async function fakeEngine({env={YEET_LIVE:'1'},oneclick,signer,balances,chain,now=fakeClock(),onSettled,budgetMs,hooks}={}){
  const db=openTradeDb(':memory:');
- oneclick??=fakeOneClick();signer??=fakeSigner();balances??=fakeBalances();
- const engine=await createEngine({db,env,client:oneclick,signer,balances,now,onSettled,trackerIntervalMs:0,budgetMs,hooks});
- return {engine,db,oneclick,signer,balances,now};
+ oneclick??=fakeOneClick();signer??=fakeSigner();balances??=fakeBalances();chain??=fakeChain({balances,signer});
+ const engine=await createEngine({db,env,client:oneclick,signer,balances,chain,now,onSettled,trackerIntervalMs:0,budgetMs,hooks});
+ return {engine,db,oneclick,signer,balances,chain,now};
 }
