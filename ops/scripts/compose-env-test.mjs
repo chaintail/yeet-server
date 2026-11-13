@@ -51,7 +51,7 @@ function readNames(dirs) {
 }
 
 // Set inside the image or by the compose file outside `environment`, or used only by tests and local runs.
-const IN_IMAGE = ["LISTEN_HOST", "SECRETS_DIR", "AS_PORT", "ADMIN_PORT", "CONNECTOR_PORT", "CORE_PORT", "TRADE_DB", "NODE_ENV"];
+const IN_IMAGE = ["LISTEN_HOST", "SECRETS_DIR", "AS_PORT", "ADMIN_PORT", "CONNECTOR_PORT", "CORE_PORT", "TRADE_DB", "NODE_ENV", "YEET_SERVER_COMMIT"];
 // Secret values: only from /var/lib/yeet-connector/config/<role>.env (env_file), never in compose.
 const SECRETS = {
   core: ["PRIVY_APP_SECRET", "YEET_PRIVY_AUTHORIZATION_KEY", "ONECLICK_JWT", "YEET_XP_SECRET"],

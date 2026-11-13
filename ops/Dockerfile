@@ -15,7 +15,9 @@ COPY connector/login/ ./
 RUN node build.mjs && test -s dist/login.js && test -s dist/fund.js
 
 FROM node:24-slim
-ENV NODE_ENV=production
+# The commit this image is built from; GET /version reports it (docker build --build-arg SERVER_COMMIT=$(git rev-parse --short HEAD)).
+ARG SERVER_COMMIT=
+ENV NODE_ENV=production YEET_SERVER_COMMIT=${SERVER_COMMIT}
 WORKDIR /app/connector
 COPY --from=deps /app/connector/node_modules ./node_modules
 COPY connector/package.json connector/scope-catalog.mjs ./

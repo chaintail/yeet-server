@@ -27,6 +27,7 @@ button{font:inherit;color:inherit}
 .rows{display:flex;flex-direction:column;gap:.375rem}
 .row{display:grid;grid-template-columns:2.25rem minmax(0,1fr) auto auto;align-items:center;gap:.5rem;background:var(--panel2);border-radius:.875rem;padding:.5rem .5rem .5rem .5rem;min-height:3.25rem}
 .row .reason{grid-column:2/-1;color:var(--muted);font-size:.75rem}
+.row .where{grid-column:2/-1;color:var(--muted);font-size:.75rem}
 .avatar{width:2.25rem;height:2.25rem;border-radius:50%;display:grid;place-items:center;font-weight:900;font-size:1rem;color:#0b0814;background:var(--yellow)}
 .avatar[data-tone="1"]{background:var(--pink)}.avatar[data-tone="2"]{background:var(--cyan)}.avatar[data-tone="3"]{background:var(--lime)}
 .avatar[data-tone="4"]{background:#b18cff}.avatar[data-tone="5"]{background:#ffb02e}
@@ -1027,6 +1028,8 @@ function renderBasket(p){
  return card;
 }
 const TRADE_TITLE={signing:'Signing…',submitted:'Sent',settling:'Swapping…',success:'Done',partial:'Partly done',refunded:'Refunded',failed:'Didn’t go through',requote_required:'Price moved'};
+/** Where a leg's funds are at each status: [YEET, SKEET]. FAILED has no line; the refund reason covers it. */
+const FUNDS_AT={not_sent:['still in your Base wallet','still in your Solana wallet'],sent:['on the way to the 1Click deposit address','on the way to the 1Click deposit address'],PENDING_DEPOSIT:['on the way to the 1Click deposit address','on the way to the 1Click deposit address'],KNOWN_DEPOSIT_TX:['at the 1Click deposit address','at the 1Click deposit address'],INCOMPLETE_DEPOSIT:['at the 1Click deposit address, short of the quote','at the 1Click deposit address, short of the quote'],PROCESSING:['being swapped on NEAR Intents','being swapped on NEAR Intents'],SUCCESS:['in your Solana wallet','in your Base wallet'],REFUNDED:['refunded to your Base wallet','refunded to your Solana wallet']};
 const LEG_STATUS={PENDING_DEPOSIT:['Waiting for deposit','wait'],KNOWN_DEPOSIT_TX:['Deposit seen','wait'],INCOMPLETE_DEPOSIT:['Deposit short','bad'],PROCESSING:['Swapping','wait'],SUCCESS:['Received','ok'],REFUNDED:['Refunded','bad'],FAILED:['Failed','bad'],sent:['Sent','wait'],failed:['Failed','bad'],not_sent:['Not sent','bad']};
 function renderReceipt(t){
  const skeet=t.direction==='skeet';const final=FINAL.has(t.status);
@@ -1048,6 +1051,8 @@ function renderReceipt(t){
   if(u1)links.append(link('Deposit',u1));if(u2)links.append(link('Swap',u2));
   if(links.childElementCount)right.append(links);
   li.append(right);
+  const at=Object.hasOwn(FUNDS_AT,l.status)?FUNDS_AT[l.status][skeet?1:0]:null;
+  if(at)li.append(el('p','where',`Funds ${at}`));
   if(typeof l.refund_reason==='string'&&l.refund_reason)li.append(el('p','reason',l.refund_reason.slice(0,200)));
   list.append(li);
  }

@@ -24,6 +24,17 @@ handle @yeet_conn {
 			import cf_https_proto
 		}
 	}
+	# Public deployment facts (commit, vendored yeet-win pin, trading state, limits); the connector caches them 60 s.
+	@yeet_version {
+		method GET HEAD
+		path /version
+	}
+	handle @yeet_version {
+		header >Cache-Control "public, max-age=60"
+		reverse_proxy 127.0.0.1:38861 {
+			import cf_https_proto
+		}
+	}
 	@yeet_connector_get {
 		method GET HEAD
 		path /.well-known/oauth-protected-resource /health

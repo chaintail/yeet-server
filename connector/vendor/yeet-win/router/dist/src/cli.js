@@ -6,7 +6,7 @@ import { parseArgs } from "node:util";
 import { CATALOG } from "./catalog.js";
 import { OneClickClient, OneClickError } from "./oneclick.js";
 import { buildSkeetPlan, buildYeetPlan, PlanQuoteError, PlanValidationError } from "./plan.js";
-import { replay, trackPlan } from "./receipt.js";
+import { replay, ReceiptSchema, trackPlan } from "./receipt.js";
 import { roundUsd } from "./units.js";
 const USAGE = `yeet-router <command>
 
@@ -17,9 +17,39 @@ const USAGE = `yeet-router <command>
   catalog [--json]
   status  <depositAddress> [--memo <memo>]
   track   <plan.json> [--dir receipts] [--timeout-min 20]
-  replay  <receipt.json>
+  replay  <receipt.json> [--statuses statuses.json]
 
-Quotes are dry (no deposit address) unless --live is passed AND YEET_ALLOW_LIVE=1 is set.`;
+Quotes are dry (no deposit address) unless --live is passed AND YEET_ALLOW_LIVE=1 is set.
+replay asks 1Click /status again for every leg; with --statuses it reads the /status answers from a JSON file
+({depositAddress: statusResponse}) instead of the network.`;
+/**
+ * A 1Click client whose /status answers come from a file ({depositAddress: statusResponse}) instead of the network.
+ * The answers still pass through the client's zod validation. An address missing from the file is a 404.
+ */
+export function recordedStatusClient(statuses) {
+    const answer = (async (input) => {
+        const addr = new URL(String(input)).searchParams.get("depositAddress") ?? "";
+        const known = Object.hasOwn(statuses, addr);
+        const body = known ? statuses[addr] : { message: `no recorded status for ${addr}` };
+        return new Response(JSON.stringify(body), { status: known ? 200 : 404, headers: { "content-type": "application/json" } });
+    });
+    return new OneClickClient({ fetch: answer, jwt: undefined, retryDelayMs: 0 });
+}
+const EXPLORER = {
+    base: (h) => `https://basescan.org/tx/${h}`,
+    solana: (h) => `https://solscan.io/tx/${h}`,
+    near: (h) => `https://nearblocks.io/txns/${h}`,
+};
+/** The tx hashes a receipt leg holds, with an explorer link for each. */
+function txLines(receipt, leg) {
+    const [origin, dest] = receipt.direction === "yeet" ? ["base", "solana"] : ["solana", "base"];
+    const line = (label, url) => `  ${label.padEnd(24)}${url}`;
+    return [
+        ...leg.originTxHashes.map((h) => line(`deposit tx (${origin})`, EXPLORER[origin](h))),
+        ...leg.nearTxHashes.map((h) => line("NEAR Intents tx (near)", EXPLORER.near(h))),
+        ...leg.destinationTxHashes.map((h) => line(`delivery tx (${dest})`, EXPLORER[dest](h))),
+    ];
+}
 export class UsageError extends Error {
 }
 /** Column 0 and any column listed in `left` are left-aligned; the rest (numbers) are right-aligned. */
@@ -120,6 +150,7 @@ const tradeOptions = {
     memo: { type: "string" },
     dir: { type: "string" },
     "timeout-min": { type: "string" },
+    statuses: { type: "string" },
     help: { type: "boolean", short: "h" },
 };
 export async function main(argv) {
@@ -174,6 +205,8 @@ export async function main(argv) {
                 console.log(`in ${d.amountInFormatted ?? "-"}  out ${d.amountOutFormatted ?? "-"}`);
             for (const t of d?.originChainTxHashes ?? [])
                 console.log(`origin tx ${t.hash}`);
+            for (const h of d?.nearTxHashes ?? [])
+                console.log(`near tx ${h}`);
             for (const t of d?.destinationChainTxHashes ?? [])
                 console.log(`destination tx ${t.hash}`);
             if (d?.refundReason)
@@ -199,11 +232,20 @@ export async function main(argv) {
             const file = positionals[0];
             if (!file)
                 throw new UsageError("replay needs a receipt.json");
-            const r = await replay(file, { client });
+            const source = values.statuses
+                ? recordedStatusClient(JSON.parse(await readFile(values.statuses, "utf8")))
+                : client;
+            const stored = ReceiptSchema.parse(JSON.parse(await readFile(file, "utf8")));
+            const r = await replay(file, { client: source });
             for (const l of r.legs) {
                 console.log(`${l.symbol}  ${l.storedStatus ?? "-"} -> ${l.currentStatus ?? "-"}  ${l.matches ? "match" : l.differences.join("; ")}`);
+                const leg = stored.legs.find((x) => x.index === l.index);
+                if (leg)
+                    for (const line of txLines(stored, leg))
+                        console.log(line);
             }
-            console.log(`plan ${r.planId}: ${r.matches ? "receipt matches 1Click" : "receipt differs from 1Click"}`);
+            const against = values.statuses ? `the statuses in ${values.statuses}` : "1Click";
+            console.log(`plan ${r.planId}: ${r.matches ? `receipt matches ${against}` : `receipt differs from ${against}`}`);
             return r.matches ? 0 : 1;
         }
         default:

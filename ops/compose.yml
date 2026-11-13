@@ -14,7 +14,7 @@ x-runtime: &runtime
 services:
   bootstrap:
     <<: *runtime
-    build: {context: .., dockerfile: ops/Dockerfile}
+    build: {context: .., dockerfile: ops/Dockerfile, args: {SERVER_COMMIT: '${YEET_SERVER_COMMIT:-}'}}
     pull_policy: build
     command: [as/bootstrap.mjs]
     network_mode: none

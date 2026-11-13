@@ -11,6 +11,19 @@ app.get('/health',(_q,r)=>r.json({ok:true}));
 if(PUBLIC)app.use((q,r,next)=>{if(q.headers.host!==new URL(RESOURCE).host)return r.sendStatus(421);next()});app.use(express.json({limit:'32kb'}));
 // The protocol endpoint is the resource path only (the bare origin in production); there is no alias path.
 const resourcePath=new URL(RESOURCE).pathname||'/';const prmPath='/.well-known/oauth-protected-resource'+resourcePath.replace(/\/$/,'');
+// GET /version: core's public deployment facts (core/version.mjs), cached here for 60 s; no credential is sent.
+let versionCache={at:0,body:null};
+export const VERSION_TTL_MS=60_000;
+app.get('/version',async(_q,r)=>{
+ if(!versionCache.body||Date.now()-versionCache.at>=VERSION_TTL_MS){
+  try{
+   const c=await fetch(CORE+'/version',{redirect:'error',signal:AbortSignal.timeout(2000)});
+   const raw=await c.text();if(!c.ok||Buffer.byteLength(raw)>4096)throw Error('core');
+   versionCache={at:Date.now(),body:JSON.parse(raw)};
+  }catch{r.set('Cache-Control','no-store');return r.status(503).json({error:'TEMPORARILY_UNAVAILABLE'})}
+ }
+ r.set('Cache-Control','public, max-age=60').json(versionCache.body);
+});
 app.get(prmPath,(_q,r)=>r.json({resource:RESOURCE,authorization_servers:[AS],scopes_supported:advertisedScopes(),bearer_methods_supported:['header']}));
 const challenge=res=>res.set('WWW-Authenticate',`Bearer resource_metadata="${new URL(RESOURCE).origin}${prmPath}"`);
 /** Core deadline per route: proposals (YEET and SKEET) and quotes 15 s, trade execution 25 s, everything else 4.5 s. */

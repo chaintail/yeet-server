@@ -103,6 +103,20 @@ test('A-4: POST /mcp is 404 on the connector and on the sign-in server; GET /hea
  assert.equal((await fetch(CONNECTOR+'/',{method:'GET'})).status,405);
 });
 
+test('GET /version: public deployment facts, cached 60 s, no secret or internal host',async()=>{
+ const {vendoredPin}=await import('../core/version.mjs');
+ const r=await fetch(CONNECTOR+'/version');
+ assert.equal(r.status,200);assert.equal(r.headers.get('cache-control'),'public, max-age=60');
+ const raw=await r.text(),v=JSON.parse(raw);
+ assert.deepEqual(Object.keys(v),['service','server_commit','yeet_win_commit','trading','limits','catalog_coins']);
+ assert.equal(v.service,'yeet');assert.equal(v.yeet_win_commit,vendoredPin());assert.match(v.yeet_win_commit,/^[0-9a-f]{40}$/);
+ assert.equal(v.trading,'paused');
+ assert.deepEqual(v.limits,{max_trade_usdc:'25',daily_cap_usdc:'50',min_leg_usdc:'3'});
+ assert.ok(Number.isInteger(v.catalog_coins)&&v.catalog_coins>0);
+ assert.doesNotMatch(raw,/127\.0\.0\.1|localhost|core:|as:|http:/);
+ assert.equal((await fetch(CONNECTOR+'/version',{headers:{authorization:'Bearer x'}})).status,200);
+});
+
 test('sign-in pages use yeet cookies and YEET titles; identity config is off without Privy',async()=>{
  const r=await fetch(AS+'/account/login');
  assert.equal(r.status,200);
