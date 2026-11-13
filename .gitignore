@@ -28,3 +28,6 @@ secrets/
 .build/
 # vendored @yeet/router build output is committed
 !connector/vendor/yeet-win/router/dist/
+
+# render harness output (connector/login/harness/render.mjs)
+connector/login/harness/out/

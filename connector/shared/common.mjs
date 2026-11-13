@@ -16,6 +16,8 @@ export function secret(name){return fs.readFileSync(path.join(process.env.SECRET
 export function equal(a,b){const x=Buffer.from(a||''),y=Buffer.from(b||'');return x.length===y.length&&timingSafeEqual(x,y)}
 export async function coreCall(route,subject,credential,body){const r=await fetch(CORE+route,{method:body?'POST':'GET',headers:{authorization:`Bearer ${credential}`,'x-yeet-subject':subject,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(2000)});if(!r.ok)throw Error(`core denied ${r.status}`);return r.json()}
 /** Core's server-side wallet setup (core.mjs /wallets/ensure): {status, body}; Privy creation can take several seconds. */
+/** A core call that keeps core's answer on refusal: {status, body}. body is null when it is not JSON. */
+export async function coreSend(route,subject,credential,body,timeoutMs=4000){const r=await fetch(CORE+route,{method:body?'POST':'GET',headers:{authorization:`Bearer ${credential}`,'x-yeet-subject':subject,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(timeoutMs)});let out=null;try{out=await r.json()}catch{}return {status:r.status,body:out}}
 export async function coreEnsureWallets(subject,credential,timeoutMs=45000){const r=await fetch(CORE+'/wallets/ensure',{method:'POST',headers:{authorization:`Bearer ${credential}`,'x-yeet-subject':subject,'content-type':'application/json'},body:'{}',signal:AbortSignal.timeout(timeoutMs)});let body=null;try{body=await r.json()}catch{}return {status:r.status,body}}
 /** Development identities (TEST_PROFILE=1 and DEV_IDENTITY_STUB=1 only): `DEV:did:privy:<id>` stands in for a verified Privy token. */
 export const DEV_APP_ID = 'dev-identity-stub';

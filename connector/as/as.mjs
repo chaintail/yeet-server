@@ -13,6 +13,7 @@ import { document, credentials, html, renewableConsentCopy, expiredAuthorization
 import express from "express";
 import { providerCsp } from "./provider-csp.mjs";
 import { fundRoutes, privyPageCsp, afterSignIn, nextField } from "./fund-page.mjs";
+import { ACCOUNT_TITLE, USERNAME_PATH, accountBody, usernameMessage } from "./account-page.mjs";
 import {
   compatibilityClient,
   recordConsent,
@@ -53,6 +54,7 @@ import {
   secret,
   coreCall,
   coreEnsureWallets,
+  coreSend,
   equal,
   port,
   TEST,
@@ -565,20 +567,37 @@ app.get("/account/logout-identity", (_q, r) => {
 app.use("/account", express.static(fileURLToPath(new URL("./viewer/", import.meta.url)), { fallthrough: true }));
 app.use("/account/privy-login", express.static(fileURLToPath(new URL("../login/dist/", import.meta.url)), { fallthrough: true }));
 // Without a live session this page never claims a sign-in: it sends the browser to the sign-in page.
-app.get("/account/", (q, r) =>
-  session(q)
-    ? r
-        .set("Cache-Control", "no-store")
-        .type("html")
-        .send(
-          authDocument(
-            r,
-            "YEET",
-            '<p>You are signed in to YEET. Go back to ChatGPT to keep going.</p>',
-          ),
-        )
-    : r.redirect(303, "/account/login"),
-);
+// The account page: the username field (core/username.mjs) and a link to add funds.
+async function currentUsername(id) {
+  try {
+    const { status, body } = await coreSend("/username", id, secret("core-as"));
+    return status === 200 && body ? { username: body.username ?? null, name: body.name ?? "" } : {};
+  } catch {
+    return {};
+  }
+}
+async function sendAccountPage(r, s, extra = {}, status = 200) {
+  const now = await currentUsername(s.id);
+  r.status(status).set("Cache-Control", "no-store").type("html")
+    .send(authDocument(r, ACCOUNT_TITLE, accountBody({ csrf: s.csrf, ...now, ...extra })));
+}
+app.get("/account/", async (q, r) => {
+  const s = session(q);
+  if (!s) return r.redirect(303, "/account/login");
+  await sendAccountPage(r, s, { saved: q.query.username === "saved" });
+});
+app.post(USERNAME_PATH, formBody, async (q, r) => {
+  const s = session(q);
+  if (!s) return r.redirect(303, "/account/login");
+  if (!equal(q.body?.csrf, s.csrf) || !originOK(q)) return r.sendStatus(403);
+  const value = typeof q.body.username === "string" ? q.body.username.slice(0, 64) : "";
+  let status = 503, body = null;
+  try {
+    ({ status, body } = await coreSend("/username", s.id, secret("core-as"), { username: value }));
+  } catch {}
+  if (status === 200) return r.redirect(303, "/account/?username=saved");
+  await sendAccountPage(r, s, { value, error: usernameMessage(body?.error) }, status === 409 ? 409 : 400);
+});
 // Add funds: USDC on Base through Privy funding (Coinbase Onramp). Needs a YEET sign-in session and the Privy sign-in.
 fundRoutes(app, { enabled: () => process.env.PRIVY_LOGIN === "1", session });
 // Browsers ask for /favicon.ico on their own; answer with the YEET icon the pages link to.

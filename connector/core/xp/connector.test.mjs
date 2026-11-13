@@ -2,7 +2,7 @@
 // A real consented token goes home -> daily_spin -> yeet_leaderboard, and a settled trade shows its xp_award.
 import test, {after} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,mkdirSync,writeFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,rmSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomBytes,createHash} from 'node:crypto';
@@ -131,4 +131,39 @@ test('yeet_home: needs_funds carries fund_url on the public origin; a funded wal
  const ok=await carol.call('yeet_home');
  assert.equal(ok.structuredContent.ready,'ready');
  assert.equal('fund_url' in ok.structuredContent,false);
+});
+
+test('username: set by the connector route or the account page, unique ignoring case, shown on the leaderboard',async()=>{
+ const dana=await signIn('did:privy:name-dana'),eli=await signIn('did:privy:name-eli');
+ const coreSecret=readFileSync(join(secrets,'core-mcp'),'utf8');
+ // What the connector sends for yeet_set_username (tool-registration.mjs ROUTES), with the person's own token.
+ const setName=(who,username)=>fetch(process.env.CORE_INTERNAL+'/username',{method:'POST',headers:{authorization:`Bearer ${coreSecret}`,'x-delegated-bearer':who.token,'content-type':'application/json'},body:JSON.stringify({username})});
+ let r=await setName(dana,'@Dana_Wins');assert.equal(r.status,200);assert.deepEqual(await r.json(),{username:'Dana_Wins'});
+ r=await setName(eli,'dana_WINS');assert.equal(r.status,409);assert.equal((await r.json()).error,'USERNAME_TAKEN');
+ r=await setName(eli,'Admin');assert.equal(r.status,400);assert.equal((await r.json()).error,'USERNAME_NOT_ALLOWED');
+ r=await setName(eli,'no spaces');assert.equal(r.status,400);assert.equal((await r.json()).error,'INVALID_ARGUMENT');
+ const board=(await dana.call('yeet_leaderboard',{board:'xp'})).structuredContent.rows;
+ assert.ok(board.some(row=>row.name==='Dana_Wins'),JSON.stringify(board));
+ assert.ok(!board.some(row=>row.name===handle(dana.sub)),'the default name is gone');
+ assert.ok(board.some(row=>row.name===handle(eli.sub)),'no username: default name');
+
+ // The account page: sign in on the sign-in server, read the page, post the field.
+ const c=jar();
+ const step=async(path,init={})=>{const res=await fetch(AS+path,{redirect:'manual',...init,headers:{cookie:c.header(),...init.headers}});c.add(res);return res};
+ const form=body=>({method:'POST',headers:{'content-type':'application/x-www-form-urlencoded',origin:ORIGIN},body:new URLSearchParams(body)});
+ await step('/account/login');
+ const login=c.header().match(/yeet_login=([0-9a-f]+)/)[1];
+ r=await step('/account/login',form({csrf:login,identity_token:'DEV:did:privy:name-eli'}));assert.equal(r.status,302);
+ let page=await (await step('/account/')).text();
+ assert.match(page,/<title>Your YEET account<\/title>/);
+ assert.ok(page.includes(handle(eli.sub)),'shows the current board name');
+ const csrf=page.match(/name="csrf" value="([0-9a-f]+)"/)[1];
+ r=await step('/account/username',form({csrf:'wrong',username:'Eli_Moon'}));assert.equal(r.status,403);
+ r=await step('/account/username',form({csrf,username:'DANA_WINS'}));assert.equal(r.status,409);
+ assert.match(await r.text(),/That username is taken/);
+ r=await step('/account/username',form({csrf,username:'Eli_Moon'}));assert.equal(r.status,303);assert.equal(r.headers.get('location'),'/account/?username=saved');
+ page=await (await step('/account/?username=saved')).text();
+ assert.match(page,/Username saved/);assert.match(page,/value="Eli_Moon"/);
+ const after=(await eli.call('yeet_leaderboard',{board:'xp'})).structuredContent.rows;
+ assert.ok(after.some(row=>row.name==='Eli_Moon')&&after.some(row=>row.name==='Dana_Wins'),JSON.stringify(after));
 });

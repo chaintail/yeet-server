@@ -21,6 +21,7 @@ import {
   setupErrorReport,
 } from "./wallet-setup.js";
 import { SetupProgress } from "./setup-screen.jsx";
+import { Swap } from "./screen.jsx";
 
 // How long the page keeps asking the Privy client for the app configuration after Privy reports ready.
 const CONFIG_WAIT_MS = 5000;
@@ -166,7 +167,7 @@ function ChooseMethod({ methods }) {
     </p>
   );
   return (
-    <>
+    <Swap id={sentTo ? "code" : "choose"}>
       {sentTo ? (
         <>
           <p>
@@ -205,6 +206,7 @@ function ChooseMethod({ methods }) {
         </>
       ) : (
         <>
+          <p>{introLine(methods)}</p>
           {emailOn ? (
             <>
               <label htmlFor="yeet-email">Email</label>
@@ -244,7 +246,7 @@ function ChooseMethod({ methods }) {
           {emailOn ? null : notice}
         </>
       )}
-    </>
+    </Swap>
   );
 }
 
@@ -401,19 +403,25 @@ function FinishSignIn({ config }) {
   );
 }
 
+const LOADING = <p role="status">Loading secure sign in…</p>;
+
 function SignIn({ config }) {
   const { ready, authenticated } = usePrivy();
   const methods = useEnabledMethods();
-  if (!ready) return <p role="status">Loading secure sign in…</p>;
   // Every sign-in method ends here, so the YEET signer step runs after email, Google, Apple, X and Telegram alike.
-  if (authenticated) return <FinishSignIn config={config} />;
-  if (methods === null) return <p role="status">Loading secure sign in…</p>;
-  if (!methods.length) return <p role="status">{NO_METHOD_LINE}</p>;
+  const screen = !ready ? "loading" : authenticated ? "finish" : methods === null ? "loading" : !methods.length ? "none" : "methods";
   return (
-    <>
-      <p>{introLine(methods)}</p>
-      <ChooseMethod methods={methods} />
-    </>
+    <Swap id={screen}>
+      {screen === "loading" ? (
+        LOADING
+      ) : screen === "finish" ? (
+        <FinishSignIn config={config} />
+      ) : screen === "none" ? (
+        <p role="status">{NO_METHOD_LINE}</p>
+      ) : (
+        <ChooseMethod methods={methods} />
+      )}
+    </Swap>
   );
 }
 
@@ -433,6 +441,9 @@ try {
     </PrivyProvider>,
   );
 } catch {
-  document.getElementById("privy-login").textContent =
-    "Secure sign in is unavailable. Please try again later.";
+  const line = document.createElement("p");
+  line.className = "notice";
+  line.setAttribute("role", "alert");
+  line.textContent = "Secure sign in is unavailable. Please try again later.";
+  document.getElementById("privy-login").replaceChildren(line);
 }
