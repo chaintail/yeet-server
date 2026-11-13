@@ -34,6 +34,8 @@ fi
     npm ci --workspace packages/router --include-workspace-root=false --ignore-scripts --no-audit --no-fund --prefer-offline >/dev/null
   fi
   (cd packages/router && ../../node_modules/.bin/tsc -p tsconfig.json)
+  # The widget build also writes the landing page's wheel.js/wheel.css into apps/landing/ (not vendored).
+  mkdir -p apps/landing
   (cd packages/widget && node build.mjs)
 )
 
