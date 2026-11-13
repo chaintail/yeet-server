@@ -6,6 +6,7 @@ handle @yeet_conn {
 	header {
 		Cache-Control "no-store"
 		X-Robots-Tag "noindex, nofollow"
+		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options nosniff
 		Referrer-Policy strict-origin-when-cross-origin
 		?Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://chatgpt.com"
@@ -43,6 +44,10 @@ handle @yeet_conn {
 # Landing page (built yeet-win apps/landing).
 @yeet_landing host yeet.win www.yeet.win
 handle @yeet_landing {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+	}
 	root * /srv/yeet-win/apps/landing
 	file_server
 }
