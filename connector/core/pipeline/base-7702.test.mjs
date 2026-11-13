@@ -135,8 +135,8 @@ test('SIGN_EXPIRED and AUTH_NONCE_STALE answer one fresh evm_7702 request with t
 
 for(const where of ['signed','submitted','uncertain']){
  test(`restart with the batch ${where}: recovery confirms it once and tells 1Click once per leg`,async()=>{
-  let env;
-  const loadWallet=where==='signed'?c=>{const g=loadGasWallet(c);return {address:g.address,sign:async tx=>{const r=await g.sign(tx);env.YEET_BASE_PAUSE='1';return r}}}:undefined;
+  let env,pauseOnce=true;// the pause closes once, right after the first outer signature
+  const loadWallet=where==='signed'?c=>{const g=loadGasWallet(c);return {address:g.address,sign:async tx=>{const r=await g.sign(tx);if(pauseOnce){pauseOnce=false;env.YEET_BASE_PAUSE='1'}return r}}}:undefined;
   const f=await fakeBasePipeline({env:{YEET_BASE_MODE:'7702'},loadWallet});env=f.env;const {db,rpc,oneclick}=f;
   const x=await exec(f.p,await f.p.propose(ALICE,buy(2)));
   const r=x.sign_requests[0];
@@ -168,6 +168,28 @@ test('RBF: a stuck batch is replaced (+12.5%), the second hash lands and every l
  assert.deepEqual(statuses(db,x.trade_id),['sent','sent']);
  assert.ok(legs(db,x.trade_id).every(l=>l.tx_hash===second));
  assert.ok(oneclick.calls.submit.every(c=>c.txHash===second));
+});
+
+test('a batch signed while the gas wallet is busy waits with its legs in signing (no hash), then sends, lands and notifies once per leg',async()=>{
+ const f=await fakeBasePipeline({env:{YEET_BASE_MODE:'7702'}});const {p,db,rpc,oneclick}=f;
+ // Another gas-wallet transaction in flight (a top-up for some other trade).
+ const t0=f.now();
+ db.prepare("INSERT INTO base_attempt(id,kind,trade_id,leg_idx,account_id,wallet,sender,nonce,tx_json,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
+  .run('busy-topup','gas_topup','t_busy',0,'other','0x'+'99'.repeat(20),f.gas.address,0,'{}','submitted',t0,t0);
+ const x=await exec(p,await p.propose(ALICE,buy(2)));
+ const r=x.sign_requests[0];
+ const s=await sub(p,r,await f.sign(r));
+ assert.deepEqual(s.legs.map(l=>l.send_status),['signing','signing']);
+ assert.ok(s.legs.every(l=>l.tx_hash==null));assert.equal(rpc.s.broadcasts.length,0);
+ assert.equal(batchRow(db,r.attempt_id).state,'signed');
+ db.prepare("UPDATE base_attempt SET state='confirmed' WHERE id='busy-topup'").run();
+ await f.tick(x.trade_id);
+ assert.equal(rpc.s.broadcasts.length,1);
+ const hash=keccak256(rpc.s.broadcasts[0]);
+ assert.ok(legs(db,x.trade_id).every(l=>l.tx_hash===hash),'the legs carry the hash once it is sent');
+ await mine(rpc,rpc.s.broadcasts[0]);await f.tick(x.trade_id);
+ assert.deepEqual(statuses(db,x.trade_id),['sent','sent']);
+ assert.equal(oneclick.calls.submit.length,2);assert.ok(oneclick.calls.submit.every(c=>c.txHash===hash));
 });
 
 test('deadline passed while unsent: the batch is cancelled and the legs end not_sent, amounts held',async()=>{

@@ -8,6 +8,14 @@
 //   submit({trade, legs, wallet, attemptId, signed, dryRun, now}) -> 2.2 steps 1-9 in order; a refusal changes nothing
 //   advance(id) / recover({now}) -> 2.3 send, 2.4 confirmation from the USDC Transfer logs (never receipt status alone),
 //            2.6 recovery
+// One gas-wallet transaction in flight (guard 12, for batches too): a signed batch waits as `signed` with the person's
+// signatures and no outer transaction until no top-up or other batch is in flight; only then does it get a nonce,
+// with the wallet's code, the simulation, the cost and the floor read again. So a batch that ends unsent never leaves
+// a nonce gap under another one. A batch already out is re-sent only after the same re-checks; if the wallet changed,
+// or the batch is still in a pool past its deadline, a 0-value transaction to our own gas wallet takes its nonce
+// (a cancel). A failed ending needs a second reading: a receipt without its transaction is read again, and a taken
+// nonce with no lookup showing our hashes ends the row only after NONCE_CONSUMED_CONFIRM_MS and if the trade's
+// Calibur nonce has not moved.
 // Every row lives in base_batch (store.mjs); the pipeline ledger follows it through leg-driver.mjs.
 import {recoverTypedDataAddress,serializeTransaction} from 'viem';
 import {limitsFromEnv,accountLive,spentToday} from '../../trade/limits.mjs';
@@ -33,6 +41,15 @@ export const SEND_STOP_MS=30_000;
 /** No sign request when a leg's deposit deadline is closer than this (pipeline SEND_MARGIN_MS). */
 export const SEND_MARGIN_MS=120_000;
 export const MAX_BATCH_DEADLINE_S=15*60;
+/** A gas-wallet nonce taken while no lookup shows any of our hashes ends the row only after it has been seen this long
+ * (a load-balanced RPC can serve the nonce from a node that is ahead of the one serving receipts). */
+export const NONCE_CONSUMED_CONFIRM_MS=60_000;
+/** The 0-value transaction to our own gas wallet that replaces a stuck batch at its nonce. */
+export const CANCEL_GAS=21_000n;
+/** Refusals that end a signed batch waiting to be sent; any other refusal at send time waits for the next pass. */
+const SEND_FINAL=new Set(['WALLET_HAS_CODE','AUTH_NONCE_STALE','SIGNED_SOURCE_MISMATCH','SIMULATION_FAILED']);
+const soft=(code,detail)=>{const e=new TradeError(code,detail);e.transient=true;throw e};
+const maxBig=(a,b)=>a>b?a:b;
 export const AUTO_LEGACY_FLAG='base_mode_auto_legacy';
 export const unsupportedFlag=wallet=>`7702_unsupported:${String(wallet).toLowerCase()}`;
 export const WALLET_HAS_CODE_STEPS='This wallet runs smart-account code from another app. Remove it in that app (or sign an EIP-7702 authorization to address 0) and try again.';
@@ -80,7 +97,7 @@ export function createBaseBatchDriver({db,rpc,env=process.env,now=Date.now,alert
  const sendsOf=row=>evidence(row).sends??(row.tx_hash?[{hash:row.tx_hash}]:[]);
  function resultOf(row){
   const r={txHash:row.tx_hash??undefined};
-  if(row.state==='cancelled')return {...r,state:!row.signed_raw&&['SIGN_EXPIRED','AUTH_NONCE_STALE'].includes(row.code)?'expired':'not_sent',code:row.code};
+  if(row.state==='cancelled')return {...r,state:!row.batch_sig&&['SIGN_EXPIRED','AUTH_NONCE_STALE'].includes(row.code)?'expired':'not_sent',code:row.code};
   if(row.state==='failed')return {...r,state:'failed',code:row.code};
   if(['submitted','uncertain','confirmed'].includes(row.state))return {...r,state:'sent'};
   return {...r,state:'pending'};
@@ -200,6 +217,82 @@ export function createBaseBatchDriver({db,rpc,env=process.env,now=Date.now,alert
  const requestOf=row=>({attemptId:row.id,kind:'evm_7702',chain:'base',wallet:row.wallet,payload:JSON.parse(row.typed_json),payloadSha256:row.payload_sha256,
   expiresAt:row.expires_at,legs:storedLegs(row).map(l=>l.idx)});
 
+ /** Plan 2.2 step 3: the batch rebuilt from our own legs; its signer must be the wallet. */
+ async function checkedBatch(row,executor,batchSig){
+  const w=row.wallet,stored=storedLegs(row),ev=evidence(row),saltPrefix=BigInt(ev.salt_prefix??'0'),payload=JSON.parse(row.typed_json);
+  const expected={legs:stored.map(l=>({to:l.to,amountRaw:l.amountRaw})),nonce:batchNonce(BigInt(row.nonce_key),BigInt(row.nonce_seq)),executor,deadline:BigInt(row.deadline)};
+  let batch;
+  try{
+   const td=typedDataForSigning(payload.typed_data);
+   if(lc(td.domain.verifyingContract)!==w||td.domain.chainId!==BASE_CHAIN_ID)throw Error('domain');
+   batch=assertBatchMatches(td.message,expected);
+  }catch(e){refuse('SIGNED_SOURCE_MISMATCH',`batch: ${e.message}`)}
+  let signer;try{signer=await recoverTypedDataAddress({...batchTypedData(w,batch,{saltPrefix}),signature:batchSig})}catch{signer=null}
+  if(lc(signer)!==w)refuse('SIGNED_SOURCE_MISMATCH','batch signer is not the wallet');
+  return {batch,legs:expected.legs};
+ }
+ /** Plan 2.2 steps 4-8 for the outer transaction, at submit (`dry`/`submit`) and again when a waiting batch is sent
+  * (`send`: the person's caps were checked at submit; the quota was reserved then). Throws a TradeError; one marked
+  * `transient` (an RPC error, the wallet's own transaction in flight) never ends a waiting batch. */
+ async function planOuter(row,{gw,c,t,batchSig,authSig,mode}){
+  const w=row.wallet,auth=row.auth_json?JSON.parse(row.auth_json):null,send=mode==='send';
+  const {batch,legs}=await checkedBatch(row,gw.address,batchSig);
+  // Step 4: the wallet's code, then the authorization.
+  const code=lc(await rpc.code(w)||'0x'),del=delegatedTo(code);
+  if(del===null||(del!==''&&lc(del)!==lc(CALIBUR)))refuse('WALLET_HAS_CODE',`delegated_elsewhere: ${WALLET_HAS_CODE_STEPS}`);
+  let authorization=null;
+  if(auth){
+   const y=authSig.slice(128,130);
+   if(y!=='00'&&y!=='01')refuse('SIGNED_SOURCE_MISMATCH','authorization y_parity');
+   const a=fromPrivyAuthorization({contract:auth.contract,chain_id:auth.chain_id,nonce:auth.nonce,r:'0x'+authSig.slice(0,64),s:'0x'+authSig.slice(64,128),y_parity:parseInt(y,16)});
+   try{await assertAuthorization(a,{user:w,nonce:auth.nonce})}catch(e){refuse('SIGNED_SOURCE_MISMATCH',`authorization: ${e.message}`)}
+   if(del===''){
+    const latest=Number(await rpc.nonce(w,'latest')),pending=Number(await rpc.nonce(w,'pending'));
+    // Waiting to be sent, the wallet's own transaction may still land or drop; at submit any change is stale (deviation 4).
+    if(send&&pending!==latest&&latest<=auth.nonce)soft('AUTH_NONCE_STALE','the wallet has a transaction of its own in flight');
+    if(latest!==auth.nonce||pending!==auth.nonce)refuse('AUTH_NONCE_STALE','authorization nonce');
+    authorization=a;
+   }// else: the wallet is already Calibur (someone included our authorization first): type 2 without it
+  }
+  // Step 5: limits.
+  const blocked=[];
+  if(!send){
+   const l=limits();
+   for(const v of storedLegs(row))capCheck(l,v.amountRaw);
+   if(spentToday(db,row.account_id,t)>l.dailyCapRaw)refuse('LIMIT_EXCEEDED','over daily cap');
+  }
+  const gateCode=gateRefusal(row.account_id);
+  if(gateCode){if(mode!=='dry')refuse(gateCode,'live gate');blocked.push(gateCode)}
+  if(BigInt(await rpc.tokenBalance(w))<sumOf(legs))(send?soft:refuse)('PRINCIPAL_SHORT');
+  // Step 6: the exact call.
+  const data=executeCalldata(batch,wrapSignature(batchSig));
+  let sim;
+  try{sim=await simulateExact({sender:gw.address,wallet:w,data,authorization,legs})}catch(e){soft('SIMULATION_FAILED',`eth_simulateV1: ${safeError(e)}`)}
+  if(!sim.ok)refuse('SIMULATION_FAILED',`batch: ${sim.revert??`${sim.legs.filter(x=>x.ok).length}/${sim.legs.length} legs transferred`}`);
+  // Step 7: gas, fees, cost.
+  let est;try{est=BigInt(await rpc.estimateGasAuth({from:gw.address,to:w,data,authorizationList:authorization?[authorization]:undefined}))}
+  catch(e){soft('SIMULATION_FAILED',`estimateGas: ${safeError(e)}`)}
+  const gas=est+(est+3n)/4n,cap=gasCapFor(legs.length);
+  if(est<=0n||gas>cap)refuse('INVALID_TRANSACTION_BUDGET',`gas ${gas} over ${cap}`);
+  const fees=await readFees(rpc,c.maxFeeWei);
+  const build=nonce=>authorization?buildType4({user:w,authorization,data,nonce,gas,...fees}):buildType2({user:w,data,nonce,gas,...fees});
+  const l1=await l1For(build(0)),maxCost=gas*fees.maxFeePerGas+l1;
+  if(maxCost>c.batchMaxCostWei)refuse('INVALID_TRANSACTION_BUDGET',`max cost ${maxCost} over YEET_BASE_BATCH_MAX_COST_WEI`);
+  // Step 8: floor and quota. The floor is read when the batch is sent too, with no other gas-wallet transaction in
+  // flight then (send), so the latest balance is what this one transaction can take.
+  const balance=BigInt(await rpc.balance(gw.address,'latest'));
+  if(balance-maxCost<c.floorRaw){lowAlert(balance,c);refuse('TOPUP_UNAVAILABLE','gas wallet floor')}
+  const day=utcDay(t);
+  if(send){
+   const ev=evidence(row);
+   if(store.dayTotal(ev.quota_day)-BigInt(row.max_cost_raw??'0')+maxCost>c.globalDailyRaw)refuse('TOPUP_CAP_EXCEEDED','global daily cap');
+  }else{
+   if(store.day(day,row.account_id).count>=MAX_TOPUPS_PER_ACCOUNT_DAY)refuse('TOPUP_CAP_EXCEEDED','account daily count');
+   if(store.dayTotal(day)+maxCost>c.globalDailyRaw)refuse('TOPUP_CAP_EXCEEDED','global daily cap');
+  }
+  return {authorization,authDropped:!!auth&&!authorization,data,gas,est,fees,l1,maxCost,build,sim,code,blocked,day};
+ }
+
  /** Plan 2.2 steps 1-9. */
  async function submit({trade,legs,wallet,attemptId,signed,dryRun,now:at}={}){
   const t=at??now(),dry=dryRun!==false,w=addr(wallet);
@@ -222,140 +315,112 @@ export function createBaseBatchDriver({db,rpc,env=process.env,now=Date.now,alert
   // A dry run needs only the gas wallet's address (plan 2.10); a live submit loads the key and it must match.
   const c=cfg(),gw=dry?{address:c.gasWallet}:loadWallet(c);
   if(!gw.address||gw.address!==c.gasWallet||row.sender!==gw.address)refuse('GAS_WALLET_NOT_CONFIGURED','executor is not the configured gas wallet');
-  // Step 3: the batch, rebuilt from our own legs, then its signer.
-  const ev0=evidence(row),saltPrefix=BigInt(ev0.salt_prefix??'0'),payload=JSON.parse(row.typed_json);
-  const expected={legs:stored.map(l=>({to:l.to,amountRaw:l.amountRaw})),nonce:batchNonce(BigInt(row.nonce_key),BigInt(row.nonce_seq)),executor:gw.address,deadline:BigInt(row.deadline)};
-  let batch;
-  try{
-   const td=typedDataForSigning(payload.typed_data);
-   if(lc(td.domain.verifyingContract)!==w||td.domain.chainId!==BASE_CHAIN_ID)throw Error('domain');
-   batch=assertBatchMatches(td.message,expected);
-  }catch(e){refuse('SIGNED_SOURCE_MISMATCH',`batch: ${e.message}`)}
-  let signer;try{signer=await recoverTypedDataAddress({...batchTypedData(w,batch,{saltPrefix}),signature:batchSig})}catch{signer=null}
-  if(lc(signer)!==w)refuse('SIGNED_SOURCE_MISMATCH','batch signer is not the wallet');
-  // Step 4: the authorization.
-  const code=lc(await rpc.code(w)||'0x'),del=delegatedTo(code);
-  if(del===null||(del!==''&&lc(del)!==lc(CALIBUR)))refuse('WALLET_HAS_CODE',`delegated_elsewhere: ${WALLET_HAS_CODE_STEPS}`);
-  let authorization=null;
-  if(auth){
-   const y=authSig.slice(128,130);
-   if(y!=='00'&&y!=='01')refuse('SIGNED_SOURCE_MISMATCH','authorization y_parity');
-   const a=fromPrivyAuthorization({contract:auth.contract,chain_id:auth.chain_id,nonce:auth.nonce,r:'0x'+authSig.slice(0,64),s:'0x'+authSig.slice(64,128),y_parity:parseInt(y,16)});
-   try{await assertAuthorization(a,{user:w,nonce:auth.nonce})}catch(e){refuse('SIGNED_SOURCE_MISMATCH',`authorization: ${e.message}`)}
-   if(del===''){
-    const latest=Number(await rpc.nonce(w,'latest')),pending=Number(await rpc.nonce(w,'pending'));
-    if(latest!==auth.nonce||pending!==auth.nonce){if(!dry)cancelBatch(row,'AUTH_NONCE_STALE');return {state:'expired',code:'AUTH_NONCE_STALE'}}
-    authorization=a;
-   }// else: the wallet is already Calibur (someone included our authorization first): type 2 without it
+  // Steps 3-8.
+  let plan;
+  try{plan=await planOuter(row,{gw,c,t,batchSig,authSig,mode:dry?'dry':'submit'})}
+  catch(e){
+   if(e?.code!=='AUTH_NONCE_STALE')throw e;
+   if(!dry)cancelBatch(row,'AUTH_NONCE_STALE');
+   return {state:'expired',code:'AUTH_NONCE_STALE'};
   }
-  // Step 5: limits.
-  const l=limits();
-  for(const v of views)capCheck(l,v.amountRaw);
-  if(spentToday(db,row.account_id,t)>l.dailyCapRaw)refuse('LIMIT_EXCEEDED','over daily cap');
-  const blocked=[],gateCode=gateRefusal(row.account_id);
-  if(gateCode){if(!dry)refuse(gateCode,'live gate');blocked.push(gateCode)}
-  if(BigInt(await rpc.tokenBalance(w))<sumOf(expected.legs))refuse('PRINCIPAL_SHORT');
-  // Step 6: the exact call.
-  const data=executeCalldata(batch,wrapSignature(batchSig));
-  let sim;
-  try{sim=await simulateExact({sender:gw.address,wallet:w,data,authorization,legs:expected.legs})}catch(e){refuse('SIMULATION_FAILED',`eth_simulateV1: ${safeError(e)}`)}
-  if(!sim.ok)refuse('SIMULATION_FAILED',`batch: ${sim.revert??`${sim.legs.filter(x=>x.ok).length}/${sim.legs.length} legs transferred`}`);
-  // Step 7: gas, fees, cost.
-  let est;try{est=BigInt(await rpc.estimateGasAuth({from:gw.address,to:w,data,authorizationList:authorization?[authorization]:undefined}))}
-  catch(e){refuse('SIMULATION_FAILED',`estimateGas: ${safeError(e)}`)}
-  const gas=est+(est+3n)/4n,cap=gasCapFor(expected.legs.length);
-  if(est<=0n||gas>cap)refuse('INVALID_TRANSACTION_BUDGET',`gas ${gas} over ${cap}`);
-  const fees=await readFees(rpc,c.maxFeeWei);
-  const build=nonce=>authorization?buildType4({user:w,authorization,data,nonce,gas,...fees}):buildType2({user:w,data,nonce,gas,...fees});
-  const l1=await l1For(build(0)),maxCost=gas*fees.maxFeePerGas+l1;
-  if(maxCost>c.batchMaxCostWei)refuse('INVALID_TRANSACTION_BUDGET',`max cost ${maxCost} over YEET_BASE_BATCH_MAX_COST_WEI`);
-  // Step 8: floor and quota.
-  const balance=BigInt(await rpc.balance(gw.address,'latest'));
-  if(balance-maxCost<c.floorRaw){lowAlert(balance,c);refuse('TOPUP_UNAVAILABLE','gas wallet floor')}
-  const day=utcDay(t);
-  if(store.day(day,row.account_id).count>=MAX_TOPUPS_PER_ACCOUNT_DAY)refuse('TOPUP_CAP_EXCEEDED','account daily count');
-  if(store.dayTotal(day)+maxCost>c.globalDailyRaw)refuse('TOPUP_CAP_EXCEEDED','global daily cap');
-  const simulation={legs_transferred:sim.legs.filter(x=>x.ok).length,gas_used:String(sim.gasUsed),gas_limit:String(gas),max_cost_wei:String(maxCost),
-   revert:null,type:authorization?4:2,legs:sim.legs};
+  const simulation={legs_transferred:plan.sim.legs.filter(x=>x.ok).length,gas_used:String(plan.sim.gasUsed),gas_limit:String(plan.gas),
+   max_cost_wei:String(plan.maxCost),revert:null,type:plan.authorization?4:2,legs:plan.sim.legs};
   if(dry){
-   log('base_batch_transition',{trade_id:s12(row.trade_id),attempt_id:s12(row.id),stage:'dry_run',legs:expected.legs.length,gas_limit:String(gas)});
-   return {state:'pending',dryRun:true,broadcast:false,simulation,blocked};
+   log('base_batch_transition',{trade_id:s12(row.trade_id),attempt_id:s12(row.id),stage:'dry_run',legs:stored.length,gas_limit:String(plan.gas)});
+   return {state:'pending',dryRun:true,broadcast:false,simulation,blocked:plan.blocked};
   }
-  // Step 9: sign the outer transaction and store it before any broadcast.
-  const pending=Number(await rpc.nonce(gw.address,'pending'));
-  const senderNonce=store.senderNonce(gw.address,pending),tx=build(senderNonce);
-  if(gateRefusal(row.account_id))refuse(gateRefusal(row.account_id),'live gate');
-  const out=await gw.sign(tx);
-  const hash=authorization?await assertType4Bytes(out.bytes,tx,gw.address):await assertType2Bytes(out.bytes,tx,gw.address);
+  // Step 9: the person's signatures are stored and the quota reserved; the outer transaction follows in send().
+  const day=plan.day,ev0=evidence(row);
   const saved=store.atomic(()=>{
-   if(store.senderNonce(gw.address,pending)!==senderNonce)refuse('TEMPORARILY_UNAVAILABLE','gas wallet nonce moved');
    if(store.walletBatches(w,LIVE).length)refuse('SOURCE_ATTEMPT_BLOCKED','another batch of this wallet is in flight');
-   if(store.day(day,row.account_id).count>=MAX_TOPUPS_PER_ACCOUNT_DAY||store.dayTotal(day)+maxCost>c.globalDailyRaw)refuse('TOPUP_CAP_EXCEEDED','daily');
-   store.bumpDay(day,row.account_id,1,maxCost);
-   return store.updateBatch(row.id,{state:'signed',batch_sig:s.slice(2,132),auth_sig:authSig,tx_json:txJson(tx),signed_raw:out.bytes,tx_hash:hash,
-    sender_nonce:senderNonce,max_cost_raw:String(maxCost),evidence_json:JSON.stringify({...ev0,quota_day:day,auth_dropped:!!auth&&!authorization,
-     code_at_submit:code,gas_estimate:String(est),l1_fee_bound:String(l1),sends:[{hash,at:t,max_fee_per_gas:String(tx.maxFeePerGas)}]})},['prepared']);
+   if(store.day(day,row.account_id).count>=MAX_TOPUPS_PER_ACCOUNT_DAY||store.dayTotal(day)+plan.maxCost>c.globalDailyRaw)refuse('TOPUP_CAP_EXCEEDED','daily');
+   store.bumpDay(day,row.account_id,1,plan.maxCost);
+   return store.updateBatch(row.id,{state:'signed',batch_sig:s.slice(2,132),auth_sig:authSig,max_cost_raw:String(plan.maxCost),
+    evidence_json:JSON.stringify({...ev0,quota_day:day,auth_dropped:plan.authDropped,code_at_submit:plan.code,gas_estimate:String(plan.est),l1_fee_bound:String(plan.l1)})},['prepared']);
   });
-  transition(row,'signed',{tx_hash:hash});
-  const r=await advance(saved.id,t,{fresh:true});
-  return {...r,txHash:store.batch(saved.id).tx_hash};
+  transition(row,'signed');
+  let r;
+  try{r=await send(saved.id,t,{plan,gw})}
+  catch(e){log('base_batch_transition',{attempt_id:s12(row.id),stage:'send',error:safeError(e)});r=resultOf(store.batch(saved.id))}
+  return {...r,txHash:store.batch(saved.id).tx_hash??undefined};
  }
 
- /** Re-signs a signed, never-broadcast row as type 2 when the wallet became Calibur meanwhile (the authorization is
-  * then dropped; the batch signature is unchanged). */
- async function dropAuthorization(row){
-  const gw=loadWallet(cfg()),prior=txFromJson(row.tx_json);
-  const tx=buildType2({user:row.wallet,data:prior.data,nonce:prior.nonce,gas:prior.gas,maxFeePerGas:prior.maxFeePerGas,maxPriorityFeePerGas:prior.maxPriorityFeePerGas});
-  const out=await gw.sign(tx),hash=await assertType2Bytes(out.bytes,tx,gw.address);
-  const ev=evidence(row);
-  return store.updateBatch(row.id,{tx_json:txJson(tx),signed_raw:out.bytes,tx_hash:hash,evidence_json:JSON.stringify({...ev,auth_dropped:true,sends:[{hash,at:now(),max_fee_per_gas:String(tx.maxFeePerGas)}]})},['signed']);
+ /** Plan 2.3: a signed batch gets its outer transaction only while no other gas-wallet transaction (a top-up or a
+  * batch) is in flight (guard 12), so its nonce is the next one the chain takes and a batch that ends unsent never
+  * leaves a gap under a later one. The gate, the deadline, the wallet's code and nonce, the simulation, the cost and
+  * the floor are read again unless `plan` is the one submit just made. */
+ async function send(id,t=now(),{plan,gw}={}){
+  let row=store.batch(id);
+  if(!row||row.state!=='signed'||row.never_send)return row?resultOf(row):{state:'pending'};
+  if(t>row.deadline*1000-SEND_STOP_MS)return cancelBatch(row,'DEADLINE_PASSED_UNSENT');
+  if(gateRefusal(row.account_id))return resultOf(row);
+  // A row an earlier build signed but never broadcast: its outer transaction is dropped and made again here.
+  if(row.signed_raw){row=store.updateBatch(row.id,{tx_json:null,signed_raw:null,tx_hash:null,sender_nonce:null},['signed']);plan=null}
+  if(store.gasInFlight()>0)return resultOf(row);
+  const c=cfg();
+  if(!gw)try{gw=loadWallet(c)}catch(e){log('base_batch_transition',{attempt_id:s12(row.id),stage:'send_wait',error:safeError(e)});return resultOf(row)}
+  if(gw.address!==row.sender)return resultOf(row);
+  if(!plan){
+   try{plan=await planOuter(row,{gw,c,t,batchSig:'0x'+row.batch_sig,authSig:row.auth_sig,mode:'send'})}
+   catch(e){
+    if(e instanceof TradeError&&!e.transient&&SEND_FINAL.has(e.code))return cancelBatch(row,e.code);
+    log('base_batch_transition',{attempt_id:s12(row.id),stage:'send_wait',code:e?.code,error:safeError(e)});
+    return resultOf(row);
+   }
+  }
+  const pending=Number(await rpc.nonce(gw.address,'pending'));
+  const senderNonce=store.senderNonce(gw.address,pending),tx=plan.build(senderNonce);
+  const out=await gw.sign(tx);
+  const hash=plan.authorization?await assertType4Bytes(out.bytes,tx,gw.address):await assertType2Bytes(out.bytes,tx,gw.address);
+  if(gateRefusal(row.account_id))return resultOf(row);// these bytes are dropped, never broadcast
+  // Stored before the broadcast, under the same checks: still waiting, nothing else in flight, the same nonce.
+  const cur=store.atomic(()=>{
+   const r=store.batch(row.id);
+   if(r.state!=='signed'||r.signed_raw||store.gasInFlight()>0||store.senderNonce(gw.address,pending)!==senderNonce)return null;
+   const ev=evidence(r);
+   if(ev.quota_day)store.bumpDay(ev.quota_day,r.account_id,0,plan.maxCost-BigInt(r.max_cost_raw??'0'));
+   return store.updateBatch(r.id,{state:'submitted',tx_json:txJson(tx),signed_raw:out.bytes,tx_hash:hash,sender_nonce:senderNonce,max_cost_raw:String(plan.maxCost),broadcast_at:t,
+    evidence_json:JSON.stringify({...ev,auth_dropped:plan.authDropped,code_at_send:plan.code,gas_estimate:String(plan.est),l1_fee_bound:String(plan.l1),
+     sends:[{hash,at:t,max_fee_per_gas:String(tx.maxFeePerGas)}]})},['signed']);
+  });
+  if(!cur)return resultOf(store.batch(row.id));
+  transition(row,'submitted',{tx_hash:hash});
+  await broadcastRow(cur);
+  return {state:'sent',txHash:hash};
  }
  async function broadcastRow(cur){
   try{if(lc(await rpc.broadcast(cur.signed_raw))!==cur.tx_hash)throw Error('SUBMISSION_HASH_MISMATCH')}
   catch(e){log('base_batch_transition',{attempt_id:s12(cur.id),state_to:'uncertain',tx_ref:s12(cur.tx_hash),error:safeError(e)});
    store.updateBatch(cur.id,{state:'uncertain'},['submitted','uncertain'])}
  }
- /** Plan 2.3: a signed row is broadcast once the gate, deadline, wallet nonce and code allow. */
- async function advance(id,t=now(),{fresh=false}={}){
-  let row=store.batch(id);
-  if(!row||row.state!=='signed'||row.never_send)return row?resultOf(row):{state:'pending'};
-  if(t>row.deadline*1000-SEND_STOP_MS)return cancelBatch(row,'DEADLINE_PASSED_UNSENT');
-  if(gateRefusal(row.account_id))return resultOf(row);
-  if(!fresh){
-   const tx=txFromJson(row.tx_json),del=delegatedTo(lc(await rpc.code(row.wallet)||'0x'));
-   if(del===null||(del!==''&&lc(del)!==lc(CALIBUR)))return cancelBatch(row,'WALLET_HAS_CODE');
-   let authorization=null;
-   if(tx.type==='eip7702'){
-    if(del!==''){row=await dropAuthorization(row)}
-    else{
-     const a=tx.authorizationList[0],latest=Number(await rpc.nonce(row.wallet,'latest')),pending=Number(await rpc.nonce(row.wallet,'pending'));
-     if(latest>a.nonce)return cancelBatch(row,'AUTH_NONCE_STALE');
-     if(pending!==latest)return resultOf(row);// wait until the wallet's own transaction lands or drops
-     authorization=a;
-    }
-   }
-   let sim;
-   try{sim=await simulateExact({sender:row.sender,wallet:row.wallet,data:txFromJson(row.tx_json).data,authorization,legs:storedLegs(row)})}
-   catch(e){log('base_batch_transition',{attempt_id:s12(row.id),stage:'resimulate',error:safeError(e)});return resultOf(row)}
-   if(!sim.ok)return cancelBatch(row,'SIMULATION_FAILED');
-  }
-  const cur=store.updateBatch(row.id,{state:'submitted',broadcast_at:t},['signed']);
-  transition(row,'submitted');
-  await broadcastRow(cur);
-  return {state:'sent',txHash:cur.tx_hash};
- }
+ /** Kept for callers: a signed row goes through send(). */
+ const advance=(id,t=now())=>send(id,t);
 
- /** Stuck outer transaction: we alone signed it, so it is replaced at the same nonce with fees +12.5%. */
- async function replaceBatch(row,t){
+ /** Before any re-send of a batch already out (plan 2.3): the wallet's code is read again and the exact call
+  * simulated again. Returns null (send), a code (replace it with a cancel instead) or 'unknown' (an RPC error: wait). */
+ async function resendBlocker(row){
+  try{
+   const tx=txFromJson(row.tx_json),del=delegatedTo(lc(await rpc.code(row.wallet)||'0x'));
+   if(del===null||(del!==''&&lc(del)!==lc(CALIBUR)))return 'WALLET_HAS_CODE';
+   const sim=await simulateExact({sender:row.sender,wallet:row.wallet,data:tx.data,authorization:tx.type==='eip7702'?tx.authorizationList[0]:null,legs:storedLegs(row)});
+   return sim.ok?null:'SIMULATION_FAILED';
+  }catch(e){log('base_batch_transition',{attempt_id:s12(row.id),stage:'resend_check',error:safeError(e)});return 'unknown'}
+ }
+ /** Stuck outer transaction: we alone signed it, so it is replaced at the same nonce with fees +12.5%. With `cancel`
+  * (the batch must not run any more) the replacement is a 0-value transaction from the gas wallet to itself, so the
+  * nonce is used and the gas wallet moves on; a cancel once sent is only ever replaced by a higher-fee cancel. */
+ async function replaceBatch(row,t,{cancel}={}){
   const c=cfg();
   if(gateRefusal(row.account_id))return false;
   let gw;try{gw=loadWallet(c)}catch{return false}
-  const prior=txFromJson(row.tx_json);
+  const prior=txFromJson(row.tx_json),ev=evidence(row),isCancel=!!cancel||!!ev.cancel;
   let fresh;try{fresh=await readFees(rpc,c.replaceMaxFeeWei)}catch{return false}
-  const tx={...prior,...replacementFees(prior,fresh)};
+  const fees=replacementFees(prior,fresh);
+  const tx=cancel&&!ev.cancel?buildType2({user:row.sender,data:'0x',nonce:prior.nonce,gas:CANCEL_GAS,...fees}):{...prior,...fees};
   if(tx.maxFeePerGas>c.replaceMaxFeeWei)return false;
-  const ev=evidence(row),maxCost=tx.gas*tx.maxFeePerGas+BigInt(ev.l1_fee_bound??'0'),delta=maxCost-BigInt(row.max_cost_raw??'0');
-  if(maxCost>c.batchMaxCostWei||store.dayTotal(ev.quota_day)+delta>c.globalDailyRaw){
+  // The reservation never shrinks: until one hash mines, any earlier one still can.
+  const cost=tx.gas*tx.maxFeePerGas+BigInt(ev.l1_fee_bound??'0'),reserved=BigInt(row.max_cost_raw??'0'),maxCost=maxBig(cost,reserved),delta=maxCost-reserved;
+  if(cost>c.batchMaxCostWei||store.dayTotal(ev.quota_day)+delta>c.globalDailyRaw){
    if(store.flag(`batch_replace_capped:${row.id}`)!=='1'){store.setFlag(`batch_replace_capped:${row.id}`,'1');alert({kind:'base_batch_stuck',chain:'base',attempt_id:row.id})}
    return false;
   }
@@ -364,9 +429,10 @@ export function createBaseBatchDriver({db,rpc,env=process.env,now=Date.now,alert
   const cur=store.atomic(()=>{
    store.bumpDay(ev.quota_day,row.account_id,0,delta);
    return store.updateBatch(row.id,{state:'submitted',tx_json:txJson(tx),signed_raw:out.bytes,tx_hash:hash,max_cost_raw:String(maxCost),broadcast_at:t,
-    evidence_json:JSON.stringify({...ev,sends:[...sendsOf(row),{hash,at:t,max_fee_per_gas:String(tx.maxFeePerGas),replaces:row.tx_hash}]})},['submitted','uncertain']);
+    evidence_json:JSON.stringify({...ev,...(cancel&&!ev.cancel?{cancel:{code:cancel,at:t}}:{}),
+     sends:[...sendsOf(row),{hash,at:t,max_fee_per_gas:String(tx.maxFeePerGas),replaces:row.tx_hash,...(isCancel?{kind:'cancel'}:{})}]})},['submitted','uncertain']);
   });
-  log('base_batch_transition',{attempt_id:s12(row.id),stage:'replaced',replaces:s12(row.tx_hash),tx_ref:s12(hash),max_fee_per_gas:String(tx.maxFeePerGas)});
+  log('base_batch_transition',{attempt_id:s12(row.id),stage:isCancel?'cancel':'replaced',replaces:s12(row.tx_hash),tx_ref:s12(hash),max_fee_per_gas:String(tx.maxFeePerGas),code:cancel});
   await broadcastRow(cur);
   return true;
  }
@@ -378,17 +444,33 @@ export function createBaseBatchDriver({db,rpc,env=process.env,now=Date.now,alert
    return store.updateBatch(cur.id,{...patch,gas_paid_raw:String(paid),evidence_json:JSON.stringify({...ev,...(patch.evidence??{}),ended_at:now()})},['submitted','uncertain']);
   });
  }
- /** Plan 2.4: the receipt of any hash sent, judged by the USDC Transfer logs. */
+ /** The trade's Calibur nonce moved past this batch's: the batch ran, whatever the lookups say. Unknown -> true. */
+ async function seqMoved(row){
+  try{
+   if(lc(await rpc.code(row.wallet))!==CALIBUR_CODE)return false;
+   return decodeSeq(await rpc.call({to:row.wallet,data:getSeqCalldata(BigInt(row.nonce_key))}))>BigInt(row.nonce_seq);
+  }catch{return true}
+ }
+ /** Plan 2.4: the receipt of any hash sent, judged by the USDC Transfer logs. A row ends failed only on a reading
+  * that a second lookup agrees with (a load-balanced RPC can answer one call from a node that lags another). */
  async function reconcileBatch(row,t){
-  const sends=sendsOf(row),legs=storedLegs(row);
+  const sends=sendsOf(row),legs=storedLegs(row),ev0=evidence(row);
   for(const s of sends){
    const rc=await rpc.receipt(s.hash);
    if(!rc)continue;
    const info=await rpc.transaction(s.hash);
+   if(!info)return null;// the receipt came from a node the transaction lookup has not caught up with: read again
    const paid=BigInt(rc.gasUsed)*BigInt(rc.effectiveGasPrice)+BigInt(rc.l1Fee??0n);
-   if(!info||lc(info.from)!==row.sender||lc(info.to)!==row.wallet||Number(info.nonce)!==row.sender_nonce){
+   const isCancel=s.kind==='cancel';
+   if(lc(info.from)!==row.sender||lc(info.to)!==(isCancel?row.sender:row.wallet)||Number(info.nonce)!==row.sender_nonce){
     alert({kind:'base_batch_receipt_mismatch',chain:'base',attempt_id:row.id,tx_hash:s.hash});
     const out=settle(row,{state:'failed',code:'RECEIPT_MISMATCH',never_send:1},paid);transition(row,out.state,{code:out.code});return resultOf(out);
+   }
+   if(isCancel){
+    // Our cancel took the nonce: the batch can no longer run.
+    const code=ev0.cancel?.code??'CANCELLED';
+    const out=settle(row,{state:'cancelled',code,never_send:1,tx_hash:s.hash,evidence:{cancel_mined:true,confirmed_at:t,block:String(rc.blockNumber??'')}},paid);
+    transition(row,out.state,{code,tx_hash:s.hash});return resultOf(out);
    }
    const ev=legEvidence(rc.logs,{user:row.wallet,legs}),okLegs=ev.map((x,i)=>x.ok?legs[i].idx:null).filter(x=>x!==null);
    const base={tx_hash:s.hash,evidence:{legs:ev,legs_ok:okLegs,receipt_status:success(rc)?'success':'reverted',confirmed_at:t,block:String(rc.blockNumber??'')}};
@@ -414,6 +496,15 @@ export function createBaseBatchDriver({db,rpc,env=process.env,now=Date.now,alert
   }
   if(Number(await rpc.nonce(row.sender,'latest'))>row.sender_nonce){
    for(const s of sends)if((await rpc.transaction(s.hash))?.blockNumber!=null)return null;// mined, receipt not indexed yet
+   // Seen once is not enough: the row ends only when the nonce has read as taken for NONCE_CONSUMED_CONFIRM_MS
+   // with no receipt, and the trade's batch nonce has not moved (if it has, the batch ran: wait for its receipt).
+   const first=Number(ev0.nonce_consumed_at??0);
+   if(!first){store.updateBatch(row.id,{evidence_json:JSON.stringify({...ev0,nonce_consumed_at:t})},['submitted','uncertain']);return null}
+   if(t-first<NONCE_CONSUMED_CONFIRM_MS)return null;
+   if(await seqMoved(row)){
+    if(store.flag(`batch_stuck:${row.id}`)!=='1'){store.setFlag(`batch_stuck:${row.id}`,'1');alert({kind:'base_batch_stuck',chain:'base',attempt_id:row.id,why:'receipt_missing'})}
+    return null;
+   }
    alert({kind:'base_batch_nonce_consumed',chain:'base',attempt_id:row.id,nonce:row.sender_nonce});
    const out=settle(row,{state:'failed',code:'NONCE_CONSUMED',never_send:1},0n);
    transition(row,'failed',{code:'NONCE_CONSUMED'});
@@ -432,18 +523,22 @@ export function createBaseBatchDriver({db,rpc,env=process.env,now=Date.now,alert
     return resultOf(out);
    }
    if(store.flag(`batch_stuck:${row.id}`)!=='1'){store.setFlag(`batch_stuck:${row.id}`,'1');alert({kind:'base_batch_stuck',chain:'base',attempt_id:row.id})}
-   return null;
+   // Still in a pool, it holds the gas wallet's nonce: a cancel takes that nonce so the gas wallet moves on.
+   if(!ev0.cancel){await replaceBatch(row,t,{cancel:'DEADLINE_PASSED_UNSENT'});return null}
   }
   if(cfg().paused||row.never_send)return null;
-  if(t>row.deadline*1000-SEND_STOP_MS)return null;// nothing new goes out this close to the deadline
-  if(t-(row.broadcast_at??0)>=REBROADCAST_INTERVAL_MS){
-   if(await replaceBatch(row,t))return null;
-   const cur=store.updateBatch(row.id,{state:'submitted',broadcast_at:t},['submitted','uncertain']);
-   await broadcastRow(cur);
-  }else if(row.state==='uncertain'){
-   const cur=store.updateBatch(row.id,{state:'submitted',broadcast_at:t},['uncertain']);
-   await broadcastRow(cur);
+  const cancelling=!!ev0.cancel;
+  if(!cancelling&&t>row.deadline*1000-SEND_STOP_MS)return null;// no new batch bytes go out this close to the deadline
+  const due=t-(row.broadcast_at??0)>=REBROADCAST_INTERVAL_MS;
+  if(!due&&row.state!=='uncertain')return null;
+  if(!cancelling){
+   const why=await resendBlocker(row);
+   if(why==='unknown')return null;
+   if(why){await replaceBatch(row,t,{cancel:why});return null}
   }
+  if(due&&await replaceBatch(row,t))return null;
+  const cur=store.updateBatch(row.id,{state:'submitted',broadcast_at:t},['submitted','uncertain']);
+  await broadcastRow(cur);
   return null;
  }
 

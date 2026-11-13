@@ -177,10 +177,14 @@ test('a 2-leg Base evm_7702 request (one batch): reaches the page intact; one 26
   const summary = (leg, to) => ({leg, side: 'buy', asset: 'USDC', amount_raw: '3000000', decimals: 6, to});
   const d0 = '0x' + '2'.repeat(40), d1 = '0x' + '3'.repeat(40), wallet = '0x' + 'a'.repeat(40);
   const call = (to) => ({to: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', value: '0', data: '0xa9059cbb' + to.slice(2).padStart(64, '0') + (3000000).toString(16).padStart(64, '0')});
-  const req = {trade_id: TRADE, leg: 0, attempt_id: 'd'.repeat(64), kind: 'evm_7702', chain: 'base', wallet, legs: [0, 1],
+  const f = (...pairs) => pairs.map(([name, type]) => ({name, type}));
+  const types = {EIP712Domain: f(['name', 'string'], ['version', 'string'], ['chainId', 'uint256'], ['verifyingContract', 'address'], ['salt', 'bytes32']),
+    SignedBatchedCall: f(['batchedCall', 'BatchedCall'], ['nonce', 'uint256'], ['keyHash', 'bytes32'], ['executor', 'address'], ['deadline', 'uint256']),
+    BatchedCall: f(['calls', 'Call[]'], ['revertOnFailure', 'bool']), Call: f(['to', 'address'], ['value', 'uint256'], ['data', 'bytes'])};
+  const req = {trade_id: TRADE, leg: 0, attempt_id: 'd'.repeat(64), kind: 'evm_7702', chain: 'base', wallet, legs: [0, 1], expires_at: '2026-11-13T10:10:00.000Z',
     payload: {type: 'calibur_batch', authorization: {contract: '0x000000005c84F8Fd50b21CAC312528A64437030e', chain_id: 8453, nonce: 0},
       typed_data: {domain: {name: 'Calibur', version: '1.0.0', chainId: 8453, verifyingContract: wallet, salt: '0x' + '0'.repeat(32) + '000000005c84f8fd50b21cac312528a64437030e'},
-        types: {}, primary_type: 'SignedBatchedCall', message: {batchedCall: {calls: [call(d0), call(d1)], revertOnFailure: true}, nonce: '1', keyHash: '0x' + '0'.repeat(64), executor: '0x' + 'b'.repeat(40), deadline: '1800000000'}}},
+        types, primary_type: 'SignedBatchedCall', message: {batchedCall: {calls: [call(d0), call(d1)], revertOnFailure: true}, nonce: '1', keyHash: '0x' + '0'.repeat(64), executor: '0x' + 'b'.repeat(40), deadline: '1800000000'}}},
     summary: {side: 'buy', asset: 'USDC', amount_raw: '3000000', decimals: 6, to: d0}, leg_summaries: [summary(0, d0), summary(1, d1)]};
   const legs = ['WIF', 'BOME'].map((symbol, leg) => ({leg, symbol, send_status: 'awaiting_signature'}));
   coreAnswer = () => ({status: 200, body: {trade_id: TRADE, direction: 'yeet', status: 'signing', legs, sign_requests: [req]}});

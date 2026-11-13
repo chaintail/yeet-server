@@ -3,7 +3,10 @@
 // embedded wallet whose address equals the request's `wallet`, through the same Privy signer (window.YeetSigner, the
 // vendored yeet-signer.js), then submit_trade_signature. Sign only: the wallet never sends; YEET adds the network fee
 // and sends. The card polls trade_status meanwhile.
-import {privyRpcBodies, signedFromWallets, UNSUPPORTED_7702} from '/sign/wallet-request.mjs';
+import {privyRpcBodies, signedFromWallets} from '/sign/wallet-request.mjs';
+
+/** What the page submits when the wallet refuses eth_sign7702Authorization (plan 3.2). */
+const UNSUPPORTED_7702 = 'unsupported';
 
 const root = document.getElementById('yeet-sign');
 const body = document.getElementById('sign-body');

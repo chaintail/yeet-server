@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import {parseTransaction,keccak256} from 'viem';
 import {generatePrivateKey,privateKeyToAccount} from 'viem/accounts';
 import {batchWorld,basket,batchPrepared,signBatch,delegate,mine,caliburCall,asSignRequest,T0,ACCOUNT,world,preparedAndSigned,tradeLeg} from './test-support.mjs';
-import {BatchFallback,gasCapFor,AUTO_LEGACY_FLAG,unsupportedFlag} from './batch-driver.mjs';
+import {BatchFallback,gasCapFor,AUTO_LEGACY_FLAG,unsupportedFlag,NONCE_CONSUMED_CONFIRM_MS,CANCEL_GAS} from './batch-driver.mjs';
 import {attemptIdFor} from './driver.mjs';
 import {CALIBUR,CALIBUR_ERRORS,delegationCode,caliburSalt,batchNonce,tradeNonceKey,buildBatch,executeCalldata,wrapSignature,typedDataForSigning,decodeExecuteCalldata} from './calibur-7702.mjs';
 import {loadGasWallet} from './gas-wallet.mjs';
@@ -110,14 +110,21 @@ test('the card refuses a misstated batch (checkBatch): a non-USDC call, a change
   r=>{r.payload.typed_data.domain.verifyingContract='0x'+'34'.repeat(20)},
   r=>{r.payload.authorization.contract='0x'+'56'.repeat(20)},
   r=>{r.payload.typed_data.message.batchedCall.revertOnFailure=false},
+  // The /sign page shows leg_summaries: every way its display could differ from the signed batch is refused too.
+  r=>{r.leg_summaries[0].decimals=18},
+  r=>{r.leg_summaries[0].asset='WETH'},
+  r=>{r.leg_summaries[1].leg=0},
+  r=>{r.payload.typed_data.message.deadline='0'},
+  r=>{r.payload.typed_data.message.deadline=String(Math.floor(Date.parse(r.expires_at)/1000)-1)},
+  r=>{r.payload.typed_data.types.Call=[{name:'to',type:'address'},{name:'data',type:'bytes'},{name:'value',type:'uint256'}]},
  ];
  for(const f of bad){const r=clone();f(r);assert.throws(()=>checkBatch(r),TypeError)}
  assert.equal(td.message.batchedCall.calls.length,2);
  assert.deepEqual(privyRpcBodies(good).map(b=>b.method),['eth_sign7702Authorization','eth_signTypedData_v4']);
  assert.throws(()=>privyRpcBody(good),/privyRpcBodies/);
  // A bad authorization echo from the wallet is refused.
- assert.throws(()=>signedFromWallets(good,[{data:{authorization:{contract:CALIBUR,chain_id:8453,nonce:7,r:'0x1',s:'0x2',y_parity:0}}},{data:{signature:'0x'+'ab'.repeat(65)}}]),/echo/);
- assert.throws(()=>signedFromWallets(good,[{data:{authorization:{contract:CALIBUR,chain_id:8453,nonce:0,r:'0x1',s:'0x2',y_parity:2}}},{data:{signature:'0x'+'ab'.repeat(65)}}]),/y_parity/);
+ assert.throws(()=>signedFromWallets(good,[{data:{authorization:{contract:CALIBUR,chain_id:8453,nonce:7,r:'0x1',s:'0x2',y_parity:0}}},{data:{signature:'0x'+'ab'.repeat(65)}}]),/different authorization/);
+ assert.throws(()=>signedFromWallets(good,[{data:{authorization:{contract:CALIBUR,chain_id:8453,nonce:0,r:'0x1',s:'0x2',y_parity:2}}},{data:{signature:'0x'+'ab'.repeat(65)}}]),/different authorization/);
 });
 
 test('authorization: signed for chain 0 or chain 1, for another contract, or by another key is refused; nothing sent',async()=>{
@@ -315,6 +322,9 @@ test('reverted and partial-log receipts; a nonce taken by an unknown hash',async
  await w.batch.submit({...p.args,dryRun:false,now:w.clock.t});
  w.rpc.s.latest[w.gas.address]=5;
  await w.batch.recover({now:w.clock.t});
+ assert.equal(row(w,p.attemptId).state,'submitted','one reading of a taken nonce is not enough');
+ w.clock.t+=NONCE_CONSUMED_CONFIRM_MS;
+ await w.batch.recover({now:w.clock.t});
  assert.equal(row(w,p.attemptId).code,'NONCE_CONSUMED');assert.ok(w.alerts.some(a=>a.kind==='base_batch_nonce_consumed'));
 });
 
@@ -339,4 +349,155 @@ test('legacy path waits while a batch of the gas wallet is in flight (guard 12 c
  const leg=p.legs[0];
  await assert.rejects(w.driver.prepare({trade:p.trade,leg,wallet:w.wallet,attemptId:attemptIdFor(p.trade.id,0,2),attemptNo:2,now:w.clock.t}),code('SOURCE_ATTEMPT_BLOCKED'));
  assert.equal(decodeExecuteCalldata(parseTransaction(w.rpc.s.broadcasts[0]).data).batch.batchedCall.calls.length,2);
+});
+
+// Review fixes (guards and recovery, 7702).
+const ACCOUNT2='yeet-privy-test2',ACCOUNT3='yeet-privy-test3';
+/** A second person in the same world: their own key, USDC, account and trade. */
+async function otherBasket(w,{account=ACCOUNT2,tradeId='t_cccccccccccccccccccc',deadline=T0+60*60_000}={}){
+ const key=privateKeyToAccount(generatePrivateKey()),wallet=key.address.toLowerCase();
+ w.rpc.s.token[wallet]=20_000_000n;
+ const {trade,legs}=basket({tradeId,account,deadline}),attemptId=attemptIdFor(trade.id,0,1);
+ const req=await w.batch.prepare({trade,legs,wallet,attemptId,attemptNo:1,now:w.clock.t});
+ const signed=await signBatch(key,req,legs);
+ return {wallet,attemptId,args:{trade,legs,wallet,attemptId,signed}};
+}
+const multi=()=>batchWorld({env:{YEET_LIVE_ACCOUNTS:`${ACCOUNT},${ACCOUNT2},${ACCOUNT3}`}});
+const isCancelTx=(w,bytes,nonce)=>{const x=parseTransaction(bytes);return x.to.toLowerCase()===w.gas.address&&x.gas===CANCEL_GAS&&(x.value??0n)===0n&&(x.data??'0x')==='0x'&&x.nonce===nonce};
+
+test('a stuck batch is never re-sent after the wallet changed: foreign delegate or revoked code -> a cancel to our own gas wallet at the same nonce',async()=>{
+ for(const [code,why] of [[delegationCode('0x'+'ab'.repeat(20)),'WALLET_HAS_CODE'],['0x','SIMULATION_FAILED']]){
+  const w=batchWorld();delegate(w.rpc,w.wallet);
+  const p=await batchPrepared(w);
+  await w.batch.submit({...p.args,dryRun:false,now:w.clock.t});
+  const first=parseTransaction(w.rpc.s.broadcasts[0]);
+  w.rpc.s.code[w.wallet]=code;
+  w.clock.t+=31_000;
+  await w.batch.recover({now:w.clock.t});
+  assert.equal(sent(w),2,why);
+  assert.ok(isCancelTx(w,w.rpc.s.broadcasts[1],first.nonce),'the second transaction is a cancel, not the batch again');
+  assert.ok(parseTransaction(w.rpc.s.broadcasts[1]).maxFeePerGas>=first.maxFeePerGas*1125n/1000n);
+  assert.equal(w.rpc.s.broadcasts.filter(b=>parseTransaction(b).to.toLowerCase()===w.wallet).length,1,'nothing new to the wallet');
+  // Later passes only ever replace the cancel.
+  w.clock.t+=31_000;await w.batch.recover({now:w.clock.t});
+  assert.ok(w.rpc.s.broadcasts.slice(1).every(b=>isCancelTx(w,b,first.nonce)));
+  await mine(w.rpc,w.rpc.s.broadcasts.at(-1));
+  await w.batch.recover({now:w.clock.t});
+  const b=row(w,p.attemptId);
+  assert.equal(b.state,'cancelled');assert.equal(b.code,why);assert.equal(w.batch.store.gasInFlight(),0);
+  assert.equal(w.rpc.s.token[w.wallet],20_000_000n);
+ }
+});
+
+test('one gas-wallet transaction in flight: a second person\'s batch waits (no nonce, no bytes), then goes at the next nonce with the floor read again',async()=>{
+ const w=multi();
+ const a=await batchPrepared(w);
+ const dry=await w.batch.submit({...a.args,dryRun:true,now:w.clock.t});
+ const maxCost=BigInt(dry.simulation.max_cost_wei),floor=500_000_000_000_000n;
+ w.rpc.s.balance[w.gas.address]=floor+maxCost+maxCost/2n;
+ await w.batch.submit({...a.args,dryRun:false,now:w.clock.t});
+ const b=await otherBasket(w);
+ const r=await w.batch.submit({...b.args,dryRun:false,now:w.clock.t});
+ assert.equal(r.state,'pending');assert.equal(r.txHash,undefined);
+ const q=row(w,b.attemptId);
+ assert.equal(q.state,'signed');assert.equal(q.signed_raw,null);assert.equal(q.sender_nonce,null);
+ assert.equal(sent(w),1);assert.equal(w.batch.store.gasInFlight(),1);
+ await w.batch.recover({now:w.clock.t});
+ assert.equal(sent(w),1,'still waiting while the first is unmined');
+ // The first lands and took most of the balance: the second waits on the floor (alert), never below it.
+ await mine(w.rpc,w.rpc.s.broadcasts[0]);
+ w.rpc.s.balance[w.gas.address]=floor+maxCost/2n;
+ await w.batch.recover({now:w.clock.t});
+ assert.equal(row(w,a.attemptId).state,'confirmed');
+ assert.equal(row(w,b.attemptId).state,'signed');assert.equal(sent(w),1);
+ assert.ok(w.alerts.some(x=>x.kind==='gas_wallet_low'));
+ w.rpc.s.balance[w.gas.address]=floor+2n*maxCost;
+ await w.batch.recover({now:w.clock.t});
+ const s=row(w,b.attemptId);
+ assert.equal(s.state,'submitted');assert.equal(s.sender_nonce,1);assert.equal(parseTransaction(w.rpc.s.broadcasts[1]).nonce,1);
+ assert.equal(w.batch.store.day(utcDay(T0),ACCOUNT2).count,1);
+});
+
+test('no nonce gap: a batch that never reached a pool ends at its deadline while another waits; the waiting one takes the free nonce',async()=>{
+ const w=multi();
+ const a=await batchPrepared(w,{deadline:T0+20*60_000});
+ w.rpc.s.broadcastError='rejected';
+ await w.batch.submit({...a.args,dryRun:false,now:w.clock.t});
+ w.rpc.s.broadcastError=null;
+ assert.equal(row(w,a.attemptId).state,'uncertain');assert.equal(row(w,a.attemptId).sender_nonce,0);
+ w.clock.t+=60_000;
+ const b=await otherBasket(w);
+ await w.batch.submit({...b.args,dryRun:false,now:w.clock.t});
+ assert.equal(row(w,b.attemptId).state,'signed');assert.equal(row(w,b.attemptId).sender_nonce,null);
+ w.rpc.s.broadcastError='rejected';
+ w.clock.t=row(w,a.attemptId).deadline*1000+1000;
+ await w.batch.recover({now:w.clock.t});
+ w.rpc.s.broadcastError=null;
+ assert.equal(row(w,a.attemptId).code,'DEADLINE_PASSED_UNSENT');
+ await w.batch.recover({now:w.clock.t});
+ assert.equal(row(w,b.attemptId).sender_nonce,0,'the free nonce, not one above a gap');
+ await mine(w.rpc,w.rpc.s.broadcasts.at(-1));await w.batch.recover({now:w.clock.t});
+ assert.equal(row(w,b.attemptId).state,'confirmed');assert.equal(w.batch.store.gasInFlight(),0);
+});
+
+test('a batch still in a pool past its deadline is cancelled at its nonce; the gas wallet moves on to the next batch',async()=>{
+ const w=multi();
+ const a=await batchPrepared(w,{deadline:T0+20*60_000});
+ await w.batch.submit({...a.args,dryRun:false,now:w.clock.t});
+ const hashA=row(w,a.attemptId).tx_hash;
+ w.rpc.s.txs.set(hashA,{from:w.gas.address,to:w.wallet,nonce:0,blockNumber:null});// queued in a pool, never mined
+ w.clock.t+=60_000;
+ const b=await otherBasket(w);
+ await w.batch.submit({...b.args,dryRun:false,now:w.clock.t});
+ w.clock.t=row(w,a.attemptId).deadline*1000+1000;
+ await w.batch.recover({now:w.clock.t});
+ assert.ok(isCancelTx(w,w.rpc.s.broadcasts.at(-1),0));
+ assert.ok(w.alerts.some(x=>x.kind==='base_batch_stuck'));
+ const cancel=await mine(w.rpc,w.rpc.s.broadcasts.at(-1));
+ await w.batch.recover({now:w.clock.t});
+ const ra=row(w,a.attemptId);
+ assert.equal(ra.state,'cancelled');assert.equal(ra.code,'DEADLINE_PASSED_UNSENT');assert.equal(ra.tx_hash,cancel);
+ assert.equal(row(w,b.attemptId).state,'submitted');assert.equal(row(w,b.attemptId).sender_nonce,1);
+ // The day keeps the cancel's real cost, not the batch's reservation.
+ assert.equal(BigInt(ra.gas_paid_raw)>0n,true);
+});
+
+test('a waiting first-trade batch whose wallet has its own transaction in flight holds no gas-wallet nonce; it goes once that lands',async()=>{
+ const w=multi();
+ const a=await batchPrepared(w);
+ await w.batch.submit({...a.args,dryRun:false,now:w.clock.t});
+ const b=await otherBasket(w);
+ await w.batch.submit({...b.args,dryRun:false,now:w.clock.t});
+ w.rpc.s.pending[b.wallet]=1;// the person's own transaction, not yet mined
+ await mine(w.rpc,w.rpc.s.broadcasts[0]);await w.batch.recover({now:w.clock.t});
+ assert.equal(row(w,b.attemptId).state,'signed');assert.equal(row(w,b.attemptId).signed_raw,null);assert.equal(w.batch.store.gasInFlight(),0);
+ delete w.rpc.s.pending[b.wallet];// it dropped
+ await w.batch.recover({now:w.clock.t});
+ assert.equal(row(w,b.attemptId).state,'submitted');assert.equal(parseTransaction(w.rpc.s.broadcasts.at(-1)).type,'eip7702');
+ // A waiting batch that reaches its deadline ends unsent and gives its reservation back.
+ const v=multi(),x=await batchPrepared(v);
+ await v.batch.submit({...x.args,dryRun:false,now:v.clock.t});
+ const y=await otherBasket(v);
+ await v.batch.submit({...y.args,dryRun:false,now:v.clock.t});
+ v.clock.t=row(v,y.attemptId).deadline*1000-29_000;
+ await v.batch.recover({now:v.clock.t});
+ assert.equal(row(v,y.attemptId).code,'DEADLINE_PASSED_UNSENT');assert.equal(v.batch.store.day(utcDay(T0),ACCOUNT2).count,0);
+});
+
+test('lagging lookups never end a landed batch: a receipt without its transaction, or a taken nonce without either, are read again',async()=>{
+ const w=batchWorld();
+ const p=await batchPrepared(w);
+ await w.batch.submit({...p.args,dryRun:false,now:w.clock.t});
+ const h=await mine(w.rpc,w.rpc.s.broadcasts[0]);
+ const tx=w.rpc.s.txs.get(h),rc=w.rpc.s.receipts.get(h);
+ w.rpc.s.txs.delete(h);
+ await w.batch.recover({now:w.clock.t});
+ assert.equal(row(w,p.attemptId).state,'submitted','receipt without its transaction: not RECEIPT_MISMATCH');
+ w.rpc.s.receipts.delete(h);
+ for(let i=0;i<3;i++){w.clock.t+=NONCE_CONSUMED_CONFIRM_MS;await w.batch.recover({now:w.clock.t})}
+ assert.equal(row(w,p.attemptId).state,'submitted','the trade\'s batch nonce moved: the batch ran, never NONCE_CONSUMED');
+ assert.ok(w.alerts.some(a=>a.kind==='base_batch_stuck'&&a.why==='receipt_missing'));
+ w.rpc.s.txs.set(h,tx);w.rpc.s.receipts.set(h,rc);
+ await w.batch.recover({now:w.clock.t});
+ assert.equal(row(w,p.attemptId).state,'confirmed');assert.deepEqual(JSON.parse(row(w,p.attemptId).evidence_json).legs_ok,[0,1]);
 });

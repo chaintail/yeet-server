@@ -55,15 +55,16 @@ export function createBaseLegDriver({db,ledger,env=process.env,now=Date.now,log=
  /** The ledger follows a batch row (plan 2.5). */
  function syncBatch(id,a,b){
   const legRef={tradeId:a.trade_id,legIdx:a.leg_idx,legs:ledger.legsOfAttempt(a)};
-  const signed=b.signed_raw?{signedHex:b.signed_raw,txHash:b.tx_hash}:{};
+  // A signed batch waiting for the gas wallet has the person's signatures but no outer transaction yet.
+  const signed=b.signed_raw?{signedHex:b.signed_raw,txHash:b.tx_hash}:b.batch_sig?{signedHex:'0x'+b.batch_sig+(b.auth_sig??''),txHash:null}:{};
   switch(b.state){
    case 'prepared':return {...legRef,state:'awaiting_signature'};
-   case 'signed':case 'submitted':case 'uncertain':ledger.evmProgress(id,'broadcast',signed);return {...legRef,state:'pending',txHash:b.tx_hash};
+   case 'signed':case 'submitted':case 'uncertain':ledger.evmProgress(id,b.signed_raw?'broadcast':'signed',signed);return {...legRef,state:'pending',txHash:b.tx_hash??undefined};
    case 'confirmed':{const ev=JSON.parse(b.evidence_json||'{}');
     ledger.evmProgress(id,'confirmed',{...signed,txHash:b.tx_hash,legsOk:ev.legs_ok??null,evidence:{code:b.code??null,batch:'7702'}});
     return {...legRef,state:'sent',txHash:b.tx_hash}}
    case 'failed':case 'cancelled':
-    if(!b.signed_raw){if(a.status==='pending')ledger.endAttempt(id,'pending',b.code??'CANCELLED');return {...legRef,state:'expired',code:b.code}}
+    if(!b.batch_sig){if(a.status==='pending')ledger.endAttempt(id,'pending',b.code??'CANCELLED');return {...legRef,state:'expired',code:b.code}}
     ledger.evmProgress(id,b.state==='failed'&&b.code==='REVERTED'?'failed':'not_sent',{...signed,reason:b.code});return {...legRef,state:'not_sent',code:b.code};
   }
   return {...legRef,state:'pending'};

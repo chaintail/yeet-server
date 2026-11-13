@@ -332,7 +332,10 @@ export function createLedger({db,now=Date.now,sponsorLimits=DEFAULT_SPONSORSHIP_
      }
      if(st!=='signing')return st==='confirming';
      setAttempt(id,'signing','confirming',batch&&txHash&&txHash!==a.signature?{signature:txHash}:{});
-     moveAll('signing',{tx_hash:(batch?txHash:null)??a.signature??txHash,stage:'broadcast'},batch&&txHash?{tx_hash:txHash}:{});return true;
+     moveAll('signing',{tx_hash:(batch?txHash:null)??a.signature??txHash,stage:'broadcast'},batch&&txHash?{tx_hash:txHash}:{});
+     // A 7702 batch that waited for the gas wallet has its legs in signing already, without a hash: set it now.
+     if(batch&&txHash)for(const i of legs)db.prepare('UPDATE trade_legs SET tx_hash=?,updated_at=? WHERE trade_id=? AND idx=? AND tx_hash IS NULL').run(txHash,at,a.trade_id,i);
+     return true;
     }
     if(target==='confirmed'){
      setAttempt(id,st,'confirmed',{signature:txHash});

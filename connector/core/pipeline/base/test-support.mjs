@@ -196,7 +196,7 @@ export function basket({tradeId='t_bbbbbbbbbbbbbbbbbbbb',account=ACCOUNT,n=2,amo
  return {trade:{id:tradeId,account_id:account},legs};
 }
 /** The contract-shaped sign request of a batch-driver prepare answer (leg_summaries for checkBatch). */
-export const asSignRequest=(req,legs)=>({kind:'evm_7702',chain:'base',wallet:req.wallet,payload:req.payload,
+export const asSignRequest=(req,legs)=>({kind:'evm_7702',chain:'base',wallet:req.wallet,payload:req.payload,expires_at:new Date(req.expiresAt).toISOString(),
  legs:req.legs,leg_summaries:legs.map(l=>({leg:l.idx,side:'buy',asset:'USDC',amount_raw:l.amount_in_raw,decimals:6,to:l.deposit_address}))});
 /** What the card does with the person's key: the wallet calls in order, joined by signedFromWallets. `tamper` edits
  * the typed data or the authorization request before signing (negative tests). */

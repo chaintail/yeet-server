@@ -19,72 +19,86 @@
 // -> {signature: "0x02..."}; `signed` = that string.
 // The server rebuilds the transaction from its own record and requires byte equality after re-serialisation, so no
 // field may be added, dropped or re-estimated by the card (no access list, no gas re-estimate, no chain switch).
-
 //
-// Base basket (kind "evm_7702", BASE-7702-PRODUCTION-PLAN.md 1.1 and 3.1): one Uniswap Calibur batch for every leg,
-// sent and paid by YEET's gas wallet. privyRpcBodies(req) gives the wallet calls in order: (1) only when
-// payload.authorization is set, {method: "eth_sign7702Authorization", chain_type: "ethereum", params: {contract,
-// chain_id: 8453, nonce}}; (2) {method: "eth_signTypedData_v4", chain_type: "ethereum", params: {typed_data}}.
-// signedFromWallets(req, answers) joins the answers: "0x" + batch signature (65 bytes r||s||v) + the authorization's
-// r||s||y_parity (65 bytes) when one was asked, 132 or 262 characters. checkBatch(req) runs before any wallet call and
-// refuses a request whose batch is not exactly the legs it shows (USDC transfers to leg_summaries[i].to of
-// amount_raw, to Calibur only). The answer "unsupported" (UNSUPPORTED_7702) is what the card submits when the wallet
-// refuses eth_sign7702Authorization.
+// Base basket (kind "evm_7702", BASE-7702-PRODUCTION-PLAN 1.1 and 3.1): one Uniswap Calibur batch (EIP-712
+// SignedBatchedCall) of N USDC transfers that names YEET's gas wallet as executor, plus, only while the wallet is not
+// yet delegated, one EIP-7702 authorization for Calibur. YEET's gas wallet sends the one transaction and pays.
+// privyRpcBodies(req) gives the wallet calls in order: {method: "eth_sign7702Authorization", chain_type: "ethereum",
+// params: {contract, chain_id: 8453, nonce}} (answer data.authorization {contract, chain_id, nonce, r, s, y_parity}),
+// then {method: "eth_signTypedData_v4", chain_type: "ethereum", params: {typed_data}} (answer data.signature, 65
+// bytes). signedFromWallets(req, answers) = lower-case 0x + batch signature [+ r || s || y_parity as 00/01], 132 or
+// 262 characters. checkBatch(req) runs before any call: the typed data must be exactly the transfers the request's
+// leg_summaries list, so a server that misstates the batch is refused here. The literal `unsupported` is the card's
+// answer when the wallet refuses the 7702 method; the server then answers per-leg evm_tx requests.
 
 const hex=v=>'0x'+BigInt(v).toString(16);
 const B64=/^[A-Za-z0-9+/]+={0,2}$/;
-/** Hard-coded so a server that misstates the batch is refused in the card (plan 3.1). */
-export const CALIBUR='0x000000005c84f8fd50b21cac312528a64437030e';
-export const USDC_BASE='0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
-export const BASE_CHAIN_ID=8453;
-export const UNSUPPORTED_7702='unsupported';
-const lc=v=>String(v??'').toLowerCase();
-const ADDR=/^0x[0-9a-f]{40}$/;
-const ZERO32='0x'+'0'.repeat(64);
+export const CALIBUR='0x000000005c84F8Fd50b21CAC312528A64437030e';
+export const USDC_BASE='0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+const BASE_CHAIN=8453,ZERO32='0x'+'0'.repeat(64);
+const ADDR=/^0x[0-9a-fA-F]{40}$/,UINT=/^(0|[1-9][0-9]{0,77})$/,HEX32=/^0x[0-9a-fA-F]{1,64}$/;
+const lc=v=>String(v).toLowerCase();
+const word=v=>BigInt(v).toString(16).padStart(64,'0');
+const CALIBUR_TYPES={
+ EIP712Domain:[['name','string'],['version','string'],['chainId','uint256'],['verifyingContract','address'],['salt','bytes32']],
+ SignedBatchedCall:[['batchedCall','BatchedCall'],['nonce','uint256'],['keyHash','bytes32'],['executor','address'],['deadline','uint256']],
+ BatchedCall:[['calls','Call[]'],['revertOnFailure','bool']],
+ Call:[['to','address'],['value','uint256'],['data','bytes']],
+};
+const refuse=why=>Object.assign(TypeError(`evm_7702 batch refused: ${why}`),{code:'BATCH_REFUSED'});
 
-/** Throws TypeError unless the evm_7702 request's batch pays exactly its leg_summaries (plan 3.1 checkBatch). */
+/** Throws (code BATCH_REFUSED) unless an evm_7702 request's batch is exactly the USDC transfers its leg summaries list. */
 export function checkBatch(req){
- if(req?.kind!=='evm_7702')throw TypeError('checkBatch is for evm_7702 requests');
- const p=req.payload??{},td=p.typed_data??{},d=td.domain??{},m=td.message??{},calls=m.batchedCall?.calls;
- if(p.type!=='calibur_batch'||td.primary_type!=='SignedBatchedCall')throw TypeError('not a Calibur batch');
- if(d.name!=='Calibur'||d.version!=='1.0.0'||Number(d.chainId)!==BASE_CHAIN_ID||lc(d.verifyingContract)!==lc(req.wallet))throw TypeError('batch domain is not this wallet on Base');
- if(!ADDR.test(lc(m.executor))||lc(m.executor)===lc('0x'+'0'.repeat(40)))throw TypeError('batch executor must be set');
- if(lc(m.keyHash)!==ZERO32||m.batchedCall?.revertOnFailure!==true)throw TypeError('batch must use the root key and revert on failure');
- const legs=req.leg_summaries??[];
- if(!Array.isArray(calls)||!calls.length||calls.length!==legs.length)throw TypeError('batch calls differ from the legs');
+ if(req?.kind!=='evm_7702')throw refuse('not an evm_7702 request');
+ const p=req.payload??{},t=p.typed_data??{},d=t.domain??{},m=t.message??{},bc=m.batchedCall??{};
+ if(p.type!=='calibur_batch'||t.primary_type!=='SignedBatchedCall')throw refuse('not a Calibur SignedBatchedCall');
+ if(!ADDR.test(req.wallet??''))throw refuse('wallet');
+ if(d.name!=='Calibur'||d.version!=='1.0.0'||Number(d.chainId)!==BASE_CHAIN||!ADDR.test(d.verifyingContract??'')||lc(d.verifyingContract)!==lc(req.wallet))throw refuse('domain is not this wallet on Base');
+ const types=t.types??{};
+ if(Object.keys(types).length!==4||Object.entries(CALIBUR_TYPES).some(([k,f])=>!Array.isArray(types[k])||types[k].length!==f.length||f.some(([n,ty],i)=>types[k][i]?.name!==n||types[k][i]?.type!==ty)))throw refuse('types');
+ if(!ADDR.test(m.executor??'')||BigInt(m.executor)===0n)throw refuse('executor');
+ if(typeof m.keyHash!=='string'||lc(m.keyHash)!==ZERO32)throw refuse('keyHash');
+ if(bc.revertOnFailure!==true)throw refuse('revertOnFailure');
+ if(!UINT.test(String(m.nonce??''))||!UINT.test(String(m.deadline??''))||BigInt(m.deadline)===0n)throw refuse('nonce or deadline');
+ const ex=Date.parse(req.expires_at);
+ if(!Number.isFinite(ex)||ex>Number(m.deadline)*1000)throw refuse('expires after the batch deadline');
+ const sums=Array.isArray(req.leg_summaries)?req.leg_summaries:req.legs===undefined&&req.summary?[req.summary]:null;
+ const calls=bc.calls;
+ if(!sums||!Array.isArray(calls)||calls.length<1||calls.length>5||calls.length!==sums.length)throw refuse('one call per leg');
  calls.forEach((c,i)=>{
-  const mm=/^0xa9059cbb0{24}([0-9a-f]{40})([0-9a-f]{64})$/.exec(lc(c.data));
-  if(lc(c.to)!==USDC_BASE||String(c.value)!=='0'||!mm)throw TypeError(`batch call ${i} is not a USDC transfer`);
-  if('0x'+mm[1]!==lc(legs[i].to)||BigInt('0x'+mm[2])!==BigInt(legs[i].amount_raw))throw TypeError(`batch call ${i} differs from leg ${legs[i].leg}`);
+  const s=sums[i];
+  if((req.legs!==undefined&&s?.leg!==req.legs[i])||s?.asset!=='USDC'||Number(s.decimals)!==6||!ADDR.test(s.to??'')||!UINT.test(String(s.amount_raw??''))||BigInt(s.amount_raw)===0n)throw refuse(`leg ${i} summary`);
+  if(lc(c?.to)!==lc(USDC_BASE)||!UINT.test(String(c?.value??''))||BigInt(c.value)!==0n)throw refuse(`call ${i} is not a USDC call`);
+  if(lc(c.data)!==`0xa9059cbb${word(s.to)}${word(s.amount_raw)}`)throw refuse(`call ${i} is not transfer(${s.to}, ${s.amount_raw})`);
  });
  const a=p.authorization;
- if(a!==null&&a!==undefined&&(lc(a.contract)!==CALIBUR||Number(a.chain_id)!==BASE_CHAIN_ID||!Number.isInteger(a.nonce)||a.nonce<0))throw TypeError('authorization must be for Calibur on Base');
+ if(a!==null&&a!==undefined&&(lc(a.contract)!==lc(CALIBUR)||Number(a.chain_id)!==BASE_CHAIN||!Number.isInteger(a.nonce)||a.nonce<0))throw refuse('authorization is not for Calibur on Base');
  return true;
 }
-/** The Privy wallet RPC bodies for a sign request, in order (evm_7702: authorization first when asked, then the
- * batch; other kinds: the one privyRpcBody). */
+
+/** Every Privy wallet RPC body a sign request needs, in order (one, or two for a first evm_7702 basket). */
 export function privyRpcBodies(req){
  if(req?.kind!=='evm_7702')return [privyRpcBody(req)];
  checkBatch(req);
  const a=req.payload.authorization,out=[];
- if(a)out.push({method:'eth_sign7702Authorization',chain_type:'ethereum',params:{contract:a.contract,chain_id:BASE_CHAIN_ID,nonce:a.nonce}});
+ if(a)out.push({method:'eth_sign7702Authorization',chain_type:'ethereum',params:{contract:a.contract,chain_id:BASE_CHAIN,nonce:a.nonce}});
  out.push({method:'eth_signTypedData_v4',chain_type:'ethereum',params:{typed_data:req.payload.typed_data}});
  return out;
 }
-const word=v=>{const h=lc(v).replace(/^0x/,'');if(!/^[0-9a-f]{1,64}$/.test(h))throw TypeError('authorization r/s');return h.padStart(64,'0')};
-/** The `signed` argument for an evm_7702 request from the wallet answers, in privyRpcBodies order. */
+
+/** The `signed` argument from the answers to privyRpcBodies(req), in the same order. */
 export function signedFromWallets(req,answers){
  if(req?.kind!=='evm_7702')return signedFromWallet(req,answers?.[0]);
- const a=req.payload?.authorization,list=(answers??[]).map(x=>x?.data??x);
+ const a=req.payload?.authorization,list=Array.isArray(answers)?answers:[];
  if(list.length!==(a?2:1))throw TypeError('one wallet answer per call');
- const sig=lc(list.at(-1)?.signature);
- if(!/^0x[0-9a-f]{130}$/.test(sig))throw TypeError('no 65-byte batch signature in the wallet answer');
- if(!a)return sig;
- const au=list[0]?.authorization??list[0];
- if(lc(au?.contract)!==lc(a.contract)||Number(au?.chain_id)!==BASE_CHAIN_ID||Number(au?.nonce)!==a.nonce)throw TypeError('the authorization answer does not echo the request');
- const y=Number(au.y_parity);
- if(y!==0&&y!==1)throw TypeError('authorization y_parity must be 0 or 1');
- return sig+word(au.r)+word(au.s)+(y===1?'01':'00');
+ const sig=(list.at(-1)?.data??list.at(-1))?.signature;
+ if(typeof sig!=='string'||!/^0x[0-9a-fA-F]{130}$/.test(sig))throw TypeError('no 65-byte batch signature in the wallet answer');
+ if(!a)return sig.toLowerCase();
+ const z=(list[0]?.data??list[0])?.authorization;
+ const y=Number(z?.y_parity);
+ if(!z||lc(z.contract)!==lc(a.contract)||Number(z.chain_id)!==BASE_CHAIN||Number(z.nonce)!==a.nonce||(y!==0&&y!==1)||!HEX32.test(z.r??'')||!HEX32.test(z.s??''))
+  throw TypeError('the wallet answered a different authorization');
+ return (sig+word(z.r)+word(z.s)+(y?'01':'00')).toLowerCase();
 }
 
 /** The Privy wallet RPC body for a sign request (POST /v1/wallets/{wallet_id}/rpc, or js-sdk-core rpc). */
@@ -101,7 +115,7 @@ export function privyRpcBody(req){
    to:p.to,data:p.data,value:hex(p.value),chain_id:Number(p.chainId),nonce:Number(p.nonce),type:2,
    gas_limit:hex(p.gas),max_fee_per_gas:hex(p.maxFeePerGas),max_priority_fee_per_gas:hex(p.maxPriorityFeePerGas)}}};
  }
- if(req?.kind==='evm_7702')throw TypeError('evm_7702 needs one or two wallet calls: use privyRpcBodies');
+ if(req?.kind==='evm_7702')throw TypeError('evm_7702 needs privyRpcBodies (one or two wallet calls)');
  throw TypeError(`unknown sign request kind ${req?.kind}`);
 }
 
