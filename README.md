@@ -1,4 +1,7 @@
-# yeet-ai (private)
+# folio-ai (private)
+
+folio-ai: Folio's AI connector, configured for YEET. It is published as `chaintail/folio-ai`; the product, its
+hosts, directories and environment variables keep the YEET names.
 
 Private side of YEET: the ChatGPT connector (sign-in server, core, connector), its Privy sign-in bundle, the trade
 engine and the deployment files. The public side (router, landing page, tool contract, card widget) is

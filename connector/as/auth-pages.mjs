@@ -9,5 +9,5 @@ export function credentials(){return '<label for="identity_token">Development id
 export const expiredAuthorizationBody = '<p>This authorization page expired or its sign-in session changed. Go back to ChatGPT and connect YEET again.</p>';
 export function renewableConsentCopy(window) {
   const duration = (seconds) => seconds % 3600 === 0 ? `${seconds / 3600} hours` : seconds % 60 === 0 ? `${seconds / 60} minutes` : `${seconds} seconds`;
-  return `<label><input type="checkbox" name="renewable_consent" value="yes"> Allow ChatGPT to renew access for ${duration(window)} from first issuance.</label>`;
+  return `<label><input type="checkbox" name="renewable_consent" value="yes"> Let ChatGPT stay connected for up to ${duration(window)} without asking me again.</label>`;
 }

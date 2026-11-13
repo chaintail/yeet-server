@@ -1,7 +1,7 @@
 {
-  "name": "yeet-connector",
+  "name": "folio-ai-connector",
   "version": "1.0.0",
-  "description": "YEET ChatGPT connector: sign-in server (as), core and connector",
+  "description": "folio-ai: Folio's AI connector, configured for YEET. ChatGPT connector: sign-in server (as), core and connector",
   "scripts": {
     "start:as": "node as/server.mjs as",
     "start:core": "node core/server.mjs core",

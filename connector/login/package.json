@@ -1,4 +1,5 @@
 {
+  "name": "folio-ai-login",
   "private": true,
   "type": "module",
   "scripts": {

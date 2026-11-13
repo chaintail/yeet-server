@@ -538,9 +538,9 @@ app.get("/interaction/:uid", async (q, r, next) => {
       return;
     }
     const identity = s && !recoveringAccount(d)
-      ? `<input type="hidden" name="session_login" value="yes"><p>Signed in as <strong>${html(s.id)}</strong></p>`
+      ? `<input type="hidden" name="session_login" value="yes"><p>You are signed in to YEET.</p>`
       : loginFields();
-    const action = s && !recoveringAccount(d) ? `Continue as ${html(s.id)}` : "Sign in";
+    const action = s && !recoveringAccount(d) ? "Continue" : "Sign in";
     r.type("html").send(
       authDocument(
         r,

@@ -12,12 +12,24 @@ export function submittedScopes(requested,body){
 export function dailyAllowance(value=process.env.YEET_DAILY_CAP_USDC){
  return typeof value==='string'&&/^(0|[1-9][0-9]{0,5})(\.[0-9]{1,6})?$/.test(value)?value:'50';
 }
-/** Production consent fields: the scopes granted, plus one plain line about money when trading is requested. */
+/** What each scope lets ChatGPT do, in plain words for the consent page. openid and offline_access are sign-in
+ *  plumbing; they stay in the collapsed Details list only. */
+export const SCOPE_WORDS=Object.freeze({
+ 'yeet:read':'See your YEET wallets, coins, trades and XP.',
+ 'yeet:write':'Get prices for trades and spin the daily wheel for you.',
+ 'yeet:trade':'Buy and sell coins with your YEET wallet, only after you tap ⚡ YEET in the chat.',
+});
+/** Production consent fields: a plain list of what ChatGPT may do, the daily money line when trading is requested,
+ *  and the raw scope names inside the collapsed Details element (consentForm). */
 export function consentFields(requested,priorGranted=[]){
- // grantedSubset keeps only catalog scope names, so the list needs no escaping.
- const listed=grantedSubset(requested).join(' ');
- const trade=requested.includes('yeet:trade')?`<p>YEET can send up to ${html(dailyAllowance())} USDC a day from your YEET wallet, only when you tap ⚡ YEET.</p>`:'';
- return `<dt>Scopes granted</dt><dd>${listed}</dd></dl>${trade}`;
+ const items=grantedSubset(requested).filter(s=>SCOPE_WORDS[s]).map(s=>`<li>${SCOPE_WORDS[s]}</li>`).join('');
+ const trade=requested.includes('yeet:trade')?`<p class="limit">YEET can send up to ${html(dailyAllowance())} USDC a day from your YEET wallet, only when you tap ⚡ YEET.</p>`:'';
+ return `${items?`<p>ChatGPT will be able to:</p><ul class="can">${items}</ul>`:''}${trade}`;
+}
+/** The technical record behind the consent, collapsed by default. grantedSubset keeps only catalog scope names,
+ *  so the scope list needs no escaping. */
+export function consentDetails({accountId,clientId,resource,requested}){
+ return `<details class="details"><summary>Details</summary><dl><dt>Your YEET account</dt><dd>${html(accountId)}</dd><dt>App asking for access</dt><dd>${html(clientId)}</dd><dt>YEET server</dt><dd>${html(resource)}</dd><dt>Scopes granted</dt><dd>${grantedSubset(requested).join(' ')}</dd></dl></details>`;
 }
 /** Five required agreements, then the optional product-email line. Plain text: there are no legal page URLs yet. */
 export const AGREEMENTS=Object.freeze([
@@ -40,7 +52,7 @@ export function requireAgreements(body){
 /** The production consent form exactly as as.mjs sends it (inside authDocument). The button stays disabled
  *  until the required boxes are ticked (consent.js); the boxes are also `required` for browsers without scripts. */
 export function consentForm({csrf,accountId,clientId,resource,requested,priorGranted=[],renewal=''}){
- return `<form method="POST" data-yeet-agreements><input type="hidden" name="csrf" value="${html(csrf)}"><dl><dt>Authorized account</dt><dd>${html(accountId)}</dd><dt>Client</dt><dd>${html(clientId)}</dd><dt>Resource</dt><dd>${html(resource)}</dd>${consentFields(requested,priorGranted)}${agreementFields()}<input type="hidden" name="consent" value="yes">${renewal}<button type="submit">Authorize requested scopes</button></form><script type="module" src="/demo/consent.js"></script>`;
+ return `<form method="POST" data-yeet-agreements><input type="hidden" name="csrf" value="${html(csrf)}"><p class="lead">ChatGPT wants to use your YEET account so you can trade from the chat.</p>${consentFields(requested,priorGranted)}<fieldset class="agreements"><legend>Please confirm</legend>${agreementFields()}${renewal}</fieldset>${consentDetails({accountId,clientId,resource,requested})}<input type="hidden" name="consent" value="yes"><button type="submit">Continue</button></form><script type="module" src="/demo/consent.js"></script>`;
 }
 /** One screen after consent, before ChatGPT. There is no referral system: both buttons continue. */
 export const REFERRAL_TITLE='Got a referral code?';
