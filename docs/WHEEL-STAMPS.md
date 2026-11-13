@@ -6,8 +6,10 @@ Server side: `connector/core/xp/spin.mjs` (wheel, coin draw), `connector/core/xp
 
 ## Rules
 
-- Every wheel slice is one tradable catalog coin: the server's Solana catalog without USDC, in catalog order
-  (SOL, WIF, BOME, TRUMP, PENGU, MELANIA, SPX, TURBO, LOUD, NEARKAT today).
+- Owner rule: every slice of the daily wheel is a meme coin. The slices are the server's Solana catalog meme coins
+  (`kind: "meme"`), in catalog order (WIF, BOME, TRUMP, PENGU, MELANIA, SPX, TURBO, LOUD, NEARKAT today: 9 slices).
+  SOL and USDC are never slices and a spin never stamps them; both stay in the trading catalog. Stamps of a coin
+  stored before (SOL from the 10-slice wheel) keep their count and are still listed after the wheel coins.
 - One spin per account per UTC day, as before. The XP rules are unchanged: `xp_won = base_xp + draw_xp + streak_xp`.
 - The coin is a second keyed draw, HMAC(secret, `account|day|coin`), stored with the stamp. A repeat the same day
   returns the same coin, wheel and stamp, even after a catalog change.
@@ -44,15 +46,14 @@ Server side: `connector/core/xp/spin.mjs` (wheel, coin draw), `connector/core/xp
   "streak_days": 3,
   "next_spin_at": "2026-11-14T00:00:00.000Z",
   "wheel": [
-    {"coin": "SOL", "xp": 7}, {"coin": "WIF", "xp": 24}, {"coin": "BOME", "xp": 0}, {"coin": "TRUMP", "xp": 40},
-    {"coin": "PENGU", "xp": 2}, {"coin": "MELANIA", "xp": 12}, {"coin": "SPX", "xp": 31}, {"coin": "TURBO", "xp": 5},
-    {"coin": "LOUD", "xp": 15}, {"coin": "NEARKAT", "xp": 9}
+    {"coin": "WIF", "xp": 24}, {"coin": "BOME", "xp": 0}, {"coin": "TRUMP", "xp": 40}, {"coin": "PENGU", "xp": 2},
+    {"coin": "MELANIA", "xp": 12}, {"coin": "SPX", "xp": 31}, {"coin": "TURBO", "xp": 5}, {"coin": "LOUD", "xp": 15},
+    {"coin": "NEARKAT", "xp": 9}
   ],
-  "slice": 1,
+  "slice": 0,
   "stamp": {"coin": "WIF", "count_after": 3, "slots": 7, "card": 1, "filled": 3, "set_completed": false},
   "set_bonus_xp": 0,
   "stamps": [
-    {"coin": "SOL", "count": 0, "slots": 7, "card": 1, "progress": 0, "complete": false},
     {"coin": "WIF", "count": 3, "slots": 7, "card": 1, "progress": 3, "complete": false},
     {"coin": "BOME", "count": 1, "slots": 7, "card": 1, "progress": 1, "complete": false}
   ],
@@ -96,7 +97,7 @@ state). With a spin left, calling `daily_spin` again uses it: the card should on
 {
   "total": 164, "streak_days": 2, "spin_available": true, "next_streak_milestone": {"days": 3, "xp": 25},
   "spins_available": 1, "extra_spin_reason": null,
-  "stamps": [{"coin": "SOL", "count": 0, "slots": 7, "card": 1, "progress": 0, "complete": false}],
+  "stamps": [{"coin": "WIF", "count": 0, "slots": 7, "card": 1, "progress": 0, "complete": false}],
   "sets_completed": 0
 }
 ```

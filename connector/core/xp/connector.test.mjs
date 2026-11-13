@@ -35,6 +35,21 @@ after(async()=>{
  rmSync(root,{recursive:true,force:true});
 });
 
+// Tap on the connector's core calls: the last JSON body core answered, so a tool result can be compared with what the
+// server actually sent (the connector's contract check must not drop a field: stamps, spin counts, lucky fields).
+let lastCore=null;
+const realFetch=globalThis.fetch;
+globalThis.fetch=async(url,init)=>{
+ const r=await realFetch(url,init);
+ if(String(url).startsWith(process.env.CORE_INTERNAL))lastCore=await r.clone().json().catch(()=>null);
+ return r;
+};
+after(()=>{globalThis.fetch=realFetch});
+/** Tools whose structuredContent must be exactly the core answer (the one-time confirm code goes to _meta only). */
+const PASS_THROUGH=new Set(['yeet_home','daily_spin','lucky_wheel','lucky_spin','yeet_propose','execute_trade','submit_trade_signature','trade_status']);
+const checked=new Set();
+after(()=>{for(const n of PASS_THROUGH)assert.ok(checked.has(n),`no successful ${n} call was compared with core`)});
+
 const SCOPES=['openid','offline_access','yeet:read','yeet:write','yeet:trade'];
 const local=url=>{const u=new URL(url,ORIGIN);return u.origin===ORIGIN?`${AS}${u.pathname}${u.search}`:u.href};
 function jar(){const c=new Map();return {header:()=>[...c].map(([k,v])=>`${k}=${v}`).join('; '),add(r){for(const s of r.headers.getSetCookie()){const p=s.split(';')[0],i=p.indexOf('=');c.set(p.slice(0,i),p.slice(i+1))}}}}
@@ -56,7 +71,16 @@ async function signIn(did){
  const token=await (await fetch(AS+'/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',code,code_verifier:verifier,redirect_uri:redirect,client_id:'local-chatgpt-fixture',resource:ORIGIN})})).json();
  assert.ok(token.access_token);
  const me=await (await fetch(AS+'/me',{headers:{authorization:`Bearer ${token.access_token}`}})).json();
- const call=async(name,args={})=>(await (await rpc({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}},token.access_token)).json()).result;
+ const call=async(name,args={})=>{
+  lastCore=null;
+  const result=(await (await rpc({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}},token.access_token)).json()).result;
+  if(PASS_THROUGH.has(name)&&result&&!result.isError){
+   const {confirm:_c,...sent}=lastCore??{};
+   assert.deepEqual(result.structuredContent,sent,`${name}: the tool result is every field core sent`);
+   checked.add(name);
+  }
+  return result;
+ };
  return {token:token.access_token,sub:me.sub,call};
 }
 
@@ -80,17 +104,26 @@ test('YEET_P2=1 end to end: home -> spin -> leaderboard, then a settled trade sh
  // Sign-in paid 5 XP once today; the spin is open; no wins are invented.
  const home=await alice.call('yeet_home');
  assert.equal(home.isError,undefined,JSON.stringify(home.content));
- const {wheel,...xpRest}=home.structuredContent.xp;
- assert.deepEqual(xpRest,{total:5,streak_days:1,spin_available:true,next_streak_milestone:{days:3,xp:25}});
+ const {xpRuntime}=await import('./xp.mjs');
+ const {wheel,stamps,...xpRest}=home.structuredContent.xp;
+ assert.deepEqual(xpRest,{total:5,streak_days:1,spin_available:true,next_streak_milestone:{days:3,xp:25},spins_available:1,extra_spin_reason:null,sets_completed:0});
+ // Nothing the server sends in xp is dropped by the connector's contract check (stamps, spin counts, wheel).
+ assert.deepEqual(home.structuredContent.xp,xpRuntime().summary(alice.sub),'yeet_home.xp is the server summary, every field');
  assert.ok(Array.isArray(wheel)&&wheel.length>=2&&wheel.every(w=>typeof w.coin==='string'&&Number.isInteger(w.xp)),'xp.wheel reaches the card');
+ assert.ok(wheel.every(w=>w.coin!=='SOL'),'every daily wheel slice is a meme coin');
+ assert.ok(stamps.length===wheel.length&&stamps.every(c=>c.count===0&&c.coin!=='SOL'),'xp.stamps reaches the card');
  assert.deepEqual(home.structuredContent.recent_wins,[]);
 
  const spin=await alice.call('daily_spin');
  assert.equal(spin.isError,undefined,JSON.stringify(spin.content));
  const s=spin.structuredContent;
- // daily_spin's own wheel is still cut by the pinned contract (stamps fields not listed); recompute it server side.
- const {xpRuntime}=await import('./xp.mjs');
- assert.deepEqual(xpRuntime().spin.spin(alice.sub).wheel,wheel,'xp.wheel before the spin is the wheel the spin used');
+ // daily_spin carries every field the server sends (wheel, slice, stamp, stamps, spin counts and reasons): the tool
+ // result equals the server's own repeat of the spin.
+ assert.deepEqual(s,xpRuntime().spin.spin(alice.sub),'daily_spin is the server result, every field');
+ for(const k of ['wheel','slice','stamp','set_bonus_xp','stamps','sets_completed','spin_kind','spin_reason','spins_available','extra_spin_reason'])assert.ok(k in s,k);
+ assert.deepEqual(s.wheel,wheel,'xp.wheel before the spin is the wheel the spin used');
+ assert.deepEqual(s.wheel[s.slice],{coin:s.stamp.coin,xp:s.draw_xp});
+ assert.notEqual(s.stamp.coin,'SOL');
  assert.match(spin.content[0].text,new RegExp(`^You won ${s.xp_won} XP and a [A-Z]+ stamp \\(1 of 7\\)\\.$`));
  assert.ok(s.xp_won>=5&&s.xp_won<=5+40+25,String(s.xp_won));assert.equal(s.total,5+s.xp_won);assert.equal(s.streak_days,1);
  assert.equal(s.next_spin_at,new Date(Date.UTC(...(d=>[d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate()+1])(new Date()))).toISOString());

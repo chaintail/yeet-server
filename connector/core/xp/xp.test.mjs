@@ -269,13 +269,15 @@ test('next_streak_milestone: today’s spin still counts until it happens; homeX
  assert.deepEqual(xp.summary('a').next_streak_milestone,{days:3,xp:25});
  // No spin configured: no milestone can pay.
  assert.equal(openXp({secret:undefined,now}).summary('a').next_streak_milestone,null);
- // The pinned contract lists next_streak_milestone in yeet_home.xp, so the home block carries it unchanged and parses.
+ // The pinned contract lists every summary field in yeet_home.xp (stamps, spin counts and reasons, wheel), so the home
+ // block carries the whole summary unchanged and parses.
  const summary=xp.summary('a');
  const HOME_XP_KEYS=homeXpKeys(toolSchemas.yeet_home.output);
- assert.deepEqual(HOME_XP_KEYS,['total','streak_days','spin_available','next_streak_milestone','wheel']);
- const {stamps:_s,sets_completed:_n,spins_available:_a,extra_spin_reason:_r,...listed}=summary;const block=homeXp(summary,HOME_XP_KEYS);
+ assert.deepEqual(HOME_XP_KEYS,['total','streak_days','spin_available','next_streak_milestone','wheel','spins_available','extra_spin_reason','stamps','sets_completed']);
+ const block=homeXp(summary,HOME_XP_KEYS);
  assert.ok(Array.isArray(block.wheel)&&block.wheel.length>0,'xp.wheel passes the contract cut');
- assert.deepEqual(block,listed);
+ assert.ok(Array.isArray(block.stamps)&&block.stamps.length>0,'xp.stamps passes the contract cut');
+ assert.deepEqual(block,summary,'nothing in the summary is cut');
  const xpSchema=zodSchema(z,toolSchemas.yeet_home.output.properties.xp);
  assert.equal(xpSchema.safeParse(block).success,true);
  assert.equal(xpSchema.safeParse({...block,next_streak_milestone:null}).success,true,'null when no milestone can pay');

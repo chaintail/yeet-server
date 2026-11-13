@@ -8,6 +8,7 @@ import {createSpin,roll,rollCoin,BONUS_TABLE} from './spin.mjs';
 import {stampCoins,STAMP_SLOTS} from './stamps.mjs';
 import {openXp} from './xp.mjs';
 import {fakeClock} from '../trade/fakes.mjs';
+import {tradable} from '../coins.mjs';
 import {spinText} from '../../mcp/tool-registration.mjs';
 
 const SECRET='test-xp-secret-0123456789abcdef';
@@ -15,10 +16,29 @@ const clock=(iso='2026-11-10T08:00:00.000Z')=>fakeClock(Date.parse(iso));
 const DAY=86_400_000;
 const n=(l,sql,...a)=>Number(l.db.prepare(sql).get(...a).n);
 
-test('wheel coins: the 10 tradable Solana catalog coins, no USDC, catalog order',()=>{
+test('wheel coins: every slice is a meme coin (owner rule): the 9 Solana catalog meme coins, no SOL, no USDC, catalog order',()=>{
  const coins=stampCoins();
- assert.equal(coins.length,10);assert.ok(!coins.includes('USDC'));
- assert.deepEqual(coins.slice(0,3),['SOL','WIF','BOME']);
+ assert.equal(coins.length,9);assert.ok(!coins.includes('USDC'));assert.ok(!coins.includes('SOL'));
+ assert.deepEqual(coins.slice(0,3),['WIF','BOME','TRUMP']);
+ const kinds=Object.fromEntries(tradable().map(e=>[e.symbol,e.kind]));
+ assert.ok(coins.every(c=>kinds[c]==='meme'));
+ // SOL stays in the trading catalog; it only leaves the wheel.
+ assert.equal(kinds.SOL,'major');
+});
+
+test('the wheel never lands on or stamps SOL; home xp.wheel and daily_spin show the same meme-only slices',()=>{
+ const now=clock();
+ for(let i=0;i<60;i++){
+  const xp=openXp({secret:SECRET,now});const who=`w${i}`;
+  const before=xp.summary(who).wheel;
+  const s=xp.doSpin(who);
+  assert.deepEqual(before,s.wheel,'xp.wheel is the wheel daily_spin returns');
+  assert.equal(s.wheel.length,9);
+  assert.ok(s.wheel.every(w=>w.coin!=='SOL'&&w.coin!=='USDC'),who);
+  assert.notEqual(s.stamp.coin,'SOL');
+  assert.ok(!s.stamps.some(c=>c.coin==='SOL'),'no SOL stamp card is offered');
+  xp.close();
+ }
 });
 
 test('determinism: the same account and day give the same coin, wheel and stamp, also after a restart',()=>{
@@ -112,7 +132,7 @@ test('a spin stored before stamps existed gets its stamp on its first repeat, on
 test('home: stamps for every coin and sets_completed in the xp summary',()=>{
  const xp=openXp({secret:SECRET,now:clock()});
  const s=xp.doSpin('a');const sum=xp.summary('a');
- assert.equal(sum.stamps.length,10);assert.equal(sum.sets_completed,0);
+ assert.equal(sum.stamps.length,9);assert.equal(sum.sets_completed,0);
  assert.deepEqual(sum.stamps,s.stamps);
 });
 

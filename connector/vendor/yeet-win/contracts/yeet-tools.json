@@ -528,6 +528,13 @@
       "additionalProperties": false,
       "description": "BUY caps of the person's XP tier, per trade and per UTC day. Sells are never capped."
     },
+    "spin_reason": {
+      "enum": [
+        "streak_milestone",
+        "trade_bonus"
+      ],
+      "description": "Why an extra spin was granted."
+    },
     "wheel_slice": {
       "type": "object",
       "description": "One wheel slice: a tradable coin and the bonus XP value shown on it (base_xp is paid on top).",
@@ -607,6 +614,45 @@
         "amount_usdc",
         "claimed",
         "expires_at"
+      ],
+      "additionalProperties": false
+    },
+    "stamp_count": {
+      "type": "object",
+      "description": "Stamps of one coin: the card being filled now is floor(count/7)+1 with progress count % 7.",
+      "properties": {
+        "coin": {
+          "$ref": "#/$defs/symbol"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "slots": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        },
+        "card": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "progress": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 50
+        },
+        "complete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "coin",
+        "count",
+        "slots",
+        "card",
+        "progress",
+        "complete"
       ],
       "additionalProperties": false
     }
@@ -730,6 +776,32 @@
                     },
                     "minItems": 1,
                     "maxItems": 26
+                  },
+                  "spins_available": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 20
+                  },
+                  "extra_spin_reason": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/spin_reason"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "stamps": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/stamp_count"
+                    },
+                    "maxItems": 64
+                  },
+                  "sets_completed": {
+                    "type": "integer",
+                    "minimum": 0
                   }
                 },
                 "required": [
@@ -1792,6 +1864,109 @@
           },
           "next_spin_at": {
             "$ref": "#/$defs/time"
+          },
+          "wheel": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/wheel_slice"
+            },
+            "minItems": 2,
+            "maxItems": 26,
+            "description": "One slice per coin, catalog order; every slice shows a different value."
+          },
+          "slice": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 25,
+            "description": "Index into wheel where the spin lands; wheel[slice].xp equals draw_xp."
+          },
+          "stamp": {
+            "type": "object",
+            "description": "The stamp this spin added.",
+            "properties": {
+              "coin": {
+                "$ref": "#/$defs/symbol"
+              },
+              "count_after": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "slots": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50
+              },
+              "card": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "filled": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50
+              },
+              "set_completed": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "coin",
+              "count_after",
+              "slots",
+              "card",
+              "filled",
+              "set_completed"
+            ],
+            "additionalProperties": false
+          },
+          "set_bonus_xp": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000,
+            "description": "XP paid for completing a set with this stamp; not part of xp_won, included in total."
+          },
+          "stamps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/stamp_count"
+            },
+            "maxItems": 64
+          },
+          "sets_completed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "spin_kind": {
+            "enum": [
+              "daily",
+              "extra"
+            ]
+          },
+          "spin_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/spin_reason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "spins_available": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20,
+            "description": "Spins left today after this one."
+          },
+          "extra_spin_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/spin_reason"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [

@@ -1,6 +1,6 @@
 repo: chaintail/yeet-win
 branch: int/cards-signing
-commit: 19986a51fcad4e128bccff25b435b41209f600e2
+commit: 404f3a5451eed5885b97579f34def530cb8a1452
 built: router (tsc 7.0.2), widget (node build.mjs), signer (scripts/build-signer.mjs, esbuild 0.28.2, @privy-io/js-sdk-core 0.78.0, sha256 0a7eae048a25)
 files:
   contracts/yeet-tools.json

@@ -14,8 +14,9 @@ export {SET_COMPLETE_XP} from './ledger.mjs';
 
 export const STAMP_SLOTS=7;
 
-/** The wheel coins: the server's tradable Solana catalog without the funding stablecoin, in catalog order. */
-export const stampCoins=(entries=tradable())=>Object.freeze(entries.filter(e=>e.symbol!=='USDC').map(e=>e.symbol));
+/** The wheel coins: the server's tradable Solana catalog meme coins, in catalog order. Owner rule: every slice of the
+ * daily wheel is a meme coin, so SOL (and USDC) are never slices and never stamped by a spin (they stay tradable). */
+export const stampCoins=(entries=tradable())=>Object.freeze(entries.filter(e=>e.kind==='meme').map(e=>e.symbol));
 
 const SCHEMA=`CREATE TABLE IF NOT EXISTS xp_stamp(
   identity_id TEXT NOT NULL, coin TEXT NOT NULL, count INTEGER NOT NULL CHECK(count>=0),

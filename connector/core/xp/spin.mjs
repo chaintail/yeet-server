@@ -4,7 +4,7 @@
 // fires on that streak length plus its own draw on the same table, seeded `account|day|streak` (as the contest streak spin does), so
 // it is independent of the daily draw. The spin is stored as that day's daily_spin xp_event row.
 //
-// Every wheel slice is one catalog coin. The coin won is a second keyed draw (`account|day|coin`), stored with the stamp
+// Every wheel slice is one catalog meme coin (stamps.mjs stampCoins; never SOL or USDC). The coin won is a second keyed draw (`account|day|coin`), stored with the stamp
 // (stamps.mjs) in the same transaction as the XP row, so a repeat returns the same coin even if the catalog changed.
 import {createHmac,createHash} from 'node:crypto';
 import {dayOf} from './ledger.mjs';
