@@ -5,7 +5,7 @@ import {introspectBearer,validatePrincipal} from '#shared/introspection.mjs';
 import express from 'express';
 import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import {AS,RESOURCE,CORE,secret,PUBLIC,port} from '#shared/common.mjs';
-const app=express();
+const app=express();app.disable('x-powered-by');
 // Health first: the container check runs without the public Host header.
 app.get('/health',(_q,r)=>r.json({ok:true}));
 if(PUBLIC)app.use((q,r,next)=>{if(q.headers.host!==new URL(RESOURCE).host)return r.sendStatus(421);next()});app.use(express.json({limit:'32kb'}));

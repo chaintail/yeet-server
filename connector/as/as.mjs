@@ -9,7 +9,7 @@ import {
   diagnostic,
   observeServerError,
 } from "./diagnostics.mjs";
-import { document, credentials, html, renewableConsentCopy, expiredAuthorizationBody, promptTitle } from "./auth-pages.mjs";
+import { document, credentials, html, renewableConsentCopy, expiredAuthorizationBody, promptTitle, providerErrorPage } from "./auth-pages.mjs";
 import express from "express";
 import { providerCsp } from "./provider-csp.mjs";
 import { fundRoutes, privyPageCsp, afterSignIn, nextField } from "./fund-page.mjs";
@@ -197,6 +197,13 @@ const provider = new Provider(AS, {
     },
   },
   findAccount,
+  // Errors the provider shows in the browser (unknown client, redirect_uri mismatch) use the YEET page, not the
+  // library page with its external font. Only the OAuth error code is shown; its description stays in the logs.
+  renderError: async (ctx, out) => {
+    ctx.type = "html";
+    ctx.set("Cache-Control", "no-store");
+    ctx.body = providerErrorPage(out?.error);
+  },
   interactions: { policy: accountInteractionPolicy(), url: (_ctx, i) => `/interaction/${i.uid}` },
   ...(TEST && process.env.CIMD_TEST_FIXTURES === "1"
     ? {
@@ -261,6 +268,7 @@ try {
 }
 if (ssrfFailed) throw Error("CIMD startup fails closed");
 const app = express();
+app.disable("x-powered-by");
 app.use((q, r, next) => {
   if (q.path === "/me") {
     r.once("finish", () => diagnostic("oauth_userinfo_result", { status: r.statusCode }));
@@ -493,6 +501,9 @@ app.get("/account/", (q, r) =>
 );
 // Add funds: USDC on Base through Privy funding (Coinbase Onramp). Needs a YEET sign-in session and the Privy sign-in.
 fundRoutes(app, { enabled: () => process.env.PRIVY_LOGIN === "1", session });
+// Browsers ask for /favicon.ico on their own; answer with the YEET icon the pages link to.
+const ICON = fs.readFileSync(new URL("./viewer/icon.svg", import.meta.url));
+app.get("/favicon.ico", (_q, r) => r.set("Cache-Control", "public, max-age=86400").type("image/svg+xml").send(ICON));
 app.get("/", (_q, r) => r.redirect("https://yeet.win"));
 function interactionError(e, r, next) {
   if (e instanceof AuthorizationExpired || e instanceof errors.SessionNotFound)
@@ -661,6 +672,7 @@ app.use((e, _q, r, _n) => {
 });
 export const server = app.listen(port("AS_PORT", 38312), process.env.LISTEN_HOST || "0.0.0.0");
 const admin = express();
+admin.disable("x-powered-by");
 admin.use(express.json({ limit: "8kb" }));
 admin.use((q, r, next) => {
   if (!equal(q.headers.authorization, `Bearer ${secret("operator")}`))

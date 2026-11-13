@@ -24,7 +24,7 @@ const HOME_XP_KEYS=homeXpKeys(toolSchemas.yeet_home.output);
 // The card draws the wheel from the contract's x-yeet-spin; the server draws the award. Refuse to start if they differ.
 checkSpinTable(contract['x-yeet-spin']);
 const xpSafe=(what,fn,fallback)=>{try{return fn()}catch(e){console.error(JSON.stringify({event:'xp_failed',what,error:String(e?.message??e).slice(0,200)}));return fallback}};
-const app=express();app.use(express.json({limit:'32kb'}));
+const app=express();app.disable('x-powered-by');app.use(express.json({limit:'32kb'}));
 app.get('/health',(_q,r)=>r.json({ok:true}));
 app.use((q,r,next)=>{const token=q.headers.authorization?.replace(/^Bearer /,'');q.role=['mcp','as','operator'].find(role=>equal(token,secret(`core-${role}`)));if(!q.role)return r.sendStatus(401);next()});
 app.post('/identity/resolve',(q,r)=>{if(q.role!=='as')return r.sendStatus(403);const id=resolveIdentity(q.body);if(!id||read('policy.json')[id]?.suspended)return r.sendStatus(403);if(p2On())xpSafe('sign_in',()=>xpRuntime().signIn(id));r.json({id})});

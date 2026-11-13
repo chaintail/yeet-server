@@ -77,6 +77,20 @@ test('registration stores only ChatGPT clients; other redirect hosts get 400 and
  assert.equal(r.status,400);
 });
 
+test('provider errors use the YEET page; no x-powered-by on any server; favicon served',async()=>{
+ const bad=await fetch(AS+'/auth?'+new URLSearchParams({client_id:'no-such-client',response_type:'code',redirect_uri:'https://evil.example/cb',scope:'openid',code_challenge:'x'.repeat(43),code_challenge_method:'S256'}));
+ assert.equal(bad.status,400);assert.match(bad.headers.get('content-type'),/text\/html/);
+ const body=await bad.text();
+ assert.match(body,/<title>Connection refused<\/title>/);assert.match(body,/href="\/account\/auth-pages\.css"/);assert.match(body,/Error code: invalid_client/);
+ assert.doesNotMatch(body,/oops|fonts\.googleapis|something went wrong/i);
+ const core=`http://127.0.0.1:${PORTS.CORE_PORT}`,admin=`http://127.0.0.1:${PORTS.ADMIN_PORT}`;
+ for(const url of [AS+'/account/login',AS+'/nope',CONNECTOR+'/health',CONNECTOR+'/',core+'/health',admin+'/policy'])
+  assert.equal((await fetch(url)).headers.get('x-powered-by'),null,url);
+ const icon=await fetch(AS+'/favicon.ico');assert.equal(icon.status,200);assert.match(icon.headers.get('content-type'),/image\/svg\+xml/);
+ assert.equal((await fetch(AS+'/account/icon.svg')).status,200);
+ assert.match(await (await fetch(AS+'/account/login')).text(),/<link rel="icon" type="image\/svg\+xml" href="\/account\/icon\.svg">/);
+});
+
 test('A-4: POST /mcp is 404 on the connector and on the sign-in server; GET /health is 200',async()=>{
  assert.equal((await fetch(CONNECTOR+'/mcp',{method:'POST',headers:{'content-type':'application/json'},body:'{}'})).status,404);
  assert.equal((await fetch(AS+'/mcp',{method:'POST',headers:{'content-type':'application/json'},body:'{}'})).status,404);
