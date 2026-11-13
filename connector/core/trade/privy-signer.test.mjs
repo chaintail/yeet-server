@@ -54,6 +54,31 @@ test('adapter: an authorization refusal by documented code is WALLET_NOT_READY a
  await assert.rejects(s.transferUsdcBase({walletId:'wallet-base',from:BASE_WALLET,to:BASE_WALLET,amountRaw:'1',idempotencyKey:KEY}),e=>e.code==='WALLET_NOT_READY'&&e.notSent===true);
 });
 
+test('adapter: YEET_BASE_GAS=self sends the same transfer unsponsored after an ETH check; no ETH is BALANCE_LOW, notSent',async()=>{
+ const bodies=[];
+ const fetch=async(url,init)=>{bodies.push(JSON.parse(init.body));return new Response(JSON.stringify({data:{hash:'0x'+'ab'.repeat(32)}}),{status:200})};
+ const args={walletId:'wallet-base',from:BASE_WALLET,to:'0x'+'1'.repeat(40),amountRaw:'5000000',idempotencyKey:KEY};
+ assert.throws(()=>createDelegatedSigner({env:fakePrivyEnv({YEET_BASE_GAS:'maybe'}),fetch}),/Invalid YEET_BASE_GAS/);
+ assert.equal(createDelegatedSigner({env:fakePrivyEnv(),fetch}).gasMode,'sponsored');
+ const poor=createDelegatedSigner({env:fakePrivyEnv({YEET_BASE_GAS:'self'}),fetch,balances:{baseEth:async()=>0n}});
+ assert.equal(poor.gasMode,'self');assert.equal(poor.sponsor,false);
+ await assert.rejects(poor.transferUsdcBase(args),e=>e.code==='BALANCE_LOW'&&e.notSent===true);
+ assert.equal(bodies.length,0,'nothing sent without ETH');
+ const rich=createDelegatedSigner({env:fakePrivyEnv({YEET_BASE_GAS:'self'}),fetch,balances:{baseEth:async()=>10n**15n}});
+ const r=await rich.transferUsdcBase(args);
+ assert.equal(r.txHash,'0x'+'ab'.repeat(32));
+ assert.equal(bodies[0].sponsor,false);assert.equal(bodies[0].params.transaction.to,USDC_BASE,'same USDC transfer as the sponsored send');
+ assert.equal(bodies[0].params.transaction.value,'0x0');
+});
+
+test('adapter: insufficient_funds (wallet or gas credits) is a definite refusal: notSent, a 4xx only',async()=>{
+ assert.equal(privyErrorCode(400,{code:'insufficient_funds',error:'Insufficient gas credits balance'}),'PRIVY_INSUFFICIENT_FUNDS');
+ assert.equal(privyErrorCode(500,{code:'insufficient_funds'}),'PRIVY_HTTP_500','a 5xx is never a refusal');
+ const fetch=async()=>new Response(JSON.stringify({code:'insufficient_funds',error:'Insufficient gas credits balance'}),{status:400});
+ const s=createDelegatedSigner({env:fakePrivyEnv(),fetch});
+ await assert.rejects(s.transferUsdcBase({walletId:'wallet-base',from:BASE_WALLET,to:BASE_WALLET,amountRaw:'1',idempotencyKey:KEY}),e=>e.code==='TEMPORARILY_UNAVAILABLE'&&e.notSent===true&&e.privyStatus===400);
+});
+
 test('adapter: a sponsored Base send answers a Privy transaction id with an empty hash; the hash comes from GET /v1/transactions/{id}',async()=>{
  const privy=fakePrivy({confirmAfter:2});
  const s=createDelegatedSigner({env:fakePrivyEnv(),fetch:privy.fetch});

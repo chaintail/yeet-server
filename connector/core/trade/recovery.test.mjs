@@ -139,7 +139,7 @@ test('fix 2: crash between commit and send, deadline passed: legs not_sent, cap 
  await assert.rejects(exec(engine,alice,p),e=>e.code==='TEMPORARILY_UNAVAILABLE','replay answers the same');
 });
 
-for(const [label,env] of [['kill switch on',{YEET_LIVE:'1',YEET_KILL_SWITCH:'1'}],['YEET_LIVE unset',{}]]){
+for(const [label,env] of [['kill switch on',{YEET_LIVE:'1',YEET_KILL_SWITCH:'1'}],['YEET_LIVE unset',{}],['account not in YEET_LIVE_ACCOUNTS',{YEET_LIVE:'1',YEET_LIVE_ACCOUNTS:'yeet-privy-bob'}]]){
  test(`recovery while paused (${label}): queued legs are released as not_sent, nothing is sent, the cap is returned`,async()=>{
   const {db,tradeId,engine,signer}=await crashAfterCommit({env});
   await engine.tracker.pollOnce();

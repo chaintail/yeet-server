@@ -1,6 +1,6 @@
 // execute_trade, at the person's tap (port plan section 3):
 //  1. the confirm code: bound to account, client, proposal, revision and quote; single use; a used code replays its trade
-//  2. kill switch and YEET_LIVE (unset: TRADING_PAUSED, the code stays unused)
+//  2. kill switch, YEET_LIVE and YEET_LIVE_ACCOUNTS (unset or not listed: TRADING_PAUSED, the code stays unused)
 //  3. signer state and balance through the wallet adapter
 //  4. live plan through the router with dry:false (one deposit address per leg)
 //  5. the live plan is checked leg by leg against the proposal and the person's own wallets (assertLivePlan); any
@@ -13,7 +13,7 @@
 //     recovery resolves the hash by GET /v1/transactions/{id} on later ticks
 //  8. persist trade and legs, answer `submitted` inside the time budget; the tracker takes over
 import {buildYeetPlan,buildSkeetPlan,formatUnits,FUNDING,CATALOG,isEvmAddress,isSolanaAddress} from './router.mjs';
-import {checkKillSwitch,checkBasket,checkDaily,checkCost,recordSpend} from './limits.mjs';
+import {checkKillSwitch,checkBasket,checkDaily,checkCost,recordSpend,accountLive} from './limits.mjs';
 import {routed,quoteHash} from './proposals.mjs';
 import {receiptLeg} from './tracker.mjs';
 import {legIdempotencyKey,USDC_BASE} from './signer.mjs';
@@ -307,8 +307,9 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
     const wallet=w[chainOf(t)];
     return ctx={wallet,held:t.direction==='skeet'?await wallets.holdings(wallet.address):undefined};
    };
-   // Kill switch or YEET_LIVE unset: nothing new is sent or re-issued; legs already sent are still tracked.
-   const paused=limits.killSwitch||!limits.live;
+   // Kill switch, YEET_LIVE unset, or the account outside YEET_LIVE_ACCOUNTS: nothing new is sent or re-issued; legs
+   // already sent are still tracked.
+   const paused=limits.killSwitch||!limits.live||!accountLive(limits,t.account_id);
    for(const l of open){
     if(l.send_status==='sent'){
      // Sent, hash pending: Privy accepted it (transaction id stored); the hash is looked up, the transfer never re-sent.
@@ -391,6 +392,7 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
    if(code.used)return replay(code.trade_id);
    checkKillSwitch(limits);
    if(!limits.live)refuse('TRADING_PAUSED','YEET_LIVE is not set');
+   if(!accountLive(limits,ctx.accountId))refuse('TRADING_PAUSED','account not in YEET_LIVE_ACCOUNTS');
    const p=proposals.row(proposal_id);
    if(p.status!=='proposed'||p.revision!==revision){const prior=existingTrade(p.id);if(prior)return replay(prior);refuse('CONFIRMATION_REQUIRED','revision is not current')}
    const legs=proposals.legsOf(p.id,revision);

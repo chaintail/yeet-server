@@ -4,7 +4,7 @@
 //   balances  wallets.mjs balances interface (JSON-RPC or a fake)
 //   chain     accounting.mjs chain reader for the before/after balance check (default: over `balances`)
 import {OneClickClient,formatUnits,findToken,CATALOG} from './router.mjs';
-import {limitsFromEnv} from './limits.mjs';
+import {limitsFromEnv,accountLive} from './limits.mjs';
 import {createConfirmCodes} from './nonce.mjs';
 import {createWallets,createRpcBalances} from './wallets.mjs';
 import {createProposals} from './proposals.mjs';
@@ -47,7 +47,7 @@ export async function createEngine({db,env=process.env,client,signer,balances,ch
   async home(ctx){
    const w=await wallets.require(ctx.accountId,{refresh:true});
    let usdc=null;try{usdc=await wallets.usdc(w.base.address)}catch{}
-   const ready=limits.killSwitch||!limits.live?'paused':w.base.signerState!=='granted'?'needs_signer':usdc!==null&&usdc<limits.minLegRaw?'needs_funds':'ready';
+   const ready=limits.killSwitch||!limits.live||!accountLive(limits,ctx.accountId)?'paused':w.base.signerState!=='granted'?'needs_signer':usdc!==null&&usdc<limits.minLegRaw?'needs_funds':'ready';
    return {wallets:{base:{address:w.base.address,usdc:usdc===null?null:usd(formatUnits(usdc,6))},solana:{address:w.solana.address}},ready,xp:null,recent_wins:[]};
   },
   propose:(ctx,body)=>proposals.propose(ctx,body),

@@ -4,6 +4,9 @@
 //   YEET_DAILY_CAP_USDC  USDC per account per UTC day (default 50) -> LIMIT_EXCEEDED
 //   YEET_MAX_COST_BPS    swap cost ceiling in bps (default 800)    -> COST_TOO_HIGH
 //   YEET_KILL_SWITCH     1/true: no new proposals or trades        -> TRADING_PAUSED
+//   YEET_LIVE_ACCOUNTS   comma list of account ids (yeet-privy-...). When set, only these accounts may execute while
+//                        live; every other account is TRADING_PAUSED (its queued legs are not sent). Unset or empty:
+//                        every account. Operator trades (core.mjs /operator/trades) need the account listed here.
 //   YEET_REQUOTE_TOLERANCE_BPS  live output may be this far under the previewed estimate at the tap (default 50)
 //   YEET_CODE_MINT_LIMIT confirm codes per account per 10 minutes (default 20) -> TEMPORARILY_UNAVAILABLE
 //   YEET_TRACK_MAX_HOURS hours a trade is tracked past its 1Click deposit deadline before it is stale (default 24)
@@ -28,6 +31,17 @@ function intEnv(env,name,fallback,max){
  if(!Number.isSafeInteger(v)||v<0||v>max)throw Error(`Invalid ${name}`);
  return v;
 }
+const ACCOUNT_RE=/^yeet-privy-[A-Za-z0-9_-]{1,80}$/;
+/** YEET_LIVE_ACCOUNTS as a frozen list, or null when unset or empty (no allowlist). */
+export function liveAccountsFromEnv(env=process.env){
+ const raw=String(env.YEET_LIVE_ACCOUNTS??'').trim();
+ if(!raw)return null;
+ const ids=[...new Set(raw.split(',').map(s=>s.trim()).filter(Boolean))];
+ if(!ids.length||ids.some(id=>!ACCOUNT_RE.test(id)))throw Error('Invalid YEET_LIVE_ACCOUNTS');
+ return Object.freeze(ids);
+}
+/** True when the account may execute under the allowlist (always true without one). Does not look at YEET_LIVE. */
+export const accountLive=(limits,accountId)=>!limits.liveAccounts||limits.liveAccounts.includes(accountId);
 /** Reads and validates the limits; throws at startup on a malformed value. */
 export function limitsFromEnv(env=process.env){
  return Object.freeze({
@@ -40,6 +54,7 @@ export function limitsFromEnv(env=process.env){
   trackMaxHours:intEnv(env,'YEET_TRACK_MAX_HOURS',24,24*30),
   killSwitch:['1','true','on','yes'].includes(String(env.YEET_KILL_SWITCH??'').toLowerCase()),
   live:env.YEET_LIVE==='1',
+  liveAccounts:liveAccountsFromEnv(env),
   basePolicyId:env.YEET_BASE_POLICY_ID?.trim()||null,
   solanaPolicyId:env.YEET_SOLANA_POLICY_ID?.trim()||null,
   maxLegs:MAX_LEGS,

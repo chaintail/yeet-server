@@ -171,6 +171,37 @@ test('B-1 kill switch pauses proposals and taps; YEET_LIVE unset gives TRADING_P
  await code(exec(flipped,alice,q),'TRADING_PAUSED');
 });
 
+test('YEET_LIVE_ACCOUNTS: only listed accounts execute while live; others are paused and keep their code',async()=>{
+ const {engine,signer,db}=await fakeEngine({env:{YEET_LIVE:'1',YEET_LIVE_ACCOUNTS:` ${alice.accountId} ,yeet-privy-carol`}});
+ assert.deepEqual(engine.limits.liveAccounts,[alice.accountId,'yeet-privy-carol']);
+ const pb=await engine.propose(bob,{...basket,request_id:'b1'});
+ await code(exec(engine,bob,pb),'TRADING_PAUSED');
+ assert.equal(signer.sent.length,0,'nothing sent for an account outside the list');
+ assert.equal(db.prepare('SELECT count(*) n FROM confirm_codes WHERE used_at IS NOT NULL').get().n,0,'the code was not used');
+ assert.equal((await engine.home(bob)).ready,'paused');
+ assert.equal((await engine.home(alice)).ready,'ready');
+ const pa=await engine.propose(alice,basket);
+ const r=await exec(engine,alice,pa);
+ assert.equal(r.status,'submitted');assert.equal(signer.sent.length,3);
+ // The list never overrides the switches.
+ const {engine:killed}=await fakeEngine({env:{YEET_LIVE:'1',YEET_KILL_SWITCH:'1',YEET_LIVE_ACCOUNTS:alice.accountId}});
+ await code(killed.propose(alice,basket),'TRADING_PAUSED');
+ const {engine:off}=await fakeEngine({env:{YEET_LIVE_ACCOUNTS:alice.accountId}});
+ const po=await off.propose(alice,basket);
+ await code(exec(off,alice,po),'TRADING_PAUSED');
+ assert.equal((await off.home(alice)).ready,'paused');
+});
+
+test('YEET_LIVE_ACCOUNTS parsing: unset or blank is no list; a malformed id fails at startup',async()=>{
+ const {limitsFromEnv,accountLive}=await import('./limits.mjs');
+ for(const v of [undefined,'','  '])assert.equal(limitsFromEnv({YEET_LIVE_ACCOUNTS:v}).liveAccounts,null);
+ assert.equal(accountLive(limitsFromEnv({}),'yeet-privy-anyone'),true);
+ const l=limitsFromEnv({YEET_LIVE_ACCOUNTS:'yeet-privy-a,yeet-privy-a,yeet-privy-b'});
+ assert.deepEqual(l.liveAccounts,['yeet-privy-a','yeet-privy-b']);assert.ok(Object.isFrozen(l.liveAccounts));
+ assert.equal(accountLive(l,'yeet-privy-b'),true);assert.equal(accountLive(l,'yeet-privy-c'),false);
+ for(const bad of ['alice','yeet-privy-a;rm','yeet-privy-a,,did:privy:x',','])assert.throws(()=>limitsFromEnv({YEET_LIVE_ACCOUNTS:bad}),/Invalid YEET_LIVE_ACCOUNTS/);
+});
+
 test('B-1 partial leg failure: the trade is partial, the failed leg is reported and not counted against the cap',async()=>{
  const signer=fakeSigner({failLegs:[1]});
  const {engine,db}=await fakeEngine({signer});

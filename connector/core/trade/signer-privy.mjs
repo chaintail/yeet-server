@@ -37,7 +37,7 @@ export const PRIVY_FAILED_STATUSES=new Set(['failed','execution_reverted']);
  * never succeed and the caller must look the transaction up (reference_id) before deciding anything.
  * A 400 for a key reused with another body carries `keyConflict: true`: the key was accepted earlier.
  */
-export const DEFINITE_REFUSALS=new Set(['PRIVY_POLICY_DENIED','PRIVY_AUTHORIZATION_DENIED','INVALID_PRIVY_PATH','INVALID_IDEMPOTENCY_KEY']);
+export const DEFINITE_REFUSALS=new Set(['PRIVY_POLICY_DENIED','PRIVY_AUTHORIZATION_DENIED','PRIVY_INSUFFICIENT_FUNDS','INVALID_PRIVY_PATH','INVALID_IDEMPOTENCY_KEY']);
 const notSent=fn=>{try{return fn()}catch(e){const t=e?.name==='TradeError'?e:new TradeError('TEMPORARILY_UNAVAILABLE',e?.message);t.notSent=true;throw t}};
 const notSentAsync=async fn=>{try{return await fn()}catch(e){const t=e?.name==='TradeError'?e:new TradeError('TEMPORARILY_UNAVAILABLE',e?.message);t.notSent=true;throw t}};
 async function rpc(api,walletId,body,idempotencyKey){
@@ -89,9 +89,19 @@ function storedRequest(request,method){
  */
 export function privyTransfers({api,env,balances}){
  const gasWalletId=env.YEET_GAS_WALLET_ID?.trim()||undefined;
- const sponsor=!gasWalletId;
+ // YEET_BASE_GAS: `sponsor` (default) sends with Privy gas sponsorship; `self` sends unsponsored, the wallet pays gas
+ // from its own ETH (checked before the send). A YEET_GAS_WALLET_ID also sends unsponsored, topped up from that wallet.
+ const baseGas=(env.YEET_BASE_GAS?.trim()||'sponsor');
+ if(!['sponsor','self'].includes(baseGas))throw Error('Invalid YEET_BASE_GAS');
+ const sponsor=!gasWalletId&&baseGas==='sponsor';
+ const gasMode=gasWalletId?'gas_wallet':sponsor?'sponsored':'self';
  async function ensureGas(from,idempotencyKey){
-  if(!gasWalletId)return;
+  if(!gasWalletId){
+   if(gasMode!=='self')return;
+   if(!balances?.baseEth)refuse('WALLET_NOT_READY','no Base RPC for the gas check');
+   if(await balances.baseEth(from)<GAS_MIN_WEI)refuse('BALANCE_LOW','no ETH for gas (YEET_BASE_GAS=self)');
+   return;
+  }
   if(!balances?.baseEth)refuse('WALLET_NOT_READY','no Base RPC for the gas check');
   const wei=await balances.baseEth(from);
   if(wei>=GAS_MIN_WEI)return;
@@ -109,7 +119,7 @@ export function privyTransfers({api,env,balances}){
   return body;
  }
  return {
-  sponsor,
+  sponsor,gasMode,
   async transferUsdcBase({walletId,from,to,amountRaw,idempotencyKey,referenceId,request,persistRequest}){
    const body=await notSentAsync(async()=>{
     if(!WALLET_ID.test(walletId??''))refuse('WALLET_NOT_READY','no Base wallet id');

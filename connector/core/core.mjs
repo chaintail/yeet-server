@@ -37,6 +37,50 @@ app.use((q,r,next)=>{const token=q.headers.authorization?.replace(/^Bearer /,'')
 app.post('/identity/resolve',(q,r)=>{if(q.role!=='as')return r.sendStatus(403);const id=resolveIdentity(q.body);if(!id||read('policy.json')[id]?.suspended)return r.sendStatus(403);if(p2On())xpSafe('sign_in',()=>xpRuntime().signIn(id));r.json({id})});
 app.post('/policy',(q,r)=>{if(q.role!=='operator')return r.sendStatus(403);const {account,client,suspended,disconnect,reconnect}=q.body;if(!user(account))return r.sendStatus(400);const p=read('policy.json');const row=p[account]||{clients:{}};if(typeof suspended==='boolean')row.suspended=suspended;if(disconnect||reconnect){if(typeof client!=='string'||!client)return r.sendStatus(400);row.clients[client]=!!disconnect}p[account]=row;write('policy.json',p);r.json({ok:true})});
 app.get('/policy',(q,r)=>{if(q.role!=='as')return r.sendStatus(403);const subject=q.headers['x-yeet-subject'];const exists=!!user(subject);r.json({...read('policy.json')[subject],exists,eligible:exists})});
+// Operator trades (ops/first-trade.mjs): the operator starts a trade for one account from the box, without ChatGPT,
+// through the same engine calls the card uses (yeet_propose, execute_trade, trade_status), so confirm codes, caps,
+// the requote rule, audit rows, accounting and XP apply unchanged. Client id `operator`. Only for an account listed in
+// YEET_LIVE_ACCOUNTS: with the allowlist unset no account can be traded this way (the reads stay open). Every call is
+// logged.
+const OPERATOR_CLIENT='operator';
+const OPERATOR_INPUT={propose:'yeet_propose',execute:'execute_trade'};
+function operatorTrade(op,fn){
+ return async(q,r)=>{
+  if(q.role!=='operator')return r.sendStatus(403);
+  if(Object.keys(q.query).length)return r.sendStatus(400);
+  const {account:accountId,...body}=q.body??{};
+  if(!user(accountId))return r.sendStatus(400);
+  if(read('policy.json')[accountId]?.suspended)return r.sendStatus(403);
+  const ctx={accountId,clientId:OPERATOR_CLIENT};
+  console.log(JSON.stringify({event:'operator_trade',op,account:accountId,proposal:body.proposal_id??null,trade:body.trade_id??null}));
+  try{
+   const e=await tradeEngine();
+   // Reads (trading, status) stay open so a trade can be followed after trading is turned off again.
+   if((op==='propose'||op==='execute')&&!e.limits.liveAccounts?.includes(accountId))return r.status(403).json(failure('TRADING_PAUSED'));
+   let args=body;
+   if(OPERATOR_INPUT[op]){const a=inputs[OPERATOR_INPUT[op]].safeParse(body);if(!a.success)return r.status(400).json(failure('INVALID_ARGUMENT'));args=a.data}
+   r.json(await fn(e,ctx,args));
+  }catch(e){
+   if(e?.name==='TradeError'){console.error(JSON.stringify({event:'operator_trade_refused',op,code:e.code,detail:String(e.detail??'').slice(0,200)}));return r.status(CODE_STATUS[e.code]??409).json(failure(e.code))}
+   console.error(JSON.stringify({event:'operator_trade_failed',op,error:String(e?.message??e).slice(0,200)}));
+   unavailable(r);
+  }
+ };
+}
+/** What the engine would do for this account right now: the card's `paused` vs `live`, and why. */
+app.post('/operator/trading',operatorTrade('trading',(e,ctx)=>{
+ const l=e.limits,allowed=!!l.liveAccounts?.includes(ctx.accountId);
+ return {trading:l.live&&!l.killSwitch?'live':'paused',live:l.live,kill_switch:l.killSwitch,scope:l.liveAccounts?'allowlist':'all',
+  live_accounts:l.liveAccounts?.length??0,account_allowed:allowed,operator_trades:allowed&&l.live&&!l.killSwitch,
+  base_gas:e.signer.gasMode??null};// sponsored | self | gas_wallet (signer-privy.mjs YEET_BASE_GAS)
+}));
+app.post('/operator/trades/propose',operatorTrade('propose',(e,ctx,a)=>e.propose(ctx,a)));
+app.post('/operator/trades/execute',operatorTrade('execute',(e,ctx,a)=>e.execute(ctx,a)));
+app.post('/operator/trades/status',operatorTrade('status',(e,ctx,a)=>{
+ if(typeof a.trade_id!=='string'||!/^t_[a-z0-9]{20}$/.test(a.trade_id))throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});
+ const view=e.status(ctx,a.trade_id);
+ return {...(p2On()?{...view,xp_award:xpSafe('trade',()=>xpRuntime().tradeAward(ctx.accountId,view),null)}:view),record:e.tracker.record(ctx,a.trade_id)};
+}));
 app.use(async(q,r,next)=>{if(Object.keys(q.query).length)return r.sendStatus(400);if(q.role==='operator')return r.sendStatus(403);let subject,client;if(q.role==='mcp'){try{q.principal=validatePrincipal(await introspectBearer(q.headers['x-delegated-bearer'],'core-resource','core-introspection'));subject=q.principal.subject;client=q.principal.client}catch{return r.sendStatus(401)}}else subject=q.headers['x-yeet-subject'];if(!user(subject))return r.sendStatus(400);q.subject=subject;const p=read('policy.json')[subject];if(p?.suspended||q.role==='mcp'&&p?.clients?.[client])return r.sendStatus(403);next()});
 app.get('/eligibility',(q,r)=>q.role==='mcp'?r.json({ok:true}):r.sendStatus(403));
 /** Scope each connector route needs; a route not listed here is refused for the connector. */

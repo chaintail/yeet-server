@@ -59,6 +59,9 @@ export function privyErrorCode(status,json){
  const code=typeof json?.code==='string'?json.code:'',error=[json?.error,json?.message].find(v=>typeof v==='string')??'';
  if(status>=400&&status<500){
   if(code==='policy_violation')return 'PRIVY_POLICY_DENIED';
+  // docs.privy.io api-errors (checked 2026-11-13): "Wallet has insufficient funds for this transaction" or
+  // "Insufficient gas credits balance" (sponsorship credits depleted). Checked before anything is submitted.
+  if(code==='insufficient_funds')return 'PRIVY_INSUFFICIENT_FUNDS';
   if(AUTHORIZATION_CODES.has(code)||(code==='invalid_data'&&error.startsWith('No valid authorization signatures'))||((status===401||status===403)&&REFUSALS.some(p=>error.startsWith(p))))return 'PRIVY_AUTHORIZATION_DENIED';
   if(status===400&&/idempotency/i.test(error))return 'PRIVY_IDEMPOTENCY_CONFLICT';
  }

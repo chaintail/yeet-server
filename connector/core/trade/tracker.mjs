@@ -150,6 +150,15 @@ export function createTracker({db,client,now=Date.now,onSettled=()=>{},intervalM
   /** Sweeps once at start (trades a crash left in `signing` are recovered), then every intervalMs. */
   start(){if(!timer&&intervalMs>0){pollOnce().catch(()=>{});timer=setInterval(()=>{pollOnce().catch(()=>{})},intervalMs);timer.unref?.()}},
   stop(){if(timer)clearInterval(timer);timer=undefined},
+  /** The operator's receipt material for the trade's owner (core.mjs /operator/trades/status): the router receipt as
+   * stored, the last error, and the trade's audit rows from trade_events. */
+  record(ctx,tradeId){
+   const t=tradeRow(tradeId);
+   if(!t||t.account_id!==ctx.accountId)refuse('INVALID_ARGUMENT','unknown trade');
+   const events=db.prepare('SELECT leg_id,kind,from_status,to_status,evidence_json,at FROM trade_events WHERE trade_id=? ORDER BY id').all(tradeId)
+    .map(e=>({at:iso(e.at),kind:e.kind,leg:e.leg_id,from:e.from_status,to:e.to_status,evidence:e.evidence_json?JSON.parse(e.evidence_json):null}));
+   return {receipt:t.receipt_json?JSON.parse(t.receipt_json):null,last_error:t.last_error??null,proposal_id:t.proposal_id,created_at:iso(t.created_at),events};
+  },
   /** trade_status for the trade's owner. */
   status(ctx,tradeId){
    const t=tradeRow(tradeId);

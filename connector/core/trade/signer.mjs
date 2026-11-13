@@ -54,6 +54,7 @@ export async function createSigner({env=process.env,fetch=globalThis.fetch,balan
 export function privyFailure(e){
  if(e?.code==='PRIVY_POLICY_DENIED')refuse('LIMIT_EXCEEDED','policy denied the transfer');
  if(e?.code==='PRIVY_AUTHORIZATION_DENIED')refuse('WALLET_NOT_READY','signer not authorised');
+ if(e?.code==='PRIVY_INSUFFICIENT_FUNDS')refuse('TEMPORARILY_UNAVAILABLE','Privy: insufficient funds or gas credits');
  if(e?.name==='TradeError')throw e;
  refuse('TEMPORARILY_UNAVAILABLE',e?.code||'privy request failed');
 }

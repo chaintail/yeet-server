@@ -227,6 +227,48 @@ test('B-1 end to end through the connector with a real token: propose, quote, ex
  }finally{configureTradeEngine({})}
 });
 
+test('operator trades (ops/first-trade.mjs): only with the operator secret, only for an account in YEET_LIVE_ACCOUNTS, same engine',async()=>{
+ const tok=await token();
+ const me=await (await fetch(AS+'/me',{headers:{authorization:`Bearer ${tok.access_token}`}})).json();
+ const CORE_URL=`http://127.0.0.1:${PORTS.CORE_PORT}`;
+ const {readFileSync}=await import('node:fs');
+ const as=(role,path,body)=>fetch(CORE_URL+path,{method:'POST',headers:{authorization:`Bearer ${readFileSync(join(secrets,role),'utf8').trim()}`,'content-type':'application/json'},body:JSON.stringify(body)});
+ const op=(path,body)=>as('core-operator',path,body);
+ const {configureTradeEngine}=await import('../core/trade/runtime.mjs');
+ const {fakeOneClick,fakeSigner,fakeBalances,fakeChain,FAKE_POLICY_ENV}=await import('../core/trade/fakes.mjs');
+ const basket={request_id:'op-1',amount_usdc:'5',legs:[{symbol:'WIF',parts:10}]};
+ const setup=extra=>{const oneclick=fakeOneClick(),signer=fakeSigner(),balances=fakeBalances();
+  configureTradeEngine({client:oneclick,signer,balances,chain:fakeChain({balances,signer}),env:{...process.env,...FAKE_POLICY_ENV,YEET_LIVE:'1',...extra},trackerIntervalMs:0});return signer};
+ try{
+  // No allowlist: the operator can read, never trade.
+  setup({});
+  assert.equal((await as('core-mcp','/operator/trading',{account:me.sub})).status,403,'only the operator role');
+  assert.equal((await op('/operator/trading',{account:'yeet-privy-nobody'})).status,400);
+  assert.deepEqual(await (await op('/operator/trading',{account:me.sub})).json(),{trading:'live',live:true,kill_switch:false,scope:'all',live_accounts:0,account_allowed:false,operator_trades:false,base_gas:null});
+  const refused=await op('/operator/trades/propose',{account:me.sub,...basket});
+  assert.equal(refused.status,403);assert.equal((await refused.json()).error,'TRADING_PAUSED');
+  // Listed: propose, execute with the minted code, follow the status; the trade is the engine's own.
+  const signer=setup({YEET_LIVE_ACCOUNTS:me.sub});
+  assert.equal((await (await op('/operator/trading',{account:me.sub})).json()).operator_trades,true);
+  assert.equal((await op('/operator/trades/propose',{account:me.sub,...basket,extra:1})).status,400,'contract input only');
+  const p=await (await op('/operator/trades/propose',{account:me.sub,...basket})).json();
+  assert.match(p.proposal_id,/^p_/);assert.match(p.confirm.code,/^[A-Za-z0-9_-]{43}$/);
+  const x=await (await op('/operator/trades/execute',{account:me.sub,proposal_id:p.proposal_id,revision:p.revision,confirm:p.confirm.code})).json();
+  assert.equal(x.status,'submitted');assert.deepEqual(signer.sent.map(s=>s.amountRaw),['5000000']);
+  const st=await (await op('/operator/trades/status',{account:me.sub,trade_id:x.trade_id})).json();
+  assert.equal(st.trade_id,x.trade_id);assert.ok(Array.isArray(st.record.events)&&st.record.events.some(e=>e.to==='signing'));
+  assert.equal(st.record.proposal_id,p.proposal_id);
+  // The engine's own code check: the code is single use; presenting it again replays the same trade.
+  const again=await (await op('/operator/trades/execute',{account:me.sub,proposal_id:p.proposal_id,revision:p.revision,confirm:p.confirm.code})).json();
+  assert.equal(again.trade_id,x.trade_id);assert.equal(signer.sent.length,1,'a replayed code sends nothing');
+  assert.equal((await op('/operator/trades/status',{account:me.sub,trade_id:'t_nope'})).status,409);
+  // Trading off again (allowlist removed): status stays readable, nothing new can start.
+  setup({});
+  assert.equal((await op('/operator/trades/status',{account:me.sub,trade_id:x.trade_id})).status,200);
+  assert.equal((await op('/operator/trades/execute',{account:me.sub,proposal_id:p.proposal_id,revision:p.revision,confirm:p.confirm.code})).status,403);
+ }finally{configureTradeEngine({})}
+});
+
 test('add funds: sign-in carries only the fund return target; /fund is off without the Privy sign-in',async()=>{
  assert.equal((await fetch(AS+'/fund',{redirect:'manual'})).status,404);
  const cookies=jar();
