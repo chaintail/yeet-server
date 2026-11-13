@@ -141,9 +141,9 @@ test('B-1 end to end through the connector with a real token: propose, quote, ex
  const tok=await token();
  const call=async(name,args)=>(await (await rpc({jsonrpc:'2.0',id:5,method:'tools/call',params:{name,arguments:args}},tok.access_token)).json()).result;
  const {configureTradeEngine,tradeEngine}=await import('../core/trade/runtime.mjs');
- const {fakeOneClick,fakeSigner,fakeBalances,fakeChain}=await import('../core/trade/fakes.mjs');
+ const {fakeOneClick,fakeSigner,fakeBalances,fakeChain,FAKE_POLICY_ENV}=await import('../core/trade/fakes.mjs');
  const oneclick=fakeOneClick(),signer=fakeSigner(),balances=fakeBalances();
- configureTradeEngine({client:oneclick,signer,balances,chain:fakeChain({balances,signer}),env:{...process.env,YEET_LIVE:'1'},trackerIntervalMs:0});
+ configureTradeEngine({client:oneclick,signer,balances,chain:fakeChain({balances,signer}),env:{...process.env,...FAKE_POLICY_ENV,YEET_LIVE:'1'},trackerIntervalMs:0});
  // The confirm code may appear only in result _meta["yeet/confirm"]: never in structuredContent or the text content.
  const modelSees=r=>JSON.stringify(r.structuredContent)+JSON.stringify(r.content);
  const cardOnly=r=>{const c=r._meta?.['yeet/confirm'];assert.match(c.code,/^[A-Za-z0-9_-]{43}$/);assert.ok(!modelSees(r).includes(c.code),'code leaked to the model');assert.doesNotMatch(modelSees(r),/"confirm"|yeet\/confirm/);return c};

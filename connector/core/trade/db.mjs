@@ -161,6 +161,14 @@ export const MIGRATIONS=Object.freeze([
    created_at INTEGER NOT NULL,
    acked_at INTEGER) STRICT;
   CREATE INDEX trade_alerts_open ON trade_alerts(acked_at,id);`,
+ // 4: Privy send state (PRIVY-SETUP-REVIEW). A sponsored Base send answers a Privy transaction id before the chain hash:
+ // the leg is `sent` with privy_tx_id and no tx_hash until the tracker resolves the hash. send_request is the exact
+ // body of the first attempt, replayed byte for byte. A cached 5xx on /rpc sets cached_failure_at: that key is never
+ // sent again; key_generation counts the keys a leg has used (0 = the first, also the reference_id).
+ `ALTER TABLE trade_legs ADD COLUMN privy_tx_id TEXT;
+  ALTER TABLE trade_legs ADD COLUMN send_request TEXT;
+  ALTER TABLE trade_legs ADD COLUMN key_generation INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE trade_legs ADD COLUMN cached_failure_at INTEGER;`,
 ]);
 
 /** Opens (and migrates) the trade database. `file` defaults to $STATE_DIR/trade.sqlite; ':memory:' for tests. */

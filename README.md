@@ -87,8 +87,10 @@ code replays the trade it started.
   `sponsor: true` unless `YEET_GAS_WALLET_ID` is set (then a 0.00003 ETH top-up from that wallet when needed).
   Solana (SKEET) answers WALLET_NOT_READY until `YEET_SOL_FEE_PAYER_ID` is set.
 - Without Privy credentials the connector still runs: `yeet_home`, proposals and taps answer WALLET_NOT_READY.
-- Policy for the Base signer: `node core/trade/policy-create.mjs --max-trade 25 --daily 50` prints the JSON
-  (USDC `transfer` on Base only, per-transaction and rolling 24 h caps); it never sends it.
+- Policies: `node core/trade/policy-create.mjs aggregation|base|solana` prints the Privy request bodies (Base: USDC
+  `transfer` on Base only, per-transaction cap in hex, aggregation referenced by id; Solana: TransferChecked of the
+  catalogue's mints only), owned by `YEET_POLICY_ADMIN_QUORUM_ID`; it never sends them. The daily cap is the
+  server's (`ops/README.md`, "Trade limits and the Privy signer").
 - State: `$STATE_DIR/trade.sqlite` (tables of plan 4.2, migrated at start).
 
 ## XP (Lane E, P2)
@@ -158,7 +160,8 @@ SUCCESS and replay matches. Without `YEET_LIVE=1` or any flag it refuses and mov
 
 - `yeet_coins` prices are null; `recent_wins` stays empty (no price history).
 - SKEET execution needs the Solana fee payer (`YEET_SOL_FEE_PAYER_ID`) and a live check of the sponsored send.
-- Never exercised against live Privy: the `eth_sendTransaction` body and answer, `GET /v1/users/{did}`, the policy
-  aggregation shape, gas sponsorship on the app's plan (see the comments in `core/trade/signer-privy.mjs` and
+- Never exercised against live Privy: the `eth_sendTransaction` body and answer (modelled on docs.privy.io: empty
+  hash plus `transaction_id` when sponsored), `GET /v1/transactions`, `reference_id`, the exact 400 text for a reused
+  idempotency key, `GET /v1/users/{did}`, gas sponsorship on the app's plan (see the comments in `core/trade/signer-privy.mjs` and
   `policy-create.mjs`).
 - Deploy: image not built, compose not started, Caddy and tunnel not changed (see `ops/README.md`).

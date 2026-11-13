@@ -8,7 +8,9 @@
 //  6. REQUOTE when a live leg's amountOut is more than YEET_REQUOTE_TOLERANCE_BPS (default 50) under the previewed
 //     estimate or under the preview's min_out, or the preview is over 60 s old and a live leg is under the estimate:
 //     the code is used, a new revision is stored and a new code goes to `_meta`
-//  7. one transfer per leg for the exact amountIn through the signer, then 1Click submitDeposit
+//  7. one transfer per leg for the exact amountIn through the signer, then 1Click submitDeposit. A sponsored Base send
+//     answers a Privy transaction id before the chain hash: the leg is `sent` (hash pending), never sent again, and
+//     recovery resolves the hash by GET /v1/transactions/{id} on later ticks
 //  8. persist trade and legs, answer `submitted` inside the time budget; the tracker takes over
 import {buildYeetPlan,buildSkeetPlan,formatUnits,FUNDING,CATALOG,isEvmAddress,isSolanaAddress} from './router.mjs';
 import {checkKillSwitch,checkBasket,checkDaily,checkCost,recordSpend} from './limits.mjs';
@@ -17,7 +19,7 @@ import {receiptLeg} from './tracker.mjs';
 import {legIdempotencyKey,USDC_BASE} from './signer.mjs';
 import {refuse,newId,iso,TradeError} from './util.mjs';
 import {tx} from './db.mjs';
-import {transitionLeg,appendEvent} from './audit.mjs';
+import {transitionLeg,appendEvent,recordLegEvent,recordLegHash} from './audit.mjs';
 import {USDC_KEY} from './accounting.mjs';
 
 export const PREVIEW_STALE_MS=60_000;
@@ -28,6 +30,11 @@ const explorer=(direction,hash)=>hash?(direction==='yeet'?`https://basescan.org/
 export const SEND_MARGIN_MS=120_000;
 /** A leg left `sending` is re-issued (same idempotency key) at most this often. */
 export const RESEND_AFTER_MS=15_000;
+/** After a cached Privy 5xx, a new idempotency key is used only when a reference_id lookup at least this long after the
+ * 5xx finds no transaction: Privy never accepted the request. */
+export const REKEY_AFTER_MS=60_000;
+/** At most this many keys after the first; then the leg stays `sending` (spent) and is only looked up. */
+export const MAX_KEY_GENERATION=2;
 const TX_HASH=/^(0x[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{43,90})$/;
 const codeOf=e=>e instanceof TradeError?e.code:'TEMPORARILY_UNAVAILABLE';
 /** execute_trade leg status (contract enum sent|failed|not_sent): an attempted transfer that is not confirmed yet may
@@ -85,6 +92,20 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
  const inFlight=new Set();
  const note=(tradeId,message)=>db.prepare('UPDATE trades SET last_error=? WHERE id=?').run(String(message).slice(0,300),tradeId);
 
+ /**
+  * Before anything is signed: the YEET signer is attached to the wallet, and (delegated) its signer entry carries
+  * exactly the policy configured for the chain (YEET_BASE_POLICY_ID / YEET_SOLANA_POLICY_ID). A signer attached with
+  * no policy, another policy or several is refused: Privy would apply no limit or other limits. Custodial wallets have
+  * no signer entry (the YEET key owns them), so only the grant is checked there.
+  */
+ function requireSigner(w,chain){
+  if(w[chain].signerState!=='granted'||!w[chain].walletId)refuse('WALLET_NOT_READY',`${chain} signer not granted`);
+  if(signer.kind==='custodial')return;
+  const want=chain==='base'?limits.basePolicyId:limits.solanaPolicyId;
+  if(!want)refuse('WALLET_NOT_READY',`${chain} policy not configured`);
+  if(w[chain].policyId!==want)refuse('WALLET_NOT_READY',`${chain} signer policy is not the configured one`);
+ }
+
  /** The execute_trade answer for a stored trade (also what a replayed code gets). */
  function answer(tradeId){
   const t=trade(tradeId);
@@ -108,10 +129,64 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
  /** The signer call for a leg; throws before anything is broadcast when the call cannot be built. */
  function prepare(t,l,wallet,held){
   const q=JSON.parse(l.live_quote_json);
-  if(t.direction==='yeet')return ()=>signer.transferUsdcBase({walletId:wallet.walletId,from:wallet.address,to:l.deposit_address,amountRaw:l.amount_in_raw,idempotencyKey:l.idempotency_key});
+  const common={walletId:wallet.walletId,amountRaw:l.amount_in_raw,idempotencyKey:l.idempotency_key,referenceId:legIdempotencyKey(wallet.walletId,t.id,l.idx,0),
+   request:l.send_request??undefined,persistRequest:body=>persistRequest(t.id,l.idx,body)};
+  if(t.direction==='yeet')return ()=>signer.transferUsdcBase({...common,from:wallet.address,to:l.deposit_address});
   const mint=proposals.mintOf(q.origin.symbol),src=held?.find(h=>h.mint===mint);
-  if(!src)refuse('BALANCE_LOW','token account not found');
-  return ()=>signer.transferSpl({walletId:wallet.walletId,owner:wallet.address,source:src.tokenAccount,destinationOwner:l.deposit_address,mint,decimals:q.origin.decimals,amountRaw:l.amount_in_raw,tokenProgram:src.tokenProgram,idempotencyKey:l.idempotency_key});
+  if(!src&&!l.send_request)refuse('BALANCE_LOW','token account not found');
+  return ()=>signer.transferSpl({...common,owner:wallet.address,source:src?.tokenAccount,destinationOwner:l.deposit_address,mint,decimals:q.origin.decimals,tokenProgram:src?.tokenProgram});
+ }
+ /** The exact request body, stored before its first send; a retry sends it again instead of building a new one. */
+ function persistRequest(tradeId,idx,body){
+  if(db.prepare('UPDATE trade_legs SET send_request=? WHERE trade_id=? AND idx=? AND send_request IS NULL').run(body,tradeId,idx).changes===1)return;
+  if(legOf(tradeId,idx)?.send_request!==body)throw Error('a different request is already stored for this leg');
+ }
+ /** The leg's reference_id, from its stored request; null when no request was ever stored (so none was sent). */
+ const referenceOf=l=>{try{const r=JSON.parse(l.send_request)?.reference_id;return typeof r==='string'?r:null}catch{return null}};
+ const chainOf=t=>t.direction==='yeet'?'base':'solana';
+ /** One Privy lookup by reference_id for a `sending` leg; null when no lookup is possible or it failed. */
+ async function privyLookup(t,l){
+  const referenceId=referenceOf(l);
+  if(!referenceId||typeof signer.lookupTransfer!=='function')return null;
+  try{return await signer.lookupTransfer({chain:chainOf(t),referenceId})}
+  catch(e){note(t.id,`leg ${l.idx}: Privy lookup: ${e?.detail??e?.message}`);return null}
+ }
+ /** A Privy lookup that found the transfer: sent (with or without its hash yet), or failed with nothing moved. */
+ async function applyFound(t,idx,found,source){
+  if(found.state==='failed'){release(t,idx,'failed',{reason:'Privy reports the transfer failed',privy_transaction_id:found.transactionId,privy_status:found.status,source});return 'TEMPORARILY_UNAVAILABLE'}
+  return adopt(t,idx,{txHash:found.txHash,transactionId:found.transactionId},source);
+ }
+ /** sending -> sent from a signer answer or a lookup: the chain hash, or a Privy transaction id with the hash pending. */
+ async function adopt(t,idx,{txHash,transactionId},source){
+  const hash=typeof txHash==='string'&&TX_HASH.test(txHash)?txHash:null,id=typeof transactionId==='string'&&transactionId?transactionId:null;
+  if(!hash&&!id){note(t.id,`leg ${idx}: signer answered no hash`);return 'TEMPORARILY_UNAVAILABLE'}
+  const evidence={source,...(hash?{tx_hash:hash}:{hash_pending:true}),...(id?{privy_transaction_id:id}:{})};
+  transitionLeg(db,{tradeId:t.id,idx,from:'sending',to:'sent',evidence,set:{tx_hash:hash,privy_tx_id:id,cached_failure_at:null,updated_at:now()},at:now()});
+  if(hash)await submit(t,idx);
+ }
+ /** A `sent` leg with a Privy transaction id and no hash: one GET /v1/transactions/{id} per recovery pass. */
+ async function resolveHash(t,l){
+  if(typeof signer.lookupTransfer!=='function')return;
+  let r;
+  try{r=await signer.lookupTransfer({chain:chainOf(t),transactionId:l.privy_tx_id})}
+  catch(e){note(t.id,`leg ${l.idx}: Privy transaction: ${e?.detail??e?.message}`);return}
+  if(r?.state==='confirmed'&&TX_HASH.test(r.txHash??''))
+   recordLegHash(db,{tradeId:t.id,idx:l.idx,txHash:r.txHash,evidence:{privy_transaction_id:l.privy_tx_id,privy_status:r.status,source:'privy_transaction'},at:now()});
+  else if(r?.state==='failed')note(t.id,`leg ${l.idx}: Privy reports transaction ${l.privy_tx_id} ${r.status}`);
+ }
+ /** A new idempotency key for a leg whose key holds a cached 5xx, after a lookup found no transaction under its
+  * reference_id; the stored request is sent again unchanged. False when the leg or its wallet changed meanwhile. */
+ function rekey(t,l,wallet){
+  const gen=l.key_generation;
+  if(l.idempotency_key!==legIdempotencyKey(wallet.walletId,t.id,l.idx,gen)){note(t.id,`leg ${l.idx}: wallet changed since the first attempt, not re-issued`);return false}
+  const key=legIdempotencyKey(wallet.walletId,t.id,l.idx,gen+1);
+  return tx(db,()=>{
+   if(db.prepare("UPDATE trade_legs SET idempotency_key=?,key_generation=?,cached_failure_at=NULL,updated_at=? WHERE trade_id=? AND idx=? AND send_status='sending' AND key_generation=? AND cached_failure_at IS NOT NULL")
+    .run(key,gen+1,now(),t.id,l.idx,gen).changes!==1)return false;
+   recordLegEvent(db,{tradeId:t.id,idx:l.idx,status:'sending',evidence:{reason:'Privy 5xx cached on the key; no transaction under the reference',reference_id:referenceOf(l),
+    failed_at:iso(l.cached_failure_at),key_generation:gen+1,idempotency_key:key},at:now()});
+   return true;
+  });
  }
  /**
   * One transfer attempt for a `queued` leg, or a re-issue of a `sending` leg with its stored idempotency key. The leg is
@@ -120,7 +195,7 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
   * Returns the catalogue code of a failure, or undefined.
   */
  async function attempt(t,idx,wallet,held){
-  const l=legOf(t.id,idx),key=legIdempotencyKey(wallet.walletId,t.id,idx);
+  const l=legOf(t.id,idx),key=legIdempotencyKey(wallet.walletId,t.id,idx,0);
   if(l.send_status==='queued'){
    let call;
    try{call=prepare(t,{...l,idempotency_key:key},wallet,held)}catch(e){release(t,idx,'failed',{reason:codeOf(e),stage:'prepare'});return codeOf(e)}
@@ -128,24 +203,30 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
    return finish(t,idx,call,true);
   }
   if(l.send_status!=='sending')return;
-  if(l.idempotency_key!==key){note(t.id,`leg ${idx}: wallet changed since the first attempt, not re-issued`);return}
+  // A key that answered a 5xx holds that 5xx for 24 h: it is never sent again (recover() looks up, then rekeys).
+  if(l.cached_failure_at!==null)return;
+  if(l.idempotency_key!==legIdempotencyKey(wallet.walletId,t.id,idx,l.key_generation)){note(t.id,`leg ${idx}: wallet changed since the first attempt, not re-issued`);return}
   let call;
   try{call=prepare(t,l,wallet,held)}catch(e){note(t.id,`leg ${idx}: ${e?.detail??e?.message}`);return codeOf(e)}
   db.prepare('UPDATE trade_legs SET send_attempts=send_attempts+1,updated_at=? WHERE trade_id=? AND idx=?').run(now(),t.id,idx);
   return finish(t,idx,call,false);
  }
  async function finish(t,idx,call,first){
-  let txHash;
-  try{({txHash}=await call())}
+  let res;
+  try{res=await call()}
   catch(e){
    // A re-issue's refusal says nothing about the first attempt, so only a first attempt can be released.
    if(first&&e?.notSent===true){release(t,idx,'failed',{reason:codeOf(e),stage:'signer',not_sent:true});return codeOf(e)}
-   note(t.id,`leg ${idx}: ${e?.detail??e?.message??'send not confirmed'}`);
+   note(t.id,`leg ${idx}: ${e?.detail??e?.message??'send not confirmed'}${e?.privyStatus?` (Privy ${e.privyStatus})`:''}`);
+   if(e?.cachedFailure){
+    // Privy caches a 5xx on /rpc against the key: this key is spent. Look the transfer up before deciding anything.
+    db.prepare("UPDATE trade_legs SET cached_failure_at=?,updated_at=? WHERE trade_id=? AND idx=? AND send_status='sending'").run(now(),now(),t.id,idx);
+    const found=await privyLookup(t,legOf(t.id,idx));
+    if(found&&found.state!=='none')return applyFound(t,idx,found,'privy_reference');
+   }
    return codeOf(e);
   }
-  if(typeof txHash!=='string'||!TX_HASH.test(txHash)){note(t.id,`leg ${idx}: signer answered no hash`);return 'TEMPORARILY_UNAVAILABLE'}
-  transitionLeg(db,{tradeId:t.id,idx,from:'sending',to:'sent',evidence:{tx_hash:txHash,source:'signer'},set:{tx_hash:txHash,updated_at:now()},at:now()});
-  await submit(t,idx);
+  return adopt(t,idx,res??{},'signer');
  }
  /** 1Click /deposit/submit for a sent leg, until accepted; not needed once 1Click has found the deposit itself. */
  async function submit(t,idx){
@@ -192,7 +273,7 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
  async function recover(tradeId){
   if(inFlight.has(tradeId))return false;
   const t=trade(tradeId);if(!t)return false;
-  const open=legsOf(tradeId).filter(l=>l.send_status==='queued'||l.send_status==='sending'||(l.send_status==='sent'&&!l.deposit_submitted));
+  const open=legsOf(tradeId).filter(l=>l.send_status==='queued'||l.send_status==='sending'||(l.send_status==='sent'&&(!l.deposit_submitted||(!l.tx_hash&&l.privy_tx_id))));
   if(!open.length)return false;
   inFlight.add(tradeId);
   try{
@@ -200,13 +281,18 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
    const walletCtx=async()=>{
     if(ctx)return ctx;
     const w=await wallets.require(t.account_id,{refresh:!signer.directory.stable});
-    const wallet=w[t.direction==='yeet'?'base':'solana'];
+    requireSigner(w,chainOf(t));
+    const wallet=w[chainOf(t)];
     return ctx={wallet,held:t.direction==='skeet'?await wallets.holdings(wallet.address):undefined};
    };
    // Kill switch or YEET_LIVE unset: nothing new is sent or re-issued; legs already sent are still tracked.
    const paused=limits.killSwitch||!limits.live;
    for(const l of open){
-    if(l.send_status==='sent'){await submit(t,l.idx);continue}
+    if(l.send_status==='sent'){
+     // Sent, hash pending: Privy accepted it (transaction id stored); the hash is looked up, the transfer never re-sent.
+     if(!l.tx_hash&&l.privy_tx_id)await resolveHash(t,l);
+     await submit(t,l.idx);continue;
+    }
     const deadline=Date.parse(JSON.parse(l.live_quote_json).deadline);
     if(l.send_status==='queued'){
      if(paused){release(t,l.idx,'not_sent',{reason:'trading paused',kill_switch:limits.killSwitch,live:limits.live});continue}
@@ -216,12 +302,23 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
      continue;
     }
     if(await lookup(t,l))continue;
+    // Privy by reference_id: a transfer it accepted under any key of this leg is adopted, never sent again.
+    const found=await privyLookup(t,l);
+    if(found&&found.state!=='none'){await applyFound(t,l.idx,found,'privy_reference');continue}
     if(paused)continue;// stays `sending` (spent) until 1Click or the tracker horizon resolves it
     // Never re-issue towards an address that may be inactive: the leg stays `sending` (spent) until 1Click or the
     // tracker's horizon resolves it.
     if(!(now()+SEND_MARGIN_MS<deadline))continue;
     if(now()-l.updated_at<RESEND_AFTER_MS)continue;
-    const {wallet,held}=await walletCtx();
+    let wallet,held;
+    try{({wallet,held}=await walletCtx())}catch(e){note(tradeId,`leg ${l.idx}: ${e?.detail??e?.message}`);continue}
+    if(l.cached_failure_at!==null){
+     // The key holds a cached 5xx. A new key only when a lookup answered (found === none) at least REKEY_AFTER_MS
+     // after the 5xx; with no answer, or after MAX_KEY_GENERATION keys, the leg is only looked up.
+     if(found?.state!=='none'||now()-l.cached_failure_at<REKEY_AFTER_MS)continue;
+     if(l.key_generation>=MAX_KEY_GENERATION){note(tradeId,`leg ${l.idx}: Privy 5xx on ${l.key_generation+1} keys; only looked up from now on`);continue}
+     if(!rekey(t,l,wallet))continue;
+    }
     await attempt(t,l.idx,wallet,held);
    }
    settle(tradeId);
@@ -277,7 +374,7 @@ export function createExecutor({db,client,limits,wallets,signer,codes,proposals,
    if(quoteHash(p.id,revision,legs)!==code.quote_sha256)refuse('CONFIRMATION_REQUIRED','quote changed');
    const w=await wallets.require(ctx.accountId,{refresh:!signer.directory.stable});
    const chain=p.direction==='yeet'?'base':'solana';
-   if(w[chain].signerState!=='granted'||!w[chain].walletId)refuse('WALLET_NOT_READY',`${chain} signer not granted`);
+   requireSigner(w,chain);
    const total=legs.reduce((a,l)=>a+BigInt(l.amount_in_raw),0n);
    let held;
    if(p.direction==='yeet'){

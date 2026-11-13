@@ -8,7 +8,6 @@ import {createCustodialSigner} from './signer-custodial.mjs';
 import {createSigner,signerKind,erc20TransferData,USDC_BASE} from './signer.mjs';
 import {createRpcBalances,createWallets} from './wallets.mjs';
 import {splTransferTransaction,associatedTokenAddress,TOKEN_PROGRAM,TOKEN_2022_PROGRAM,SOLANA_MAINNET_CAIP2} from './solana-tx.mjs';
-import {basePolicy} from './policy-create.mjs';
 import {canonical} from './util.mjs';
 import {openTradeDb} from './db.mjs';
 import {base58Decode} from './router.mjs';
@@ -52,7 +51,7 @@ test('delegated Base transfer: Privy wallet RPC eth_sendTransaction with the Fol
  const f=fakeFetch(()=>({body:{method:'eth_sendTransaction',data:{hash:HASH}}}));
  const s=createDelegatedSigner({env:ENV,fetch:f.fn});
  const key='c'.repeat(64);
- assert.deepEqual(await s.transferUsdcBase({walletId:'wallet-base',from:BASE_WALLET,to:'0x'+'11'.repeat(20),amountRaw:'4000000',idempotencyKey:key}),{txHash:HASH});
+ assert.deepEqual(await s.transferUsdcBase({walletId:'wallet-base',from:BASE_WALLET,to:'0x'+'11'.repeat(20),amountRaw:'4000000',idempotencyKey:key}),{txHash:HASH,transactionId:null,hashPending:false});
  const [c]=f.calls;
  assert.equal(c.url,'https://api.privy.io/v1/wallets/wallet-base/rpc');assert.equal(c.method,'POST');
  assert.equal(c.headers['privy-app-id'],ENV.PRIVY_APP_ID);assert.equal(c.headers['privy-idempotency-key'],key);
@@ -61,7 +60,7 @@ test('delegated Base transfer: Privy wallet RPC eth_sendTransaction with the Fol
  assert.ok(sigOk(c),'signature verifies over canonical {version, method, url, body, privy- headers}');
  assert.equal(c.raw,canonical(c.body),'the body is sent exactly as signed');
  assert.deepEqual(c.body,{method:'eth_sendTransaction',caip2:'eip155:8453',chain_type:'ethereum',sponsor:true,
-  params:{transaction:{to:USDC_BASE,data:erc20TransferData('0x'+'11'.repeat(20),4_000_000n),value:'0x0',chain_id:8453}}});
+  reference_id:key,params:{transaction:{to:USDC_BASE,data:erc20TransferData('0x'+'11'.repeat(20),4_000_000n),value:'0x0',chain_id:8453}}});
 });
 
 test('delegated: Privy refusals map to catalogue codes; no hash is TEMPORARILY_UNAVAILABLE',async()=>{
@@ -104,7 +103,7 @@ test('SKEET transfer: WALLET_NOT_READY until a Solana fee payer is configured; t
  const sig='5'.repeat(88);
  const f=fakeFetch(()=>({body:{data:{hash:sig}}}));
  const s=createDelegatedSigner({env:{...ENV,YEET_SOL_FEE_PAYER_ID:'fee-payer'},fetch:f.fn,balances:{recentBlockhash:async()=>'11111111111111111111111111111111'}});
- assert.deepEqual(await s.transferSpl(leg),{txHash:sig});
+ assert.deepEqual(await s.transferSpl(leg),{txHash:sig,transactionId:null,hashPending:false});
  const b=f.calls[0].body;
  assert.equal(b.method,'signAndSendTransaction');assert.equal(b.caip2,SOLANA_MAINNET_CAIP2);assert.equal(b.sponsor,true);assert.equal(b.params.encoding,'base64');
  assert.ok(sigOk(f.calls[0]));
@@ -157,14 +156,4 @@ test('Solana transfer built by hand: ATA by find_program_address (checked agains
  assert.deepEqual([...m.subarray(4,36)],[...base58Decode(SOL_WALLET)]);
  assert.deepEqual([...m.subarray(4+2*32,4+3*32)],[...base58Decode(destination)]);
  assert.equal(m[m.length-10],12);assert.equal(Buffer.from(m.subarray(m.length-9,m.length-1)).readBigUInt64LE(),4_000_000n);assert.equal(m[m.length-1],6);
-});
-
-test('policy printer: Base USDC transfer only, per-transaction and rolling 24 h caps in raw units',()=>{
- const p=basePolicy({maxTradeUsdc:'25',dailyUsdc:'50'});
- assert.equal(p.chain_type,'ethereum');assert.deepEqual(p.rules.map(r=>r.method),['eth_signTransaction','eth_sendTransaction']);
- const c=Object.fromEntries(p.rules[0].conditions.map(x=>[x.field,x]));
- assert.equal(c.chain_id.value,'8453');assert.equal(c.to.value,USDC_BASE);assert.equal(c.value.value,'0');assert.equal(c.function_name.value,'transfer');
- assert.deepEqual([c['transfer.amount'].operator,c['transfer.amount'].value],['lte','25000000']);
- assert.equal(c['aggregation.usdc_24h'].value,'50000000');assert.equal(p.aggregations[0].window.seconds,86400);
- assert.ok(p.rules.every(r=>r.action==='ALLOW'&&r.name.length<50));
 });

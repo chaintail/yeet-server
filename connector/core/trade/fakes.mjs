@@ -1,7 +1,7 @@
 // Test doubles for every external system the engine uses: 1Click (answers built from the router's recorded fixtures,
 // vendor/yeet-win/router/test/fixtures), the signer adapter and the wallet balances. Nothing here touches a network.
 import {readFileSync} from 'node:fs';
-import {createHash} from 'node:crypto';
+import {createHash,generateKeyPairSync} from 'node:crypto';
 import {openTradeDb} from './db.mjs';
 import {createEngine} from './engine.mjs';
 import {refuse} from './util.mjs';
@@ -13,6 +13,9 @@ const fixture=name=>JSON.parse(readFileSync(new URL(`../../vendor/yeet-win/route
 export const SOL_WALLET='G4Xr9SPQWYmkXnTB7r4tienHXYU19TYfsff7wfScjNRt';
 export const BASE_WALLET='0x17602fd697f91d31fe551b26a3b12b113789477e';
 const hex=(s,n=64)=>createHash('sha256').update(s).digest('hex').slice(0,n);
+/** The Privy policy ids the fake wallets carry, and the env that expects them (executor policy check). */
+export const FAKE_POLICY_IDS=Object.freeze({base:'policy-base',solana:'policy-solana'});
+export const FAKE_POLICY_ENV=Object.freeze({YEET_BASE_POLICY_ID:FAKE_POLICY_IDS.base,YEET_SOLANA_POLICY_ID:FAKE_POLICY_IDS.solana});
 
 /**
  * Fake 1Click. quote() answers like the router test helper quoteReply: the recorded quote2-B response scaled to the
@@ -75,13 +78,14 @@ export function fakeOneClick({dryRatio=1,liveRatio=1,cost=0,statuses=['status-pr
  *   lostLegs  broadcast (recorded in `sent`), then the answer is lost (timeout, missing hash)
  *   hangLegs  the call never returns (a process that dies mid-send)
  */
-export function fakeSigner({signerState='granted',failLegs=[],failCode='TEMPORARILY_UNAVAILABLE',lostLegs=[],hangLegs=[],onSend}={}){
+export function fakeSigner({signerState='granted',failLegs=[],failCode='TEMPORARILY_UNAVAILABLE',lostLegs=[],hangLegs=[],onSend,policyIds=FAKE_POLICY_IDS}={}){
  const sent=[],byKey=new Map();let leg=0;
- const wallet=chain=>({address:chain==='base'?BASE_WALLET:SOL_WALLET,walletId:`wallet-${chain}`,signerState,policyId:'policy-1'});
+ const wallet=chain=>({address:chain==='base'?BASE_WALLET:SOL_WALLET,walletId:`wallet-${chain}`,signerState,policyId:policyIds[chain]??null});
  const s={
   kind:'fake',sent,replays:0,hashes:byKey,
   directory:{stable:false,lookup:async()=>({base:wallet('base'),solana:wallet('solana')})},
   set signerState(v){signerState=v},
+  set policyIds(v){policyIds=v},
   transferUsdcBase:args=>transfer('base',args,`0x${hex(`${args.to}:${args.amountRaw}:${args.idempotencyKey}`)}`),
   transferSpl:args=>transfer('solana',args,base58Encode(createHash('sha256').update(`spl:${args.idempotencyKey}`).digest())),
  };
@@ -101,8 +105,98 @@ export function fakeSigner({signerState='granted',failLegs=[],failCode='TEMPORAR
 export function fakeBalances({usdc='100',holdings=[]}={}){
  const b={usdcRaw:BigInt(Math.round(Number(usdc)*1e6)),holdings,
   async baseUsdc(){return b.usdcRaw},async baseEth(){return 10n**16n},
-  async solanaTokens(){return b.holdings},async recentBlockhash(){return '11111111111111111111111111111111'}};
+  async solanaTokens(){return b.holdings},blockhashes:0,
+  // A new blockhash on every call, like the chain: a rebuilt Solana transfer never has the same bytes.
+  async recentBlockhash(){return base58Encode(createHash('sha256').update(`blockhash-${b.blockhashes++}`).digest())}};
  return b;
+}
+
+/** A P-256 authorization key and the Privy env for the delegated adapter against fakePrivy (generated per run). */
+export function fakePrivyEnv(extra={}){
+ const {privateKey}=generateKeyPairSync('ec',{namedCurve:'prime256v1'});
+ return {PRIVY_APP_ID:'fake-app',PRIVY_APP_SECRET:'fake-app-secret',YEET_PRIVY_AUTHORIZATION_KEY:`wallet-auth:${privateKey.export({format:'der',type:'pkcs8'}).toString('base64')}`,
+  YEET_PRIVY_KEY_QUORUM_ID:'quorum-yeet',YEET_SOL_FEE_PAYER_ID:'fee-payer',...FAKE_POLICY_ENV,...extra};
+}
+
+/**
+ * Fake Privy REST API (a `fetch`), for the real delegated adapter (signer-privy.mjs, privy-api.mjs). It models what
+ * docs.privy.io documents and PRIVY-SETUP-REVIEW found:
+ *   - POST /v1/wallets/{id}/rpc with privy-idempotency-key: the first request under a key is processed and its answer
+ *     stored; the same key with the same body bytes replays that answer (2xx, 4xx and 5xx alike: /rpc caches a 5xx
+ *     for 24 h); the same key with another body answers 400 "Invalid use of idempotency key".
+ *   - a sponsored EVM eth_sendTransaction answers data.hash '' with transaction_id and user_operation_hash; the chain
+ *     hash appears on GET /v1/transactions/{id} after `confirmAfter` reads (status broadcasted -> confirmed)
+ *   - Solana signAndSendTransaction answers the signature in data.hash at once
+ *   - GET /v1/transactions?reference_id= lists the transactions created with that reference_id
+ *   - GET /v1/users/{did} and GET /v1/wallets/{id}: the person's embedded wallets, the YEET quorum attached with
+ *     `policyIds[chain]` (an array value attaches several)
+ * `rpcFailures`: [{at: rpc request index (new keys only), status: 500|503|'timeout', accepted: bool}]; accepted means
+ * Privy created and broadcast the transaction before the failure.
+ */
+export function fakePrivy({confirmAfter=1,rpcFailures=[],policyIds=FAKE_POLICY_IDS,quorum='quorum-yeet',did='did:privy:alice'}={}){
+ const keys=new Map(),txs=new Map(),calls=[];let rpcN=0,txN=0;
+ const p={calls,txs,keys,replays:0,conflicts:0,broadcasts:[],
+  set policyIds(v){policyIds=v},set confirmAfter(v){confirmAfter=v},set rpcFailures(v){rpcFailures=v},
+  /** The rpc requests that reached the fake (key, raw body, answer status). */
+  get rpc(){return calls.filter(c=>c.path.endsWith('/rpc'))}};
+ const reply=(status,body)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json'}});
+ const view=t=>({id:t.id,wallet_id:t.wallet_id,caip2:t.caip2,status:t.status,transaction_hash:t.transaction_hash,created_at:t.created_at,reference_id:t.reference_id,sponsored:t.sponsored});
+ function create(walletId,body){
+  const id=`tx-${++txN}`,evm=String(body.caip2).startsWith('eip155:');
+  const hash=evm?`0x${hex(`chain-${id}`)}`:base58Encode(createHash('sha256').update(`sig-${id}`).digest())+base58Encode(createHash('sha256').update(`sig2-${id}`).digest());
+  const pending=evm&&body.sponsor===true;
+  const t={id,wallet_id:walletId,caip2:body.caip2,status:pending?'broadcasted':'confirmed',transaction_hash:pending?null:hash,chainHash:hash,reads:0,
+   created_at:Date.now(),reference_id:body.reference_id??null,sponsored:!!body.sponsor,body};
+  txs.set(id,t);p.broadcasts.push(t);
+  const data=pending?{hash:'',transaction_id:id,user_operation_hash:`0x${hex(`userop-${id}`)}`,caip2:body.caip2,reference_id:t.reference_id}
+   :{hash,transaction_id:id,caip2:body.caip2,reference_id:t.reference_id};
+  return {method:body.method,data};
+ }
+ p.fetch=async(url,init={})=>{
+  const u=new URL(String(url)),path=u.pathname,method=init.method??'GET',headers=init.headers??{};
+  const call={path,method,query:Object.fromEntries(u.searchParams),key:headers['privy-idempotency-key'],raw:init.body,status:null};calls.push(call);
+  const answer=(status,body)=>{call.status=status;return reply(status,body)};
+  let m;
+  if(method==='POST'&&(m=path.match(/^\/v1\/wallets\/([^/]+)\/rpc$/))){
+   const key=call.key,stored=key?keys.get(key):undefined;
+   if(stored){
+    if(stored.raw!==init.body){p.conflicts++;return answer(400,{error:'Invalid use of idempotency key: the request body differs from the original request'})}
+    p.replays++;
+    return answer(stored.status,stored.body);
+   }
+   const i=rpcN++,fail=rpcFailures.find(f=>f.at===i),body=JSON.parse(init.body);
+   if(fail?.status==='timeout'){
+    // The answer is lost on the way back; Privy kept the request (and its answer) only when it accepted it.
+    if(fail.accepted){const res={status:200,body:create(m[1],body)};if(key)keys.set(key,{raw:init.body,...res})}
+    call.status='timeout';throw new TypeError('fetch failed');
+   }
+   if(fail){
+    if(fail.accepted)create(m[1],body);
+    const res={status:fail.status,body:{error:'Internal server error'}};
+    if(key)keys.set(key,{raw:init.body,...res});
+    return answer(res.status,res.body);
+   }
+   const res={status:200,body:create(m[1],body)};
+   if(key)keys.set(key,{raw:init.body,...res});
+   return answer(200,res.body);
+  }
+  if(method==='GET'&&(m=path.match(/^\/v1\/transactions\/([^/]+)$/))){
+   const t=txs.get(m[1]);if(!t)return answer(404,{error:'Transaction not found'});
+   t.reads++;
+   if(t.status==='broadcasted'&&t.reads>=confirmAfter){t.status='confirmed';t.transaction_hash=t.chainHash}
+   return answer(200,view(t));
+  }
+  if(method==='GET'&&path==='/v1/transactions')return answer(200,{transactions:[...txs.values()].filter(t=>t.reference_id===u.searchParams.get('reference_id')).map(view)});
+  if(method==='GET'&&path===`/v1/users/${did}`)return answer(200,{id:did,linked_accounts:[
+   {type:'wallet',wallet_client_type:'privy',chain_type:'ethereum',address:BASE_WALLET,id:'wallet-base'},
+   {type:'wallet',wallet_client_type:'privy',chain_type:'solana',address:SOL_WALLET,id:'wallet-solana'}]});
+  if(method==='GET'&&(m=path.match(/^\/v1\/wallets\/(wallet-base|wallet-solana)$/))){
+   const ids=policyIds[m[1]==='wallet-base'?'base':'solana'];
+   return answer(200,{id:m[1],additional_signers:[{signer_id:quorum,override_policy_ids:ids==null?[]:[].concat(ids)}]});
+  }
+  return answer(404,{error:'not found'});
+ };
+ return p;
 }
 
 /**
@@ -126,8 +220,8 @@ export function fakeChain({balances,signer,adjust={},failReads=0}={}){
 export function fakeClock(start=Date.parse('2026-11-12T12:00:00.000Z')){let t=start;const now=()=>t;now.advance=ms=>{t+=ms};now.set=ms=>{t=ms};return now}
 
 /** An engine over an in-memory database with fakes for every external system. */
-export async function fakeEngine({env={YEET_LIVE:'1'},oneclick,signer,balances,chain,now=fakeClock(),onSettled,budgetMs,hooks}={}){
- const db=openTradeDb(':memory:');
+export async function fakeEngine({env={YEET_LIVE:'1'},oneclick,signer,balances,chain,now=fakeClock(),onSettled,budgetMs,hooks,db=openTradeDb(':memory:')}={}){
+ env={...FAKE_POLICY_ENV,...env};
  oneclick??=fakeOneClick();signer??=fakeSigner();balances??=fakeBalances();chain??=fakeChain({balances,signer});
  const engine=await createEngine({db,env,client:oneclick,signer,balances,chain,now,onSettled,trackerIntervalMs:0,budgetMs,hooks});
  return {engine,db,oneclick,signer,balances,chain,now};

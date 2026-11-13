@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fakeEngine} from './fakes.mjs';
-import {fakeSigner,fakeOneClick} from './fakes.mjs';
+import {fakeSigner,fakeOneClick,FAKE_POLICY_ENV} from './fakes.mjs';
 import {legIdempotencyKey} from './signer.mjs';
 
 const alice={accountId:'yeet-privy-alice',clientId:'https://chatgpt.com/oauth/client.json'};
@@ -100,7 +100,7 @@ test('fix 1: the Privy adapter marks only definite refusals as nothing-broadcast
 
 const until=async(fn,what)=>{for(let i=0;i<500;i++){if(fn())return;await new Promise(r=>setImmediate(r))}throw Error(`timed out waiting for ${what}`)};
 /** An engine that "dies" right after the commit (the send never starts), and a restarted engine on the same state. */
-async function crashAfterCommit({env={YEET_LIVE:'1'},signer:firstSigner}={}){
+async function crashAfterCommit({env={YEET_LIVE:'1',...FAKE_POLICY_ENV},signer:firstSigner}={}){
  const {createEngine}=await import('./engine.mjs');
  const first=await fakeEngine({signer:firstSigner,hooks:{afterCommit:()=>new Promise(()=>{})}});
  const p=await first.engine.propose(alice,basket);
