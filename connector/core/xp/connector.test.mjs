@@ -218,7 +218,7 @@ test('YEET_P2=1 end to end: home -> spin -> leaderboard, then a settled trade sh
  assert.equal(o.isError,undefined,JSON.stringify(o.content));
  const ov=o.structuredContent;
  assert.equal(ov.username,handle(alice.sub));assert.equal(ov.xp,total);assert.equal(ov.streak_days,1);assert.equal(ov.checkin_open,false);
- assert.match(ov.usdc,/^[0-9]+(\.[0-9]+)?$/);assert.equal(ov.usdc,fund.structuredContent.usdc,'one number, the same on both cards');assert.equal(ov.needs_card_sign_in,'unknown');assert.equal(ov.trading,'live');
+ assert.match(ov.usdc,/^[0-9]+(\.[0-9]+)?$/);assert.equal(ov.usdc,fund.structuredContent.usdc,'one number, the same on both cards');assert.equal('needs_card_sign_in' in ov,false);assert.equal(ov.trading,'live');
  assert.equal(ov.tier,total>=69?'Winner':'Noob');
  assert.ok(ov.suggestions.length>=3&&ov.suggestions.every(s=>s.label&&s.say));assert.ok(!ov.suggestions.some(s=>s.id==='checkin'),'the check-in was done today');
  assert.equal(ov.suggestions.at(-1).id,'others');

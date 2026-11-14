@@ -86,7 +86,7 @@ test('recovery: a hash-pending leg Privy reports failed or execution_reverted is
   [[0,legs[0].privy_tx_id,'execution_reverted',true,legs[0].amount_in_raw],[1,legs[1].privy_tx_id,'failed',true,legs[1].amount_in_raw]]);
  // Receipt: the failed legs read as not sent.
  const s=engine.status(alice,r.trade_id);
- assert.deepEqual(s.legs.map(l=>[l.status,l.refund_reason,l.origin_tx]),[['FAILED','Not sent: the transfer failed; funds still in your Base wallet',null],['FAILED','Not sent: the transfer failed; funds still in your Base wallet',null],['PENDING_DEPOSIT',null,legs[2].tx_hash]]);
+ assert.deepEqual(s.legs.map(l=>[l.status,l.refund_reason,l.origin_tx]),[['FAILED','Not sent: the transfer failed; funds still in your wallet',null],['FAILED','Not sent: the transfer failed; funds still in your wallet',null],['PENDING_DEPOSIT',null,legs[2].tx_hash]]);
  assert.equal(s.status,'partial');
  assert.deepEqual(oneclick.calls.submit.map(c=>c.txHash),[legs[2].tx_hash],'deposit/submit only for the leg that moved');
  // Never sent again, and further ticks change nothing.

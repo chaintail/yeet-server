@@ -26,7 +26,6 @@ export function destinationAmounts(legs){
  });
 }
 /** Where a trade's source funds sit: trades.origin_chain, else the legacy rule (YEET from Base, SKEET from Solana). */
-export const originWallet=t=>t.origin_chain==='sol'?'Solana':t.origin_chain==='base'?'Base':t.direction==='yeet'?'Base':'Solana';
 
 /** Contract networks of a trade: the wallet that pays it and the wallet its result lands in. A BUY is paid from
  * origin_chain and lands on Solana; a SELL is paid from Solana and lands where origin_chain says (the legacy rule for
@@ -212,7 +211,7 @@ export function createTracker({db,client,now=Date.now,onSettled=()=>{},intervalM
     return {symbol:l.symbol,status:moving?l.oneclick_status??'PENDING_DEPOSIT':'FAILED',
      amount_in:formatUnits(BigInt(l.amount_in_raw),q.origin.decimals),amount_out:out,origin_tx:l.send_status==='sent'?l.tx_hash??null:null,
      destination_tx:r?.destinationTxHashes?.[0]??null,
-     refund_reason:moving?(l.refund_reason?String(l.refund_reason).slice(0,200):null):`${l.send_status==='failed'?'Not sent: the transfer failed':'Not sent'}; funds still in your ${originWallet(t)} wallet`,
+     refund_reason:moving?(l.refund_reason?String(l.refund_reason).slice(0,200):null):`${l.send_status==='failed'?'Not sent: the transfer failed':'Not sent'}; funds still in your wallet`,
      _dest:q.destination.symbol};
    });
    return {trade_id:t.id,direction:t.direction,status:t.status,

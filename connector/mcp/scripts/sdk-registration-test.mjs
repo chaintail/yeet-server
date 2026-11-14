@@ -9,8 +9,8 @@ import {instructions} from '../instructions.mjs';
 import {COPY} from '../guidance.mjs';
 import {contract} from '../tool-contract.mjs';
 
-const LISTED=['apply_referral','execute_trade','skeet_propose','submit_trade_signature','trade_status','yeet_accept_terms','yeet_coins','yeet_fund','yeet_home','yeet_overview','yeet_portfolio','yeet_propose','yeet_quote','yeet_referral','yeet_terms','yeet_unlock'];
-const P2=['daily_spin','yeet_checkin','yeet_leaderboard','yeet_set_username','lucky_wheel','lucky_spin'];
+const LISTED=['apply_referral','execute_trade','skeet_propose','submit_trade_signature','trade_status','yeet_accept_terms','yeet_coins','yeet_fund','yeet_home','yeet_overview','yeet_portfolio','yeet_profile','yeet_propose','yeet_quote','yeet_referral','yeet_set_username','yeet_terms'];
+const P2=['daily_spin','yeet_checkin','yeet_leaderboard','lucky_wheel','lucky_spin'];
 delete process.env.YEET_P2;
 const coins={coins:[{symbol:'WIF',name:'dogwifhat',kind:'meme',price_usd:null}],limits:{min_leg_usdc:'3',max_trade_usdc:'25',max_legs:5,default_usdc:'20'}};
 const proposal={proposal_id:'p_abcdefghij0123456789',revision:1,direction:'yeet',amount_usdc:'20',legs:[{symbol:'WIF',parts:10,amount_in:'20',est_out:'7.1',est_out_usd:'19.4',min_out:'7'}],totals:{in_usd:'20',out_usd:'19.4',cost_pct:3,time_estimate_s:40},quoted_at:'2026-11-12T00:00:00Z',warnings:[],next:'⚡ YEET is ready in the card.'};
@@ -29,18 +29,18 @@ test('tools/list: P0 and P1 tools with the contract annotations, scopes, cards a
   assert.deepEqual(tools.map(t=>t.name).sort(),LISTED);
   for(const t of tools){assert.equal(t.outputSchema.type,'object');assert.equal(t.inputSchema.type,'object');assert.ok(t.title&&t.description)}
   const scope=n=>by[n]._meta.securitySchemes[0];
-  assert.deepEqual(Object.fromEntries(LISTED.map(n=>[n,scope(n).scopes[0]])),{apply_referral:'yeet:write',execute_trade:'yeet:prepare',skeet_propose:'yeet:write',submit_trade_signature:'yeet:prepare',trade_status:'yeet:read',yeet_accept_terms:'yeet:write',yeet_referral:'yeet:read',yeet_terms:'yeet:read',yeet_unlock:'yeet:read',yeet_coins:'yeet:read',yeet_fund:'yeet:read',yeet_home:'yeet:read',yeet_overview:'yeet:read',yeet_portfolio:'yeet:read',yeet_propose:'yeet:write',yeet_quote:'yeet:write'});
+  assert.deepEqual(Object.fromEntries(LISTED.map(n=>[n,scope(n).scopes[0]])),{apply_referral:'yeet:write',execute_trade:'yeet:prepare',skeet_propose:'yeet:write',submit_trade_signature:'yeet:prepare',trade_status:'yeet:read',yeet_accept_terms:'yeet:write',yeet_referral:'yeet:read',yeet_terms:'yeet:read',yeet_profile:'yeet:read',yeet_set_username:'yeet:write',yeet_coins:'yeet:read',yeet_fund:'yeet:read',yeet_home:'yeet:read',yeet_overview:'yeet:read',yeet_portfolio:'yeet:read',yeet_propose:'yeet:write',yeet_quote:'yeet:write'});
   for(const n of LISTED)assert.equal(scope(n).type,'oauth2');
   const readOnly={readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false};
   for(const n of ['yeet_fund','yeet_overview','yeet_home','yeet_coins','trade_status','yeet_portfolio'])assert.deepEqual(by[n].annotations,readOnly,n);
   for(const n of ['yeet_propose','yeet_quote','skeet_propose'])assert.deepEqual(by[n].annotations,{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},n);
   assert.deepEqual(by.execute_trade.annotations,{readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:true});
   const template=Object.fromEntries(tools.map(t=>[t.name,t._meta?.['openai/outputTemplate']]));
-  // The overview has no card (ChatGPT presents it itself); the device step has its own tool; the terms tools have none.
-  assert.deepEqual(template,{yeet_overview:undefined,yeet_unlock:OVERVIEW_UI_URI,yeet_terms:undefined,yeet_accept_terms:undefined,yeet_referral:'ui://yeet/referral-v1.html',apply_referral:'ui://yeet/referral-v1.html',yeet_home:HOME_UI_URI,yeet_coins:undefined,yeet_propose:BASKET_UI_URI,yeet_quote:BASKET_UI_URI,execute_trade:RECEIPT_UI_URI,trade_status:RECEIPT_UI_URI,yeet_portfolio:PORTFOLIO_UI_URI,yeet_fund:'ui://yeet/fund-v1.html',skeet_propose:BASKET_UI_URI,submit_trade_signature:RECEIPT_UI_URI});
+  // The overview shows the welcome card; no tool shows a device step; the terms and profile tools have no card.
+  assert.deepEqual(template,{yeet_overview:OVERVIEW_UI_URI,yeet_profile:undefined,yeet_set_username:undefined,yeet_terms:undefined,yeet_accept_terms:undefined,yeet_referral:'ui://yeet/referral-v1.html',apply_referral:'ui://yeet/referral-v1.html',yeet_home:HOME_UI_URI,yeet_coins:undefined,yeet_propose:BASKET_UI_URI,yeet_quote:BASKET_UI_URI,execute_trade:RECEIPT_UI_URI,trade_status:RECEIPT_UI_URI,yeet_portfolio:PORTFOLIO_UI_URI,yeet_fund:'ui://yeet/fund-v1.html',skeet_propose:BASKET_UI_URI,submit_trade_signature:RECEIPT_UI_URI});
   for(const t of tools)assert.equal(t._meta?.ui?.resourceUri,template[t.name]);
   const access=Object.fromEntries(tools.map(t=>[t.name,t._meta?.['openai/widgetAccessible']]));
-  assert.deepEqual(access,{yeet_overview:true,yeet_unlock:true,yeet_terms:false,yeet_accept_terms:false,yeet_referral:true,apply_referral:true,yeet_home:true,yeet_coins:false,yeet_propose:true,yeet_quote:true,execute_trade:true,submit_trade_signature:true,trade_status:true,yeet_portfolio:true,yeet_fund:true,skeet_propose:true});
+  assert.deepEqual(access,{yeet_overview:true,yeet_profile:false,yeet_set_username:false,yeet_terms:false,yeet_accept_terms:false,yeet_referral:true,apply_referral:true,yeet_home:true,yeet_coins:false,yeet_propose:true,yeet_quote:true,execute_trade:true,submit_trade_signature:true,trade_status:true,yeet_portfolio:true,yeet_fund:true,skeet_propose:true});
   // execute_trade is card-only: hidden from the model, callable by the app.
   assert.equal(by.execute_trade._meta['openai/visibility'],'private');
   assert.deepEqual(by.execute_trade._meta.ui.visibility,['app']);

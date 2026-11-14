@@ -1588,10 +1588,6 @@
             "paused"
           ]
         },
-        "needs_card_sign_in": {
-          "const": "unknown",
-          "description": "The server cannot see whether this device is signed in. The card checks, shows the sign-in when needed and reports back."
-        },
         "suggestions": {
           "type": "array",
           "minItems": 1,
@@ -1608,7 +1604,11 @@
                   "holdings",
                   "discover",
                   "fund",
-                  "others"
+                  "others",
+                  "username",
+                  "how",
+                  "hot",
+                  "yeet"
                 ]
               },
               "label": {
@@ -1671,7 +1671,6 @@
         "holdings_count",
         "top_winner",
         "trading",
-        "needs_card_sign_in",
         "suggestions"
       ],
       "additionalProperties": false
@@ -1702,7 +1701,7 @@
         "openWorldHint": false
       },
       "scope": "yeet:read",
-      "card": null,
+      "card": "overview",
       "visible": true,
       "widgetAccessible": true,
       "errors": [
@@ -1710,40 +1709,6 @@
         "REAUTH_REQUIRED",
         "TEMPORARILY_UNAVAILABLE",
         "WALLET_NOT_READY"
-      ]
-    },
-    "yeet_unlock": {
-      "priority": "P0",
-      "title": "Unlock your wallet",
-      "description": "Shows the one-time step that trusts this device for trading.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "card_build": {
-            "$ref": "#/$defs/card_build"
-          }
-        },
-        "required": [],
-        "additionalProperties": false
-      },
-      "outputSchema": {
-        "$ref": "#/$defs/overview"
-      },
-      "annotations": {
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      },
-      "scope": "yeet:read",
-      "card": "overview",
-      "visible": true,
-      "widgetAccessible": true,
-      "errors": [
-        "REAUTH_REQUIRED",
-        "TEMPORARILY_UNAVAILABLE",
-        "WALLET_NOT_READY",
-        "TERMS_REQUIRED"
       ]
     },
     "yeet_terms": {
@@ -3484,8 +3449,76 @@
         "TERMS_REQUIRED"
       ]
     },
+    "yeet_profile": {
+      "priority": "P1",
+      "title": "YEET profile",
+      "description": "Returns the person's YEET display name, XP, tier and streak.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          },
+          "xp": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "tier": {
+            "enum": [
+              "Noob",
+              "Winner",
+              "VIP"
+            ]
+          },
+          "streak_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "guidance": {
+            "$ref": "#/$defs/guidance"
+          }
+        },
+        "required": [
+          "username",
+          "xp",
+          "tier",
+          "streak_days"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "scope": "yeet:read",
+      "card": null,
+      "visible": true,
+      "widgetAccessible": false,
+      "errors": [
+        "REAUTH_REQUIRED",
+        "TEMPORARILY_UNAVAILABLE",
+        "WALLET_NOT_READY",
+        "TERMS_REQUIRED"
+      ]
+    },
     "yeet_set_username": {
-      "priority": "P2",
+      "priority": "P1",
       "title": "Set YEET username",
       "description": "Replaces the person's YEET display name.",
       "inputSchema": {
@@ -3534,9 +3567,9 @@
         "INVALID_ARGUMENT",
         "REAUTH_REQUIRED",
         "TEMPORARILY_UNAVAILABLE",
-        "USERNAME_TAKEN",
+        "TERMS_REQUIRED",
         "USERNAME_NOT_ALLOWED",
-        "TERMS_REQUIRED"
+        "USERNAME_TAKEN"
       ]
     },
     "lucky_wheel": {
@@ -3640,8 +3673,8 @@
   "x-yeet-cards": {
     "overview": {
       "uri": "ui://yeet/overview-v1.html",
-      "title": "Unlock your wallet",
-      "description": "The one-time step that unlocks the person’s wallet on this device: a 6-digit code to the account’s email. On a device that is already unlocked it is one line."
+      "title": "Welcome",
+      "description": "The welcome card: “Welcome back,” and the person’s name, large, with their USDC, XP and streak. The same for every account."
     },
     "home": {
       "uri": "ui://yeet/home-v1.html",

@@ -88,7 +88,7 @@ test('yeet_home: paused, wallet set-up, no USDC (with and without a spin), ready
 
 test('yeet_overview: offer the suggestions in order, never a coin; the lead follows the first suggestion; paused is said first',()=>{
  const S=(...ids)=>ids.map(id=>({id,label:'x',say:'y'}));
- const o=(suggestions,over={})=>({username:'Lucky Otter 42',usdc:'20',xp:5,tier:'Noob',streak_days:1,checkin_open:false,holdings_count:0,top_winner:null,trading:'live',needs_card_sign_in:'unknown',suggestions,...over});
+ const o=(suggestions,over={})=>({username:'Lucky Otter 42',usdc:'20',xp:5,tier:'Noob',streak_days:1,checkin_open:false,holdings_count:0,top_winner:null,trading:'live',suggestions,...over});
  const plain=g('yeet_overview',o(S('discover','holdings','fund')));
  rules('overview',plain);
  assert.match(plain,/^Welcome Lucky Otter 42 in one short line/);assert.match(plain,/YEET/);

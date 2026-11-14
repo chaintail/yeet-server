@@ -15,7 +15,7 @@ import {vendoredPin} from '../../core/version.mjs';
 import {allScopes} from '#scope-catalog';
 
 const OLD='a'.repeat(40);
-const overview={username:'Lucky Otter 42',usdc:'20',xp:5,tier:'Noob',streak_days:1,checkin_open:false,holdings_count:0,top_winner:null,trading:'live',needs_card_sign_in:'unknown',suggestions:[{id:'discover',label:'Discover a new coin to yeet',say:'Help me find a new coin to yeet'}]};
+const overview={username:'Lucky Otter 42',usdc:'20',xp:5,tier:'Noob',streak_days:1,checkin_open:false,holdings_count:0,top_winner:null,trading:'live',suggestions:[{id:'discover',label:'Discover a new coin to yeet',say:'Help me find a new coin to yeet'}]};
 const coins={coins:[],limits:{min_leg_usdc:'3',max_trade_usdc:'25',max_legs:5,default_usdc:'20'}};
 const board={rows:[],me:{rank:null,xp:0}};
 const status={trade_id:'t_abcdefghij0123456789',direction:'yeet',status:'settling',legs:[{symbol:'WIF',status:'PROCESSING',amount_in:'20',amount_out:null,origin_tx:null,destination_tx:null,refund_reason:null}],received:[],updated_at:'2026-11-12T00:00:05Z',xp_award:null};

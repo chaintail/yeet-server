@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {z} from 'zod';
-import {overview,suggestionsFor,totalUsdc,SUGGESTIONS} from './overview.mjs';
+import {overview,suggestionsFor,totalUsdc,SUGGESTIONS,welcomeSuggestions} from './overview.mjs';
 import {toolSchemas,zodSchema} from '../mcp/tool-contract.mjs';
 
 const out=zodSchema(z,toolSchemas.yeet_overview.output);
@@ -17,7 +17,11 @@ test('totalUsdc: one number over every network; null only when nothing could be 
 });
 
 test('suggestions: the owner’s five, ordered by state (no USDC: fund first; check-in open: check-in first)',()=>{
- assert.deepEqual(Object.values(SUGGESTIONS).map(s=>s.label),['Do your daily check-in','Review your meme holdings','Discover a new coin to yeet','Fund my account','See what other people are yeeting','Review and accept the YEET terms','Got a win code?']);
+ assert.deepEqual(Object.values(SUGGESTIONS).map(s=>s.label),['Do your daily check-in','Review your meme holdings','Discover a new coin to yeet','Fund my account','See what other people are yeeting','Review and accept the YEET terms','Got a win code?','Pick my username','How do I win?','What’s hot right now?','I know what I want to YEET']);
+ // Right after the terms: the username first unless they picked one, the three next steps, the daily spin while one waits.
+ assert.deepEqual(ids(welcomeSuggestions({named:false,checkinOpen:true})),['username','how','hot','yeet','checkin']);
+ assert.deepEqual(ids(welcomeSuggestions({named:true,checkinOpen:true})),['how','hot','yeet','checkin']);
+ assert.deepEqual(ids(welcomeSuggestions()),['username','how','hot','yeet']);
  // The terms come first while the current version is not accepted; then, once, the win code.
  assert.deepEqual(ids(suggestionsFor({usdc:'20',checkinOpen:true,holdings:2,termsDue:true,referralOpen:true})),['terms','checkin','holdings','discover','fund']);
  assert.deepEqual(ids(suggestionsFor({usdc:'20',checkinOpen:false,holdings:0,referralOpen:true})),['referral','discover','holdings','fund','others']);
@@ -33,7 +37,7 @@ test('overview: fits the contract; USDC is the sum; no address and no network na
  const v=overview({home:home(),bag,xp:xp(),winner:{symbol:'WIF',pct:25,since:'buy'},username:'Lucky Otter 42'});
  assert.doesNotThrow(()=>out.parse(v));
  assert.deepEqual(v,{username:'Lucky Otter 42',usdc:'20',xp:120,tier:'Winner',streak_days:4,checkin_open:true,holdings_count:1,top_winner:{symbol:'WIF',pct:25,since:'buy'},trading:'live',
-  needs_card_sign_in:'unknown',suggestions:[SUGGESTIONS.checkin,SUGGESTIONS.holdings,SUGGESTIONS.discover,SUGGESTIONS.fund,SUGGESTIONS.others]});
+  suggestions:[SUGGESTIONS.checkin,SUGGESTIONS.holdings,SUGGESTIONS.discover,SUGGESTIONS.fund,SUGGESTIONS.others]});
  assert.doesNotMatch(JSON.stringify(v),/0xaaaa|7x3qiZ|\bbase\b|solana/i);
 });
 

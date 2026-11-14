@@ -627,7 +627,7 @@ h1{margin:0}
 <symbol id="i-wheel" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M12 2.5v19M2.5 12h19M5.3 5.3l13.4 13.4M18.7 5.3 5.3 18.7" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" fill="currentColor"/></symbol>
 <symbol id="i-arrow" viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
 <symbol id="c-volt" viewBox="0 0 40 40"><circle cx="20" cy="20" r="19.5" fill="#E5FF3C"/><path d="M22.3 7 11 21.4h6.6L16 33l12.9-15.4h-6.8z" fill="#09071C"/><circle cx="20" cy="20" r="19" fill="none" stroke="#fff" stroke-opacity=".6" stroke-width="1.2"/></symbol>
-<symbol id="c-near" viewBox="0 0 40 40"><circle cx="20" cy="20" r="19.5" fill="#09071C" stroke="#E5FF3C" stroke-width="1.5"/><path d="M9 13q7 0 11 7M9 27q7 0 11-7M9 20h11" fill="none" stroke="#E5FF3C" stroke-width="2.6" stroke-linecap="round"/><path d="M20 20h8M25 16.5 29 20l-4 3.5" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="c-swap" viewBox="0 0 40 40"><circle cx="20" cy="20" r="19.5" fill="#09071C" stroke="#E5FF3C" stroke-width="1.5"/><path d="M9 13q7 0 11 7M9 27q7 0 11-7M9 20h11" fill="none" stroke="#E5FF3C" stroke-width="2.6" stroke-linecap="round"/><path d="M20 20h8M25 16.5 29 20l-4 3.5" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
 </defs></svg>
 <main id="root" aria-live="polite"></main>
 <script>(function yeetCard(window){
@@ -1399,14 +1399,12 @@ function signedFromWallet(req,answer){
 
 return {privyRpcBody,privyRpcBodies,checkBatch,reactSdkArgs,signedFromWallet,signedFromWallets};})());   // src/trade-signing.js over src/vendor/wallet-request.mjs
 const signerCfg={"app_id":null,"script":null,"page":null};  // {app_id,script,page}: build-time; a result's _meta['yeet/signer'] overrides
-const BUILD="41db35e2d4ccca0c4884fffd27a941dd7eda627a";     // the yeet-win commit this template was built from; null for a local build
+const BUILD="186816c143f1a2cb66377ab5298eaece8cb33482";     // the yeet-win commit this template was built from; null for a local build
 const APP={"manage_url":"https://chatgpt.com/plugins","refresh_label":"Refresh YEET in ChatGPT","refresh_steps":"open YEET there, select Refresh, then start a new chat"};         // {manage_url,refresh_label,refresh_steps}: where the person refreshes the app in ChatGPT
 const CONFIRM_KEY='yeet/confirm',SIGNER_KEY='yeet/signer',BUILD_KEY='yeet/build';
 const POLL_MS=5000,POLL_MAX=360,SKEW_MS=2000,MAX_PARTS=99,AMOUNT_MAX=25,MORE_USDC='5';
 const FINAL=new Set(['success','partial','refunded','failed']);
 const OWN_MESSAGE=new Set(['LIMIT_EXCEEDED','BALANCE_LOW']);
-const NET={base:'Base',solana:'Solana'};
-const netOf=(v,fallback)=>Object.hasOwn(NET,v)?NET[v]:fallback;
 const SYMBOL=/^[A-Z0-9]{2,12}$/,DECIMAL=/^-?(0|[1-9][0-9]*)(\.[0-9]+)?$/;
 const PROPOSAL_ID=/^p_[a-z0-9]{20}$/,TRADE_ID=/^t_[a-z0-9]{20}$/,CODE=/^[A-Za-z0-9_-]{43}$/;
 const EVM_TX=/^0x[0-9a-fA-F]{64}$/,SOL_TX=/^[1-9A-HJ-NP-Za-km-z]{43,90}$/;
@@ -1483,7 +1481,7 @@ async function sameAccount(s,u){
  if(account.wallets.length&&typeof s?.wallets==='function'){try{const w=(await s.wallets()).map(x=>String(x?.address??'').toLowerCase()).filter(Boolean);if(w.length&&!w.some(a=>account.wallets.includes(a)))return false}catch{/* the user id decided */}}
  return true;
 }
-const otherAccount=()=>`This device was unlocked with a different YEET account. Use ${account?.masked??'the email of your YEET account'}.`;
+const otherAccount=()=>`That is a different YEET account than the one in your ChatGPT. Use ${account?.masked??'the email of your YEET account'}, or trade on the YEET page.`;
 function markTerms(t){
  const first=!termsDue,page=t?.mode==='page'&&typeof t?.page_url==='string';
  termsDue={mode:page?'page':'chat',page_url:page?t.page_url:null};
@@ -1634,7 +1632,6 @@ function show(data,meta){
  if(kind!=='basket')back=null;
  if(kind!==current?.kind){shareOpen=false;shareSay=null}
  current={kind:kind??'error',data:kind?data:{error:'TEMPORARILY_UNAVAILABLE'}};
- if(kind==='overview')checkDevice();
  render();
 }
 function receive(structured,meta,isError,raw){
@@ -1695,7 +1692,7 @@ const REFUSED={COST_TOO_HIGH:`The trade was stopped before anything was sent, be
  inline:`The card could not send the trade from this window. ${SAFE}`,page_timeout:'The trade was not finished on the YEET page in time. Check its status before a retry.',
  wallet:`This device is signed in with another account than their YEET account, so the trade was not sent. ${SAFE}`,
  page_cancelled:`They stopped the trade before finishing it on the YEET page. ${SAFE} The unfinished trade closes by itself within 10 minutes; a retry needs a fresh quote.`};
-const PAGE_TOLD='wallet_unlocked: false. Their YEET account uses Google or Apple, so this trade finishes on the YEET page the card opened: they confirm it is them there and press and hold. The card follows it and reports the result.';
+const PAGE_TOLD='Their YEET account uses Google or Apple, so this trade finishes on the YEET page the card opened: they confirm it is them there and press and hold. The card follows it and reports the result.';
 let activeRun=null;        // the signing machine of the trade this card is running (poke on return, cancel of the hand-off)
 function tellRefused(key,code,message){
  const own=OWN_MESSAGE.has(code)&&typeof message==='string'&&message?` ${message.slice(0,300)}`:'';
@@ -1779,8 +1776,8 @@ async function signinCode(){
  try{const u=await g.s.login(g.email,code);
   if(!(await sameAccount(g.s,u))){try{await g.s.logout?.()}catch{/* the session is not used either way */}
    g.stage='email';g.code='';g.error=otherAccount();g.wait=false;
-   tell('signin','mismatch','wallet_unlocked: false. This device was unlocked with a different YEET account than the one connected to ChatGPT. The card logged it out and asks for the connected account.');render();return}
-  signin=null;if(!g.fixed){note='This device is trusted. Trading is unlocked in ChatGPT.';tell('signin','unlocked-trade','wallet_unlocked: true. This device is now trusted: the person confirmed it with the emailed code, trading is unlocked in ChatGPT and their trade is continuing.')}g.resolve();return}
+   tell('signin','mismatch','device_trusted: false. The code was for a different YEET account than the one connected to ChatGPT. The card dropped that session and asks for the connected account, or the YEET page.');render();return}
+  signin=null;note='This device is trusted. Your trade is on its way.';tell('signin','unlocked-trade','device_trusted: true. The person added this device to their trusted devices with the emailed code, and their trade is continuing in the card.');g.resolve();return}
  catch{g.error='That didn’t work. Check the code, or use a different email.'}
  g.wait=false;render();
 }
@@ -1791,33 +1788,42 @@ const backInChat=()=>{if(!document.hidden)activeRun?.poke()};
 document.addEventListener('visibilitychange',backInChat);window.addEventListener('focus',backInChat);
 async function reopenPage(url){try{await openPage(url)}catch{try{await openLink(url)}catch{note='The YEET page couldn’t open here.';render()}}}
 const HINT='place'+'holder';   // the input's hint attribute
-const DEVICE_CHECK='For your security, confirm this device once.';
+/** How the person would name what they hold: the host says the device type (window.openai.userAgent.device.type). */
+function thisSurface(){
+ const t=window.openai?.userAgent?.device?.type;
+ return t==='mobile'?'This phone':t==='tablet'?'This tablet':t==='desktop'?'This computer':'This ChatGPT';
+}
+/** The trusted-devices step, only ever at a YEET or SKEET press: one question, one button, one code. The YEET page is
+ *  always offered beside it, so nothing here says "not yet" without a button that gets the trade done. */
 function signinBox(){
  const g=signin,b=mark(el('div','signin'),`signin:${g.stage}`);b.dataset.role='signin';
  const code=g.stage==='code',known=!!account?.email,shown=known?(account.masked??'your email'):g.email;
  if(known)g.email=account.email;
- const title=g.fixed?'Unlock your wallet':'Trust this device';
- if(!code&&account&&!known){b.append(el('strong',null,title),mark(el('p','next','Nothing to do here. Your trades open secure trading on the YEET page, and you can trust this device there.'),'no-email'));return b}
- b.append(el('strong',null,title));
- b.append(mark(el('p','next',code?(g.fixed?`We emailed a 6-digit code to ${shown}.`:`Enter the code we emailed to ${shown}.`):known?(g.fixed?`We email a 6-digit code to ${shown}.`:`${DEVICE_CHECK} We’ll email a code to ${shown}.`):(g.fixed?'':`${DEVICE_CHECK} `)+'Type the email of your YEET account and we email you a 6-digit code.'),'unlock-lead'));
- if(!code&&known){const go=button('ink sm',g.wait?'Sending…':'Email me a code',signinSend);go.disabled=g.wait;go.dataset.role='signin-send';const row=el('div','signin-row');row.append(go);b.append(row);
-  if(g.error){const e=el('p','reason',g.error);e.setAttribute('role','alert');b.append(e)}
-  if(!g.fixed){const acts=el('div','acts-row'),x=button('ghost xs','Cancel',signinCancel);x.dataset.role='signin-cancel';acts.append(x);b.append(acts)}
-  return b}
- const f=el('input');f.id=code?'yc-unlock-code':'yc-unlock-email';
- const lab=el('label','signin-label',code?(g.fixed?'6-digit code from your email':'Enter the 6-digit code'):'Your email');lab.htmlFor=f.id;b.append(lab);
+ const offer=`${thisSurface()} isn’t on your trusted devices yet.`;
+ const acts=el('div','acts-row');
+ const page=()=>{if(signerCfg.page){const o=button('ghost xs','Trade on the YEET page instead',signinPage);o.dataset.role='signin-other';acts.append(o)}};
+ const cancel=()=>{const x=button('ghost xs','Cancel',signinCancel);x.dataset.role='signin-cancel';acts.append(x)};
+ const fail=()=>{if(g.error){const e=el('p','reason',g.error);e.setAttribute('role','alert');b.append(e)}};
+ b.append(el('strong',null,'Trusted devices'));
+ if(!code&&account&&!known){
+  b.append(mark(el('p','next',`${offer} Trade on the YEET page, and add it there.`),'no-email'));
+  if(signerCfg.page){const go=button('ink sm','Open the YEET page',signinPage);go.dataset.role='signin-page';const row=el('div','signin-row');row.append(go);b.append(row)}
+  cancel();b.append(acts);return b}
+ b.append(mark(el('p','next',code?`Enter the code we emailed to ${shown}.`:known?`${offer} Add it to trade right in the chat?`:`${offer} Add it with the email of your YEET account.`),'unlock-lead'));
+ if(!code&&known){
+  const go=button('ink sm',g.wait?'Sending…':'Add this device',signinSend);go.disabled=g.wait;go.dataset.role='signin-send';const row=el('div','signin-row');row.append(go);b.append(row);
+  fail();page();cancel();b.append(acts);return b}
+ const f=el('input');f.id=code?'yc-device-code':'yc-device-email';
+ const lab=el('label','signin-label',code?'6-digit code':'Your email');lab.htmlFor=f.id;b.append(lab);
  if(code){f.type='text';f.inputMode='numeric';f.maxLength=6;f.autocomplete='one-time-code';f.setAttribute(HINT,'123456');f.value=g.code;f.oninput=()=>{g.code=f.value}}
  else{f.type='email';f.inputMode='email';f.autocomplete='email';f.setAttribute(HINT,'you@example.com');f.value=g.email;f.oninput=()=>{g.email=f.value}}
  f.dataset.role=code?'signin-code':'signin-email';f.disabled=g.wait;
  f.onkeydown=e=>{if(e.key==='Enter')code?signinCode():signinSend()};
- const go=button('ink sm',g.wait?(code?'Unlocking…':'Sending…'):(code?'Unlock':'Email me a code'),code?signinCode:signinSend);go.disabled=g.wait;go.dataset.role=code?'signin-go':'signin-send';
+ const go=button('ink sm',g.wait?(code?'Checking…':'Sending…'):(code?'Trust this device':'Email me a code'),code?signinCode:signinSend);go.disabled=g.wait;go.dataset.role=code?'signin-go':'signin-send';
  const row=el('div','signin-row');row.append(f,go);b.append(row);
- if(g.error){const e=el('p','reason',g.error);e.setAttribute('role','alert');b.append(e)}
- const acts=el('div','acts-row');
+ fail();
  if(code){const again=button('ghost xs','Send again',async()=>{if(g.wait)return;g.wait=true;g.error=null;render();try{await g.s.sendCode(g.email);note='We sent a new code.'}catch{g.error='The code couldn’t be sent. Try again.'}g.wait=false;render()});again.dataset.role='signin-again';again.disabled=g.wait;acts.append(again)}
- if(!code&&!known&&!g.fixed&&signerCfg.page){const o=button('ghost xs','I use Google or Apple',signinPage);o.dataset.role='signin-other';acts.append(o)}
- if(!g.fixed){const x=button('ghost xs','Cancel',signinCancel);x.dataset.role='signin-cancel';acts.append(x)}
- if(acts.childElementCount)b.append(acts);
+ page();cancel();b.append(acts);
  return b;
 }
 async function requestQuote(args){
@@ -2021,7 +2027,6 @@ function pct(n){return typeof n==='number'&&Number.isFinite(n)?`${n.toFixed(n<10
 /** The buy caps of the person's XP tier, quietly: "Winner · $320.00 left today". Sells are never capped. */
 const TIERS=new Set(['Noob','Winner','VIP']);
 function limitsLine(l){const left=money(l?.left_today_usdc);return l&&TIERS.has(l.tier)&&left?`${l.tier} · ${left} left today`:null}
-function shortAddr(a){return typeof a==='string'&&a.length>12?`${a.slice(0,6)}…${a.slice(-4)}`:a??''}
 function clock(iso){const t=new Date(iso);return Number.isFinite(t.getTime())?new Intl.DateTimeFormat('en-US',{hour:'numeric',minute:'2-digit'}).format(t):null}
 function safeSymbol(s){return typeof s==='string'&&SYMBOL.test(s)?s:null}
 function coinName(s){return s&&Object.hasOwn(COINS,s)?COINS[s]:null}
@@ -2210,16 +2215,17 @@ function sharePanel(scene){
 }
 
 const WARN={COST_HIGH:'Cost is above 3%',LEG_SMALL:'One coin is near the minimum',BALANCE_LOW:'Not enough funds yet',SIGNER_MISSING:'Wallet needs set-up'};
-/** Marlin's route: USDC on its network (`usdcNet`: Base or Solana), through NEAR Intents, to Solana (the other way for a SKEET). The dashes run while a trade runs. */
-function route(direction,symbols,state,usdcNet='Base'){
+/** Marlin's route: USDC, the swap, the coins (the other way for a SKEET). No network and no wallet is named: the middle
+ *  says how far the trade is (`say`: Quote, On its way, Swapping, Landed, Refunded ...). The dashes run while a trade runs. */
+function route(direction,symbols,state,say){
  const skeet=direction==='skeet';const box=mark(el('div','route'),'route');box.dataset.state=state;box.dataset.direction=skeet?'skeet':'yeet';
- const n=symbols.length;box.setAttribute('aria-label',skeet?`${n===1?symbols[0]:`${n} coins`} on Solana, through NEAR Intents, to USDC on ${usdcNet}`:`USDC on ${usdcNet}, through NEAR Intents, to ${n===1?symbols[0]:`${n} coins`} on Solana`);
+ const n=symbols.length,what=n===1?symbols[0]:`${n} coins`;box.setAttribute('aria-label',`${skeet?`${what} to USDC`:`USDC to ${what}`}: ${say}`);
  const node=(ic,title,sub)=>{const d=el('div','node');d.append(ic,el('b',null,title),document.createTextNode(sub));return d};
  const logo=sym=>{const i=el('i','cvi');i.append(cv(sym));return i};
  const wire=()=>{const w=el('div','wire');w.append(el('i'));return w};
- const near=el('i');near.append(use('c-near'));
- const usdc=()=>node(logo('USDC'),'USDC',usdcNet),coins=()=>node(logo('SOL'),n===1?symbols[0]:`${n} coins`,'Solana');
- box.append(skeet?coins():usdc(),wire(),node(near,'NEAR','Intents'),wire(),skeet?usdc():coins());
+ const swap=el('i');swap.append(use('c-swap'));const mid=node(swap,'Swap',say);
+ const usdc=()=>node(logo('USDC'),'USDC',skeet?'You get':'You pay'),coins=()=>node(logo(symbols[0]),what,skeet?'You sell':'You get');
+ box.append(skeet?coins():usdc(),wire(),mid,wire(),skeet?usdc():coins());
  return box;
 }
 const landsIn=s=>Number.isInteger(s)&&s>=240?`About ${Math.round(s/60)} minutes`:'Usually 2 to 3 minutes';
@@ -2231,7 +2237,7 @@ function renderBasket(p){
  const traded=rows.filter((r,i)=>skeet||parts[i]>0).map(r=>r.sym).filter(Boolean);
  const sum=parts.reduce((a,b)=>a+b,0),amt=amountOf(p),shares=skeet?null:split(micro(amt),parts);
  const ests=skeet?null:estimates(p,parts);
- const c=card('basket',skeet?'SKEET to USDC':'Your basket',skeet?'Solana → USDC':'USDC → Solana');c.dataset.direction=skeet?'skeet':'yeet';
+ const c=card('basket',skeet?'SKEET to USDC':'Your basket',skeet?'Coins → USDC':'USDC → coins');c.dataset.direction=skeet?'skeet':'yeet';
  const ui={rows:[],gets:null,pay:null,total:null,trade:null,note:null,field:null,chips:[],bounds:null,mins:null};
  if(!skeet){
   const b=amountBounds(p,parts),cur=Number(amt)||0;ui.bounds=b;
@@ -2274,7 +2280,7 @@ function renderBasket(p){
  if(warns.length){const box=mark(el('div','chips'),'warns');for(const w of warns)box.append(el('span','chip plain',WARN[w]));c.append(box)}
  if(hold){const h=alertBox(hold.title,hold.text,'hold');h.dataset.role='hold';c.append(h)}
  else if(inlineError){const e=ERRORS[inlineError]||ERRORS.TEMPORARILY_UNAVAILABLE;c.append(alertBox(e[0],OWN_MESSAGE.has(inlineError)&&inlineMessage?inlineMessage.slice(0,500):e[1],'problem'))}
- c.append(route(p.direction,traded,busy?'run':'idle',skeet?netOf(p.lands_on,'Base'):p.funding?netOf(p.funding.chosen,'Base or Solana'):'Base'));
+ c.append(route(p.direction,traded,busy?'run':'idle',busy?'On its way':'Quote'));
  const kv=mark(el('dl','kv'),'kv');
  if(skeet){
   const sells=el('dd','gets');for(const r of rows)if(r.sym)sells.append(num(null,`${amount(r.leg.amount_in)??'—'} ${r.sym}`));
@@ -2322,8 +2328,10 @@ function renderBasket(p){
 }
 const TRADE_TITLE={signing:'Sending',submitted:'Sent',settling:'Swapping',success:'YEETED.',partial:'Partly done',refunded:'Refunded',failed:'Didn’t go through',requote_required:'Price moved'};
 /** Where a leg's funds are at each status: [YEET, SKEET]. FAILED has no line; the refund reason covers it. */
-const FUNDS_AT={not_sent:['still in your {from} wallet','still in your {from} wallet'],sent:['on the way to the 1Click deposit address','on the way to the 1Click deposit address'],PENDING_DEPOSIT:['on the way to the 1Click deposit address','on the way to the 1Click deposit address'],KNOWN_DEPOSIT_TX:['at the 1Click deposit address','at the 1Click deposit address'],INCOMPLETE_DEPOSIT:['at the 1Click deposit address, short of the quote','at the 1Click deposit address, short of the quote'],PROCESSING:['being swapped on NEAR Intents','being swapped on NEAR Intents'],SUCCESS:['in your {to} wallet','in your {to} wallet'],REFUNDED:['refunded to your {from} wallet','refunded to your {from} wallet']};
+const FUNDS_AT={not_sent:['still in your wallet','still in your wallet'],sent:['on the way to the 1Click deposit address','on the way to the 1Click deposit address'],PENDING_DEPOSIT:['on the way to the 1Click deposit address','on the way to the 1Click deposit address'],KNOWN_DEPOSIT_TX:['at the 1Click deposit address','at the 1Click deposit address'],INCOMPLETE_DEPOSIT:['at the 1Click deposit address, short of the quote','at the 1Click deposit address, short of the quote'],PROCESSING:['being swapped','being swapped'],SUCCESS:['in your wallet','in your wallet'],REFUNDED:['refunded to your wallet','refunded to your wallet']};
 const ROUTE_STATE={success:'done',partial:'done',refunded:'off',failed:'off'};
+/** The route's middle word for a trade, in the words of the per-coin rows. */
+const ROUTE_SAY={signing:'On its way',submitted:'On its way',settling:'Swapping',success:'Landed',partial:'Done',refunded:'Refunded',failed:'Stopped',requote_required:'Price moved'};
 const SETTLE_MS=240000;
 /** One coin, in the person's words: [label, tone, state]. From trade_status legs[i].status (1Click) and, while this card
  *  runs the trade, the send_status submit_trade_signature answered for leg i. state: sign, send, sent, swap, done, refunded, failed. */
@@ -2359,7 +2367,7 @@ function legRows(t){
   const links=el('span','links');if(u1)links.append(link('Deposit',u1));if(u2)links.append(link('Swap',u2));if(links.childElementCount)right.append(links);
   r.append(right);
   const key=at==='sign'||at==='send'||(at==='failed'&&l.status!=='FAILED')?'not_sent':l.status;
-  const where=Object.hasOwn(FUNDS_AT,key)?FUNDS_AT[key][skeet?1:0].replace('{from}',skeet?'Solana':netOf(t.funded_from,'Base')).replace('{to}',skeet?netOf(t.lands_on,'Base'):'Solana'):null;
+  const where=Object.hasOwn(FUNDS_AT,key)?FUNDS_AT[key][skeet?1:0]:null;
   if(where)r.append(mark(el('p','where',`Funds ${where}`),`where:${sym}`,true));
   if(typeof l.refund_reason==='string'&&l.refund_reason)r.append(el('p','reason',l.refund_reason.slice(0,200)));
   list.append(r);
@@ -2382,7 +2390,7 @@ function paintSettle(u){
  if(!u)return;const ms=(u.since.to??now())-u.since.from;
  u.meta.textContent=`${u.n} of ${u.total} landed · ${mmss(ms)}`;
  if(u.bar)u.bar.style.transform=`scaleX(${(0.04+0.92*Math.min(1,ms/SETTLE_MS)).toFixed(3)})`;
- if(u.say)u.say.textContent=u.page?'Finish on the YEET page, then come back here.':ms<SETTLE_MS?'Each coin is its own swap on NEAR Intents. Usually 2 to 3 minutes.':'Taking longer than usual. It keeps going, and this card follows it.';
+ if(u.say)u.say.textContent=u.page?'Finish on the YEET page, then come back here.':ms<SETTLE_MS?'Each coin is its own swap. Usually 2 to 3 minutes.':'Taking longer than usual. It keeps going, and this card follows it.';
 }
 function renderReceipt(t){
  const skeet=t.direction==='skeet';const final=FINAL.has(t.status);const legs=Array.isArray(t.legs)?t.legs.slice(0,5):[];
@@ -2393,7 +2401,7 @@ function renderReceipt(t){
  const mine=trading?.trade_id===t.trade_id?trading:null;
  let c;settleUi=null;
  if(t.status==='success'){
-  const when=clock(t.updated_at);c=card('receipt done',null,`Landed on ${skeet?netOf(t.lands_on,'Base'):'Solana'}${when?` · ${when}`:''}`);c.querySelector('.meta').style.marginLeft='0';
+  const when=clock(t.updated_at);c=card('receipt done',null,`Landed${when?` · ${when}`:''}`);c.querySelector('.meta').style.marginLeft='0';
   const h=mark(el('div','done-h'),'done',true);h.append(el('span','shim',skeet?'SKEETED.':'YEETED.'));c.append(h);
   const coins=el('div','done-coins go');coins.setAttribute('aria-hidden','true');
   (skeet?['USDC']:got.map(r=>r.symbol)).slice(0,6).forEach((s,i)=>{const sp=el('span');sp.style.animationDelay=`${(i*.08).toFixed(2)}s`;sp.append(cv(s));coins.append(sp)});
@@ -2417,7 +2425,7 @@ function renderReceipt(t){
     const x=button('ghost xs','Cancel',()=>activeRun?.cancelPage());x.dataset.role='page-cancel';
     acts.append(a,x);box.append(acts);c.append(box)}
   }
-  if(syms.length)c.append(route(t.direction,syms,stopped?'off':ROUTE_STATE[t.status]??'run',skeet?netOf(t.lands_on,'Base'):netOf(t.funded_from,'Base')));
+  if(syms.length)c.append(route(t.direction,syms,stopped?'off':ROUTE_STATE[t.status]??'run',stopped?'Stopped':page?'Waiting':ROUTE_SAY[t.status]??'On its way'));
   if(legs.length)c.append(legRows(t));
   if(settleUi)c.append(settleUi.say);
   if(got.length){const kv=mark(el('dl','kv'),'got');kv.style.marginTop='12px';const g=el('dd','gets');for(const r of got)g.append(el('span','num',`${amount(r.amount)} ${r.symbol}`));const d=el('div');d.append(el('dt',null,'You got'),g);kv.append(d);c.append(kv)}

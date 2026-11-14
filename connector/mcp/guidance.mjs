@@ -7,7 +7,7 @@ const APP=contract['x-yeet-app'];
 export const COPY=Object.freeze({
 
  terms:{
-  due_chat:"YEET terms.due_chat.",
+  due_chat:"YEET terms.due_chat: {url}.",
   due_page:"YEET terms.due_page.",
   missing:"YEET terms.missing.",
   version:"YEET terms.version.",
@@ -19,14 +19,11 @@ export const COPY=Object.freeze({
   applied:"YEET referral.applied: {code}.",
   skipped:"YEET referral.skipped.",
  },
- yeet_unlock:{
-  card:"YEET yeet_unlock.card.",
- },
 
  yeet_overview:{
   base:"YEET yeet_overview.base: {username} {lead}.",
 
-  terms_chat:"YEET yeet_overview.terms_chat: {username}.",
+  terms_chat:"YEET yeet_overview.terms_chat: {username} {url}.",
   terms_page:"YEET yeet_overview.terms_page: {username}.",
   lead_referral:", YEET yeet_overview.lead_referral.",
   lead_none:" YEET yeet_overview.lead_none.",
@@ -132,6 +129,7 @@ export const COPY=Object.freeze({
  },
  yeet_set_username:{
   set:"YEET yeet_set_username.set: {username}.",
+  profile:"YEET yeet_set_username.profile.",
  },
 
  lucky:{
@@ -261,7 +259,7 @@ function lucky(r){
 }
 function overviewGuidance(r){
  const c=COPY.yeet_overview,first=r.suggestions?.[0]?.id;
- if(r.terms&&r.terms.accepted===false)return fill(r.terms.mode==='page'?c.terms_page:c.terms_chat,{username:r.username});
+ if(r.terms&&r.terms.accepted===false)return fill(r.terms.mode==='page'?c.terms_page:c.terms_chat,{username:r.username,url:APP.manage_url});
  const lead=r.trading==='paused'?c.lead_paused:first==='referral'?c.lead_referral:first==='fund'?c.lead_fund:first==='checkin'?c.lead_checkin:c.lead_none;
  return fill(c.base,{username:r.username,lead});
 }
@@ -270,11 +268,10 @@ export function termsGuidance(terms,reason){
  const c=COPY.terms;
  if(reason==='missing')return c.missing;
  if(reason==='version')return terms?.mode==='page'?c.due_page:c.version;
- return terms?.mode==='page'?c.due_page:c.due_chat;
+ return terms?.mode==='page'?c.due_page:fill(c.due_chat,{url:APP.manage_url});
 }
 const BY_TOOL={
  yeet_overview:overviewGuidance,
- yeet_unlock:()=>COPY.yeet_unlock.card,
  yeet_terms:r=>r.terms?.accepted?COPY.terms.accepted:termsGuidance(r.terms),
  yeet_accept_terms:()=>COPY.terms.recorded,
  yeet_referral:r=>r.status==='applied'?fill(COPY.referral.applied,{code:r.code}):r.status==='skipped'?COPY.referral.skipped:COPY.referral.open,
@@ -295,6 +292,7 @@ const BY_TOOL={
  yeet_checkin:r=>{const c=r.checkin??{},left=Number.isInteger(c.spins_available)?c.spins_available:c.spin_available?1:0;return left>0?COPY.yeet_checkin.open:fill(COPY.yeet_checkin.done,{days:c.streak_days,s:plural(c.streak_days)})},
  daily_spin:spin,
  yeet_set_username:r=>fill(COPY.yeet_set_username.set,{username:r.username}),
+ yeet_profile:()=>COPY.yeet_set_username.profile,
  lucky_wheel:lucky,lucky_spin:lucky,
 };
 export const GUIDED_TOOLS=Object.freeze(Object.keys(BY_TOOL));
@@ -313,6 +311,6 @@ export function refusalGuidance(code,message,ctx,{terms,reason}={}){
   return fill(tier?e[`LIMIT_EXCEEDED_${tier}`]:e.LIMIT_EXCEEDED,TIER_XP);
  }
  if(code==='TRADING_PAUSED'&&!hasWheel(ctx))return e.TRADING_PAUSED_no_wheel;
- if(code==='BALANCE_LOW'&&typeof message==='string'&&/USDC on Base/.test(message)&&/Solana/.test(message))return e.BALANCE_LOW_usdc;
+ if(code==='BALANCE_LOW'&&typeof message==='string'&&/you can trade up to/.test(message))return e.BALANCE_LOW_usdc;
  return e[code];
 }

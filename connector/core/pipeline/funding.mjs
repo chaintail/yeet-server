@@ -32,14 +32,14 @@ export function forcedBuyChain(env){
 }
 export const chainPaused=(env,chain)=>TRUE.includes(String((chain==='sol'?env.YEET_SOLANA_PAUSE:env.YEET_BASE_PAUSE)??'').toLowerCase());
 
-/** The BALANCE_LOW sentence for a basket no single network covers. Balances are raw USDC (6 decimals) or null. */
+/** The BALANCE_LOW sentence for a basket no single network covers. Balances are raw USDC (6 decimals) or null. A card
+ * prints it verbatim, so it names no network: one number, the most a single basket can spend right now (the largest
+ * balance that could be read on a network that is open), or that the balance could not be read. */
 export function balanceLowMessage({total,base,sol,open}){
- const part=(chain,raw)=>raw===null?`your ${NETWORK_NAME[chain]} balance could not be read just now`:`you have ${dollars(raw)} USDC on ${NETWORK_NAME[chain]}`;
- const closed=CHAINS.filter(c=>!open.includes(c)).map(c=>NETWORK_NAME[c]);
- return [`Not enough USDC for this ${dollars(total)} basket: ${part('base',base)} and ${part('sol',sol)}.`,
-  'One network has to cover the whole basket.',
-  closed.length?`${closed.join(' and ')} is not available right now.`:'',
-  'Add funds, or lower the amount.'].filter(Boolean).join(' ').slice(0,500);
+ const usable=[['base',base],['sol',sol]].filter(([c,raw])=>open.includes(c)&&raw!==null).map(([,raw])=>BigInt(raw));
+ const most=usable.length?usable.reduce((a,b)=>b>a?b:a):null;
+ return [`Not enough USDC for this ${dollars(total)} basket: ${most===null?'your balance could not be read just now':`you can trade up to ${dollars(most)} right now`}.`,
+  'Add funds, or lower the amount.'].join(' ').slice(0,500);
 }
 
 export function createFunding({env,wallets,drivers,catalog,now=Date.now,ttlMs=BALANCE_TTL_MS}){

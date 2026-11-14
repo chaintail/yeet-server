@@ -14,7 +14,7 @@ import {z} from 'zod';
 import {toolSchemas,zodSchema,contract} from '../mcp/tool-contract.mjs';
 import {homeWithFundUrl,failureWithFundUrl,fundAnswer} from './fund-link.mjs';
 import {versionInfo} from './version.mjs';
-import {overview,totalUsdc} from './overview.mjs';
+import {overview,totalUsdc,welcomeSuggestions} from './overview.mjs';
 import {winnerOf} from './trade/pnl.mjs';
 import {boardAnswer} from './xp/boards.mjs';
 import {TERMS_VERSION,termsObject,checkAcceptance,termsOpen} from './terms.mjs';
@@ -183,6 +183,8 @@ app.post('/terms/accept',async(q,r)=>{
  // The overview, so the conversation continues; null when it cannot be read just now (the acceptance stands).
  let view=null;
  try{view=await overviewFor(await tradeEngine(),{accountId:q.subject,clientId:q.principal.client})}catch(e){console.error(JSON.stringify({event:'terms_overview_failed',error:String(e?.message??e).slice(0,200)}))}
+ // The first thing after the terms: the name, then what to do next (overview.mjs welcomeSuggestions).
+ if(view)view={...view,suggestions:welcomeSuggestions({named:!!usernameOf(q.subject),checkinOpen:view.checkin_open===true})};
  r.json({terms,overview:view});
 });
 // The win code (yeet_referral and the card-only apply_referral): the rule of the connect screen it came from.

@@ -175,7 +175,7 @@ export function createTracker({db,client,now=Date.now,onSettled=()=>{},intervalM
     return {symbol:l.symbol,status:moving?l.oneclick_status??'PENDING_DEPOSIT':'FAILED',
      amount_in:formatUnits(BigInt(l.amount_in_raw),q.origin.decimals),amount_out:out,origin_tx:l.tx_hash??null,
      destination_tx:r?.destinationTxHashes?.[0]??null,
-     refund_reason:moving?(l.refund_reason?String(l.refund_reason).slice(0,200):null):`${l.send_status==='failed'?'Not sent: the transfer failed':'Not sent'}; funds still in your ${t.direction==='yeet'?'Base':'Solana'} wallet`,
+     refund_reason:moving?(l.refund_reason?String(l.refund_reason).slice(0,200):null):`${l.send_status==='failed'?'Not sent: the transfer failed':'Not sent'}; funds still in your wallet`,
      _dest:q.destination.symbol};
    });
    return {trade_id:t.id,direction:t.direction,status:t.status,

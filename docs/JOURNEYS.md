@@ -24,7 +24,7 @@ Rules the model gets (server instructions and each result's `guidance`, `connect
 `connector/core/overview.mjs`. Structured result: `username`; `usdc` (every network added up, one number; null when
 nothing could be read); `xp`, `tier`, `streak_days`; `checkin_open`; `holdings_count`; `top_winner` (the held coin that
 is up the most against the person's own average YEET price, `since: "buy"`, or null); `trading` (`live` | `paused`);
-`needs_card_sign_in: "unknown"` (the server cannot see the device; the card checks and reports); `suggestions`
+no device or sign-in state at all (nothing before a trade mentions it); `suggestions`
 (`id`, `label`, `say`); `app_refresh` when the app is stale. No wallet and no network. The text block is one line with
 the same facts and the follow-ups.
 

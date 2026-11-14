@@ -21,7 +21,7 @@ const tradeAnswer={trade_id:'t_abcdefghij0123456789',proposal_id:proposal.propos
 const statusAnswer={trade_id:tradeAnswer.trade_id,direction:'yeet',status:'signing',legs:[{symbol:'WIF',status:'PENDING_DEPOSIT',amount_in:'20',amount_out:null,origin_tx:null,destination_tx:null,refund_reason:null}],received:[],updated_at:'2026-11-12T00:00:05Z',xp_award:null};
 const submitAnswer={trade_id:tradeAnswer.trade_id,status:'submitted',legs:[{leg:0,symbol:'WIF',send_status:'signing',tx_hash:null}]};
 const home={wallets:{base:{address:'0x'+'a'.repeat(40),usdc:'20'},solana:{address:'S'.repeat(44)}},ready:'ready',xp:null,recent_wins:[],limits};
-const overviewAnswer={username:'Lucky Otter 42',usdc:'20',xp:5,tier:'Noob',streak_days:1,checkin_open:true,holdings_count:0,top_winner:null,trading:'live',needs_card_sign_in:'unknown',suggestions:[{id:'checkin',label:'Do your daily check-in',say:'Do my daily check-in'}]};
+const overviewAnswer={username:'Lucky Otter 42',usdc:'20',xp:5,tier:'Noob',streak_days:1,checkin_open:true,holdings_count:0,top_winner:null,trading:'live',suggestions:[{id:'checkin',label:'Do your daily check-in',say:'Do my daily check-in'}]};
 const core=async route=>{
  if(route==='/proposals'||route==='/proposals/skeet'||/\/quote$/.test(route))return {...proposal,confirm};
  if(route==='/trades')return tradeAnswer;
@@ -90,8 +90,8 @@ test('resources: overview, basket, portfolio, receipt and lucky declare exactly 
  assert.deepEqual(resourceMeta('home',{signOrigin:ORIGIN}).ui.csp,{connectDomains:[],resourceDomains:[]});
 });
 
-test("results: _meta['yeet/signer'] on the overview, proposal and trade results only, card-only, next to the confirm code",async()=>{
- assert.deepEqual([...SIGNER_TOOLS].sort(),['execute_trade','skeet_propose','submit_trade_signature','trade_status','yeet_overview','yeet_propose','yeet_quote','yeet_unlock']);
+test("results: _meta['yeet/signer'] on the proposal and trade results only (never the welcome card), card-only, next to the confirm code",async()=>{
+ assert.deepEqual([...SIGNER_TOOLS].sort(),['execute_trade','skeet_propose','submit_trade_signature','trade_status','yeet_propose','yeet_quote']);
  const want={privy_app_id:APP,script_url:`${ORIGIN}${asset.path}`,sign_page_url:`${ORIGIN}/sign`};
  const {client,close}=await connect(ENV);
  try{

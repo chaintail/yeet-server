@@ -23,7 +23,18 @@ export const SUGGESTIONS=Object.freeze({
  // First while the current terms are not accepted (terms.mjs); then, once, the win code (terms-store.mjs referrals).
  terms:Object.freeze({id:'terms',label:'Review and accept the YEET terms',say:'Show me the YEET terms'}),
  referral:Object.freeze({id:'referral',label:'Got a win code?',say:'I have a win code'}),
+ // Right after the terms are accepted (owner, 2026-11-14): the name first, then "what do you want to do next?".
+ username:Object.freeze({id:'username',label:'Pick my username',say:'Pick my username'}),
+ how:Object.freeze({id:'how',label:'How do I win?',say:'How do I win?'}),
+ hot:Object.freeze({id:'hot',label:'What’s hot right now?',say:'What’s hot right now?'}),
+ yeet:Object.freeze({id:'yeet',label:'I know what I want to YEET',say:'I know what I want to YEET'}),
 });
+/** The follow-ups right after the terms are accepted: the username first unless they already picked one, the three
+ * next steps, and the daily spin while one is waiting. Never a setup step. */
+export function welcomeSuggestions({named=false,checkinOpen=false}={}){
+ const S=SUGGESTIONS;
+ return [...(named?[]:[S.username]),S.how,S.hot,S.yeet,...(checkinOpen?[S.checkin]:[])].slice(0,5);
+}
 /**
  * Order by state: no USDC -> funding first; a daily check-in still open -> the check-in first (after funding when
  * both hold); holdings before discovery only when the person holds a coin. A check-in already done today goes last.
@@ -54,7 +65,7 @@ export function overview({home,bag=null,xp=null,winner=null,username,wheel=true,
   username:String(username).slice(0,32),usdc,
   xp:xp?xp.total:null,tier:home.limits?.tier??'Noob',streak_days:xp?xp.streak_days:null,checkin_open:checkinOpen,
   holdings_count:coins?Math.min(64,coins.length):null,top_winner:winner,
-  trading:home.ready==='paused'?'paused':'live',needs_card_sign_in:'unknown',
+  trading:home.ready==='paused'?'paused':'live',
   suggestions:suggestionsFor({usdc,checkinOpen:checkinOpen===true,holdings:coins?.length??0,wheel:wheel&&!!xp,board,termsDue,referralOpen}),
   ...(terms?{terms,referral_open:referralOpen}:{}),
  };

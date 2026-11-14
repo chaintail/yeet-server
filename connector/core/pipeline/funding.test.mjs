@@ -106,7 +106,7 @@ test('only Base holds enough: Base pays; only Solana holds enough: Solana pays',
  assert.deepEqual((await onlySol.p.home(ALICE)).funding,{base_usdc:'4',solana_usdc:'25',chosen:'solana'});
 });
 
-test('neither network covers the basket alone: BALANCE_LOW names both balances and Add funds; a basket is never split',async()=>{
+test('neither network covers the basket alone: BALANCE_LOW says what one basket can spend, names no network, and Add funds; a basket is never split',async()=>{
  const f=world({base:6,sol:7});
  const prop=await f.p.propose(ALICE,basket(10,`r${++n}`));
  assert.deepEqual(prop.funding,{base_usdc:'6',solana_usdc:'7',chosen:null});
@@ -116,7 +116,7 @@ test('neither network covers the basket alone: BALANCE_LOW names both balances a
  assert.match(guidanceFor('yeet_propose',{...strip(prop),warnings:['BALANCE_LOW']}),/YEET/);
  const e=await exec(f.p,prop).then(()=>null,e=>e);
  assert.equal(e.code,'BALANCE_LOW');
- assert.equal(e.userMessage,'Not enough USDC for this $10.00 basket: you have $6.00 USDC on Base and you have $7.00 USDC on Solana. One network has to cover the whole basket. Add funds, or lower the amount.');
+ assert.equal(e.userMessage,'Not enough USDC for this $10.00 basket: you can trade up to $7.00 right now. Add funds, or lower the amount.');
  assert.equal(f.db.prepare('SELECT COUNT(*) n FROM trades').get().n,0,'nothing was committed');
  // The refusal as the connector answers it: the sentence, the Add funds link, guidance that points at both.
  const body=failureWithFundUrl(withUserMessage(failure(e.code),e),'https://chatgpt.yeet.win/fund');
@@ -159,11 +159,11 @@ test('a paused network is skipped',async()=>{
  // Solana paused: Base pays.
  const g=world({base:30,sol:80,env:{YEET_SOLANA_PAUSE:'true'}});
  assert.equal((await buy(g)).origin,'base');
- // Only the paused network could pay: BALANCE_LOW, and the sentence says which network is out.
+ // Only the paused network could pay: BALANCE_LOW, and the sentence counts only what the open network holds.
  const h=world({base:80,sol:4,env:{YEET_BASE_PAUSE:'1'}});
  const {prop,e}=await refused(h);
  assert.equal(prop.funding.chosen,null);
- assert.equal(e.code,'BALANCE_LOW');assert.match(e.userMessage,/you have \$80\.00 USDC on Base and you have \$4\.00 USDC on Solana\..* Base is not available right now\./);
+ assert.equal(e.code,'BALANCE_LOW');assert.equal(e.userMessage,'Not enough USDC for this $10.00 basket: you can trade up to $4.00 right now. Add funds, or lower the amount.');
  // Both paused: trading is paused, whatever the balances.
  const both=world({base:80,sol:80,env:{YEET_BASE_PAUSE:'1',YEET_SOLANA_PAUSE:'1'}});
  assert.equal((await both.p.home(ALICE)).ready,'paused');
@@ -185,10 +185,10 @@ test('a balance that cannot be read counts as 0 and is said so; the trade goes o
  assert.deepEqual(prop.warnings.filter(w=>w==='BALANCE_LOW'),[]);valid('yeet_propose',strip(prop));
  assert.match(guidanceFor('yeet_propose',strip(prop)),/paid with their USDC on Solana \(their Base balance could not be read just now\)/);
  assert.equal(origin,'sol');assert.equal(x.status,'awaiting_signature');
- // The readable network is short too: BALANCE_LOW, and the sentence says the other one could not be read.
+ // The readable network is short too: BALANCE_LOW, with what could be read.
  const {e}=await refused(f,20);
  assert.equal(e.code,'BALANCE_LOW');
- assert.match(e.userMessage,/YEET/);
+ assert.equal(e.userMessage,'Not enough USDC for this $20.00 basket: you can trade up to $15.00 right now. Add funds, or lower the amount.');
  // Solana unreadable, Base covers: Base pays.
  const g=world({base:80,sol:30});
  g.balances.solanaTokens=async()=>{throw Error('rpc down')};
@@ -228,6 +228,9 @@ test('SKEET: proceeds land on YEET_SELL_CHAIN (default sol: the Solana wallet), 
 
 test('the BALANCE_LOW sentence fits the contract message and never invents a number',()=>{
  const m=balanceLowMessage({total:usdc(500),base:usdc(123.456),sol:null,open:['sol','base']});
- assert.equal(m,'Not enough USDC for this $500.00 basket: you have $123.46 USDC on Base and your Solana balance could not be read just now. One network has to cover the whole basket. Add funds, or lower the amount.');
+ assert.equal(m,'Not enough USDC for this $500.00 basket: you can trade up to $123.46 right now. Add funds, or lower the amount.');
+ assert.equal(balanceLowMessage({total:usdc(500),base:null,sol:null,open:['sol','base']}),'Not enough USDC for this $500.00 basket: your balance could not be read just now. Add funds, or lower the amount.');
+ // A card prints this sentence as it is: no network in it, whatever the balances.
+ for(const args of [{base:usdc(1),sol:usdc(2),open:['sol','base']},{base:usdc(9),sol:usdc(2),open:['sol']},{base:null,sol:null,open:[]}])assert.doesNotMatch(balanceLowMessage({total:usdc(500),...args}),/Base|Solana|network|chain/i);
  assert.ok(m.length<=contract.$defs.failure.properties.message.maxLength);
 });

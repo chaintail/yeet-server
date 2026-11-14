@@ -17,7 +17,7 @@ export const ACCOUNT_META_KEY='yeet/account';
 const ROUTES={
  yeet_overview:()=>['/overview'],
  // The device step on its own card, on request: the same answer as the overview.
- yeet_unlock:()=>['/overview'],
+ yeet_profile:()=>['/overview'],
  yeet_terms:()=>['/terms'],
  // `session`: ChatGPT's anonymized conversation id, recorded with the acceptance (never an argument of the tool).
  yeet_accept_terms:(args,session)=>['/terms/accept',{...args,source:'chat',...(session?{session}:{})}],
@@ -52,7 +52,7 @@ export function spinText(r){
 /** Tools whose core result may carry fields the pinned contract does not list yet (stamps): cut to the contract's
  * top-level properties so the closed output schema still passes; the fields flow through once the contract lists them. */
 // yeet_home and the proposals carry `limits` (XP tier caps: tier, per_trade_usdc, daily_limit_usdc, left_today_usdc).
-const CUT_TO_CONTRACT=new Set(['yeet_overview','yeet_unlock','daily_spin','yeet_home','yeet_propose','yeet_quote','skeet_propose']);
+const CUT_TO_CONTRACT=new Set(['yeet_overview','yeet_profile','daily_spin','yeet_home','yeet_propose','yeet_quote','skeet_propose']);
 /** lucky_wheel and lucky_spin: one plain sentence for the model (the card reads structuredContent). */
 export function luckyText(r){
  const l=r?.lucky;
@@ -81,10 +81,12 @@ export function checkinText(r){
 /** yeet_fund's text for the model: the one USDC number. */
 export const fundText=r=>`${r.usdc===null?"YEET fundText.":`They have ${r.usdc} USDC`}. The funding card is up.`;
 /** yeet_terms and yeet_accept_terms: what the model reads first, in one line; the JSON follows in structuredContent. */
-export const termsText=r=>r.terms.accepted?`The person accepted the YEET terms (version ${r.terms.version}).`:`The person has not accepted the YEET terms (version ${r.terms.version}). Statements: ${r.terms.statements.map(s=>`[${s.id}${s.required?'':', optional'}] ${s.text} ${s.url}`).join(' | ')}`;
-export const acceptText=r=>`Recorded: the person accepted the YEET terms (version ${r.terms.version}).${r.overview?` ${overviewText(r.overview)}`:''}`;
+/** yeet_profile's text for the model: the name, XP, tier and streak. Nothing else of the overview is in it. */
+export const profileText=r=>`Profile: ${r.username}${r.xp===null?'':`, ${r.xp} XP`} (${r.tier})${r.streak_days===null?'':`, ${r.streak_days}-day streak`}.`;
+export const termsText=r=>r.terms.accepted?`The person accepted the YEET terms.`:`The person has not accepted the YEET terms. For your yeet_accept_terms call only, never shown to the person: version ${r.terms.version} and the id in brackets before each statement. Statements: ${r.terms.statements.map(s=>`[${s.id}${s.required?'':', optional'}] ${s.text} ${s.url}`).join(' | ')}`;
+export const acceptText=r=>`Recorded: the person accepted the YEET terms. They are in.${r.overview?` ${overviewText(r.overview)}`:''}`;
 export const referralText=r=>r.status==='applied'?`YEET referralText: ${r.code}.`:r.status==='skipped'?'They skipped the win code. The card is up if they want to type one.':"YEET referralText.";
-const TEXT={yeet_terms:termsText,yeet_accept_terms:acceptText,yeet_referral:referralText,apply_referral:referralText,yeet_unlock:()=>'The card with the one-time device step is up.',yeet_overview:overviewText,yeet_fund:fundText,yeet_checkin:checkinText,daily_spin:spinText,lucky_wheel:luckyText,lucky_spin:luckyText};
+const TEXT={yeet_terms:termsText,yeet_accept_terms:acceptText,yeet_referral:referralText,apply_referral:referralText,yeet_overview:overviewText,yeet_profile:profileText,yeet_fund:fundText,yeet_checkin:checkinText,daily_spin:spinText,lucky_wheel:luckyText,lucky_spin:luckyText};
 /** P0 and P1 are always registered; P2 (leaderboard, spin) only with YEET_P2=1. */
 export const registeredTools=(env=process.env)=>Object.values(toolSpecs).filter(t=>t.priority!=='P2'||env.YEET_P2==='1');
 export const TOOLS=Object.freeze(Object.values(toolSpecs).map(t=>Object.freeze({...t,route:ROUTES[t.name]})));
@@ -92,7 +94,7 @@ for(const t of TOOLS)if(!t.route)throw Error(`No core route for contract tool ${
 
 /** Results that carry `_meta['yeet/signer']` (CARD-SIGNING.md section 2.3a): the overview (its card checks the device
  * sign-in and shows the sign-in when needed), the proposals the card trades from and the trade answers it follows. Card-only, like the confirm code; never in structuredContent or content. */
-export const SIGNER_TOOLS=new Set(['yeet_overview','yeet_unlock','yeet_propose','yeet_quote','skeet_propose','execute_trade','submit_trade_signature','trade_status']);
+export const SIGNER_TOOLS=new Set(['yeet_propose','yeet_quote','skeet_propose','execute_trade','submit_trade_signature','trade_status']);
 export function createMcpServer({token,callCore,env=process.env,staleness=processStaleness}) {
  const server=new McpServer({name:'yeet',version:'0.2.0'},{instructions});
  // Signing set up here (https RESOURCE, PRIVY_APP_ID, vendored signer): the signing cards declare the signing domains

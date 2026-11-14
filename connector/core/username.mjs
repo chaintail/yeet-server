@@ -11,7 +11,7 @@ const SHAPE = new RegExp(USERNAME_PATTERN);
  *  trailing digits, so "Admin_1" and "yeet99" are refused too. */
 export const RESERVED = Object.freeze([
   "admin", "administrator", "yeet", "yeetwin", "skeet", "support", "help", "helpdesk", "staff", "team", "mod",
-  "moderator", "official", "system", "root", "owner", "security", "billing", "chatgpt", "openai", "privy", "near",
+  "moderator", "official", "folio", "system", "root", "owner", "security", "billing", "chatgpt", "openai", "privy", "near",
   "nearintents", "null", "undefined", "anonymous",
 ]);
 
