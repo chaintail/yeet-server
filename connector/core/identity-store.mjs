@@ -12,6 +12,21 @@ export function maxAccounts(value = process.env.YEET_MAX_ACCOUNTS) {
     throw Error("Invalid YEET_MAX_ACCOUNTS");
   return n;
 }
+/** Limited beta (YEET_BETA_USER_CAP): accounts YEET creates at most while the beta is limited. Unset or empty: no
+ *  beta cap (YEET_MAX_ACCOUNTS alone applies, as before). A person who already has an account is never stopped by it;
+ *  a new person at the cap gets the "beta is full" page (as/beta-full.mjs) and no account. Read on every call. */
+export function betaCap(value = process.env.YEET_BETA_USER_CAP) {
+  if (value === undefined || value === "") return null;
+  const n = Number(value);
+  if (!/^[0-9]{1,7}$/.test(String(value).trim()) || !Number.isSafeInteger(n) || n > 1_000_000)
+    throw Error("Invalid YEET_BETA_USER_CAP");
+  return n;
+}
+/** True when the beta cap is set and the accounts already created reach it. */
+export function betaFull() {
+  const cap = betaCap();
+  return cap !== null && accountCount() >= cap;
+}
 function database() {
   if (db) return db;
   db = new DatabaseSync(
@@ -29,6 +44,7 @@ export function initializeIdentityStore({ app } = {}) {
   if (typeof app !== "string" || !/^[a-zA-Z0-9_-]{8,128}$/.test(app))
     throw Error("Missing identity app configuration");
   maxAccounts();
+  betaCap();
   database();
   appId = app;
 }
@@ -42,8 +58,15 @@ function validIdentity(value) {
   );
 }
 /** Verified identity -> stable account id. Creates the account on first sign-in while under the cap. */
-export function resolveIdentity(value, { now = Date.now() } = {}) {
-  if (!appId || !validIdentity(value)) return undefined;
+export function resolveIdentity(value, options) {
+  return resolveSignUp(value, options).id;
+}
+/** resolveIdentity with the reason of a refusal: {id} for the linked or newly created account, or {refused}:
+ *  "BETA_FULL" (a new person while the beta cap is reached), "MAX_ACCOUNTS" (YEET_MAX_ACCOUNTS reached) or
+ *  "INVALID" (no store or not a verified identity of the configured app). The count and the insert are one
+ *  transaction, so two sign-ups at once never pass the cap together. */
+export function resolveSignUp(value, { now = Date.now() } = {}) {
+  if (!appId || !validIdentity(value)) return { refused: "INVALID" };
   const conn = database();
   conn.exec("BEGIN IMMEDIATE");
   try {
@@ -54,12 +77,17 @@ export function resolveIdentity(value, { now = Date.now() } = {}) {
       .get(value.provider, value.app_id, value.did);
     if (prior) {
       conn.exec("COMMIT");
-      return prior.account_id;
+      return { id: prior.account_id };
     }
     const { n } = conn.prepare("SELECT COUNT(*) n FROM accounts").get();
+    const cap = betaCap();
+    if (cap !== null && n >= cap) {
+      conn.exec("COMMIT");
+      return { refused: "BETA_FULL" };
+    }
     if (n >= maxAccounts()) {
       conn.exec("COMMIT");
-      return undefined;
+      return { refused: "MAX_ACCOUNTS" };
     }
     const id = `yeet-privy-${randomBytes(16).toString("base64url")}`;
     conn.prepare("INSERT INTO accounts VALUES(?,?)").run(id, now);
@@ -67,7 +95,7 @@ export function resolveIdentity(value, { now = Date.now() } = {}) {
       .prepare("INSERT INTO identity_links VALUES(?,?,?,?)")
       .run(value.provider, value.app_id, value.did, id);
     conn.exec("COMMIT");
-    return id;
+    return { id };
   } catch (e) {
     conn.exec("ROLLBACK");
     throw e;

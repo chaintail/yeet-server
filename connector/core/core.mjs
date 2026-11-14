@@ -1,10 +1,11 @@
-import {initializeIdentityStore,resolveIdentity,lookupIdentity,account,didFor,usernameOf,setUsername} from './identity-store.mjs';
+import {initializeIdentityStore,resolveSignUp,lookupIdentity,account,didFor,usernameOf,setUsername,betaFull} from './identity-store.mjs';
+import {joinWaitlist,WaitlistError,waitlistUrlFor} from './waitlist.mjs';
 import {usernameFailure} from './username.mjs';
 import {handle} from './xp/board.mjs';
 import {createWalletEnsurer,walletSetupConfig,walletSetupMessage} from './trade/wallet-ensure.mjs';
 import express from 'express';
 import {introspectBearer,validatePrincipal} from '#shared/introspection.mjs';
-import {secret,equal,read,write,port,TEST,DEV_APP_ID} from '#shared/common.mjs';
+import {secret,equal,read,write,port,TEST,DEV_APP_ID,AS} from '#shared/common.mjs';
 import {coins,coin,symbolOf} from './coins.mjs';
 import {unavailable,failure,withUserMessage} from './failure.mjs';
 import {tradeEngine,onTradeSettled} from './trade/runtime.mjs';
@@ -35,6 +36,9 @@ if(process.env.PRIVY_LOGIN!=='1'&&!devStub)throw Error('No identity verifier con
 {const ledger=ledgerConfig(process.env);if(ledger.enabled)loadSolverKey({accountId:ledger.solverAccount,keyFile:ledger.solverKeyFile})}
 initializeIdentityStore({app:process.env.PRIVY_LOGIN==='1'?process.env.PRIVY_APP_ID:DEV_APP_ID});
 const user=id=>account(id);
+// The "beta is full" page for a ChatGPT person with no account (a tool call whose token names no account while the
+// beta is full: BETA_FULL with this link). Null when the sign-in origin is not https: no link is handed out then.
+const WAITLIST_URL=waitlistUrlFor(AS,'chatgpt');
 // XP (lane E, YEET_P2=1): trade settlement pays through the tracker's onSettled hook; read per event so the flag is live.
 onTradeSettled(e=>{if(p2On()){xpRuntime().onSettled(e);luckySettled(e)}});
 /** XP never stands in the way of the answer it decorates: a failure is logged and the XP part is left out. */
@@ -67,7 +71,19 @@ app.get('/health',(_q,r)=>r.json({ok:true}));
 const VERSION=Object.freeze(versionInfo());
 app.get('/version',(_q,r)=>r.json(VERSION));
 app.use((q,r,next)=>{const token=q.headers.authorization?.replace(/^Bearer /,'');q.role=['mcp','as','operator'].find(role=>equal(token,secret(`core-${role}`)));if(!q.role)return r.sendStatus(401);next()});
-app.post('/identity/resolve',(q,r)=>{if(q.role!=='as')return r.sendStatus(403);const id=resolveIdentity(q.body);if(!id||read('policy.json')[id]?.suspended)return r.sendStatus(403);if(p2On())xpSafe('sign_in',()=>xpRuntime().signIn(id));r.json({id})});
+// A new person while the limited beta is full (YEET_BETA_USER_CAP, identity-store.mjs): 403 BETA_FULL, no account;
+// the sign-in server then shows the "beta is full" page. Every other refusal is the bare 403 it always was.
+app.post('/identity/resolve',(q,r)=>{if(q.role!=='as')return r.sendStatus(403);const out=resolveSignUp(q.body),id=out.id;if(out.refused==='BETA_FULL'){console.log(JSON.stringify({event:'signup_beta_full'}));return r.status(403).json({error:'BETA_FULL'})}if(!id||read('policy.json')[id]?.suspended)return r.sendStatus(403);if(p2On())xpSafe('sign_in',()=>xpRuntime().signIn(id));r.json({id})});
+// The limited beta, for the sign-in page (as.mjs /account/identity-config): signup false while the beta is full, so
+// the page asks Privy to sign in existing users only and creates nobody there.
+app.get('/signup',(q,r)=>{if(q.role!=='as')return r.sendStatus(403);r.json({signup:!betaFull()})});
+// The waitlist form on the "beta is full" page (as/beta-full.mjs), through the sign-in server: one row per address.
+// The answer is the same whether the address was new or already listed. No email is sent.
+app.post('/waitlist',(q,r)=>{
+ if(q.role!=='as')return r.sendStatus(403);
+ try{const out=joinWaitlist({email:q.body?.email,source:q.body?.source});console.log(JSON.stringify({event:'waitlist_joined',source:q.body.source,fresh:out.fresh}));r.json({ok:true})}
+ catch(e){if(e instanceof WaitlistError)return r.status(400).json({error:e.code});console.error(JSON.stringify({event:'waitlist_failed',error:String(e?.message??e).slice(0,200)}));r.sendStatus(503)}
+});
 // The signing page (as/sign-page.mjs): the sign-in server verified a Privy access token and asks which account that
 // identity is ALREADY linked to. Unlike /identity/resolve this never creates an account and awards nothing.
 app.post('/identity/lookup',(q,r)=>{if(q.role!=='as')return r.sendStatus(403);const id=lookupIdentity(q.body);if(!id)return r.sendStatus(404);if(read('policy.json')[id]?.suspended)return r.sendStatus(403);r.json({id})});
@@ -129,7 +145,7 @@ app.post('/operator/trades/status',operatorTrade('status',(e,ctx,a)=>{
  const view=e.status(ctx,a.trade_id);
  return {...(p2On()?{...view,xp_award:xpSafe('trade',()=>xpRuntime().tradeAward(ctx.accountId,view),null)}:view),record:e.tracker.record(ctx,a.trade_id)};
 }));
-app.use(async(q,r,next)=>{if(Object.keys(q.query).length)return r.sendStatus(400);if(q.role==='operator')return r.sendStatus(403);let subject,client;if(q.role==='mcp'){try{q.principal=validatePrincipal(await introspectBearer(q.headers['x-delegated-bearer'],'core-resource','core-introspection'));subject=q.principal.subject;client=q.principal.client}catch{return r.sendStatus(401)}}else subject=q.headers['x-yeet-subject'];if(!user(subject))return r.sendStatus(400);q.subject=subject;const p=read('policy.json')[subject];if(p?.suspended||q.role==='mcp'&&p?.clients?.[client])return r.sendStatus(403);next()});
+app.use(async(q,r,next)=>{if(Object.keys(q.query).length)return r.sendStatus(400);if(q.role==='operator')return r.sendStatus(403);let subject,client;if(q.role==='mcp'){try{q.principal=validatePrincipal(await introspectBearer(q.headers['x-delegated-bearer'],'core-resource','core-introspection'));subject=q.principal.subject;client=q.principal.client}catch{return r.sendStatus(401)}}else subject=q.headers['x-yeet-subject'];if(!user(subject))return q.role==='mcp'&&betaFull()?r.status(403).json({...failure('BETA_FULL'),...(WAITLIST_URL?{waitlist_url:WAITLIST_URL}:{})}):r.sendStatus(400);q.subject=subject;const p=read('policy.json')[subject];if(p?.suspended||q.role==='mcp'&&p?.clients?.[client])return r.sendStatus(403);next()});
 app.get('/eligibility',(q,r)=>q.role==='mcp'?r.json({ok:true}):r.sendStatus(403));
 /** Scope each connector route needs; a route not listed here is refused for the connector. */
 export const ROUTE_SCOPES=Object.freeze([

@@ -35,12 +35,17 @@ export async function verifiedIdentity(input){
  }
  throw Error('Identity verifier unavailable or credential invalid');
 }
+/** A new person while the limited beta is full (core /identity/resolve 403 BETA_FULL): no account was created. */
+export class BetaFull extends Error{constructor(){super('BETA_FULL');this.name='BetaFull'}}
 export async function verifyIdentity(input){
  const identity=await verifiedIdentity(input);
- // Core creates the account on first verified login (capped by YEET_MAX_ACCOUNTS) and returns its stable id.
- const result=await coreCall('/identity/resolve','',secret('core-as'),identity);
- if(typeof result.id!=='string')throw Error('Identity not eligible');
- return result.id;
+ // Core creates the account on first verified login (capped by YEET_MAX_ACCOUNTS and, while set, YEET_BETA_USER_CAP)
+ // and returns its stable id.
+ const {status,body}=await coreSend('/identity/resolve','',secret('core-as'),identity,2000);
+ if(status===403&&body?.error==='BETA_FULL')throw new BetaFull();
+ if(status<200||status>=300||!body)throw Error(`core denied ${status}`);
+ if(typeof body.id!=='string')throw Error('Identity not eligible');
+ return body.id;
 }
 /** Verified credential -> the account already linked to that identity, or null (no account, or suspended). Never
  *  creates an account. Throws only when the credential does not verify. */

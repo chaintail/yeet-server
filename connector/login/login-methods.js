@@ -57,11 +57,12 @@ export function offeredMethods(enabled, offered) {
 /** "a", "a or b", "a, b or c". */
 const joinOr = (words) => (words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} or ${words.at(-1)}`);
 
-/** The line above the sign-in methods, naming only what is on. Null when nothing is on. */
-export function introLine(methods) {
+/** The line above the sign-in methods, naming only what is on. Null when nothing is on. `signup: false` (the limited
+ *  beta is full): only the sign-in, no word about creating an account. */
+export function introLine(methods, { signup = true } = {}) {
   if (!methods.length) return null;
   const names = methods.map((m) => (m.id === "email" ? "your email" : m.label));
-  return `Sign in with ${joinOr(names)}. New here? Signing in creates your YEET account and wallets.`;
+  return signup ? `Sign in with ${joinOr(names)}. New here? Signing in creates your YEET account and wallets.` : `Sign in with ${joinOr(names)}.`;
 }
 
 /** Shown instead of any button when the app has no sign-in method turned on. */
@@ -78,4 +79,20 @@ export function oauthRefusal(code) {
   if (code === "user_does_not_exist") return NO_ACCOUNT_LINE;
   if (code === "oauth_user_denied") return "";
   return "That did not finish. Try again.";
+}
+
+/**
+ * The limited beta (as/beta-full.mjs). A sign-in Privy refused because the person is new and no spot is left: with
+ * sign-up off (the server said the beta is full) Privy answers user_does_not_exist and creates nobody; Privy's own
+ * user limit for the app answers max_accounts_reached (PrivyErrorCode USER_LIMIT_REACHED in @privy-io/react-auth
+ * 3.51.4). Either way the page goes to the "beta is full" page. `error`: what Privy threw, or a flow's error state.
+ */
+export const PRIVY_USER_LIMIT = "max_accounts_reached";
+export function betaFullRefusal(error, { signup = true } = {}) {
+  const code = typeof error === "string" ? error : error?.privyErrorCode ?? error?.code;
+  return code === PRIVY_USER_LIMIT || (!signup && code === "user_does_not_exist");
+}
+/** The "beta is full" page the server put on the sign-in field (data-full), or the web one when it is missing. */
+export function betaFullPage(value) {
+  return typeof value === "string" && /^\/account\/waitlist\?[A-Za-z0-9=&%_.-]{0,300}$/.test(value) ? value : "/account/waitlist?from=web";
 }

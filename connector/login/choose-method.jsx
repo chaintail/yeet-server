@@ -11,9 +11,11 @@
 //   onStart      called when the person starts any method (also before the Google or Apple redirect)
 //   pageNotice   a line from the page to show where the component shows its own errors (the trade page: a Google or
 //                Apple sign-in that came back refused)
+//   onFull       called instead of showing an error when Privy refused a new person for the limited beta
+//                (login-methods.js betaFullRefusal): the connect screen then goes to the "beta is full" page
 import React, { useEffect, useState } from "react";
 import { usePrivy, useLoginWithEmail, useLoginWithOAuth, useLoginWithTelegram, usePrivyClient_experimental } from "@privy-io/react-auth";
-import { enabledMethods, introLine, offeredMethods } from "./login-methods.js";
+import { betaFullRefusal, enabledMethods, introLine, offeredMethods } from "./login-methods.js";
 import { words } from "./brand-words.jsx";
 import { Swap } from "./screen.jsx";
 
@@ -63,7 +65,7 @@ export function useEnabledMethods(offered) {
 /**
  * Email one-time code, then Google, Apple, X and Telegram, each only when the app has it on.
  */
-export function ChooseMethod({ methods, signup = true, intro, verifyLabel = "Sign in", onStart, pageNotice = "" }) {
+export function ChooseMethod({ methods, signup = true, intro, verifyLabel = "Sign in", onStart, pageNotice = "", onFull }) {
   const { ready } = usePrivy();
   const [email, setEmail] = useState(""),
     [code, setCode] = useState(""),
@@ -79,6 +81,12 @@ export function ChooseMethod({ methods, signup = true, intro, verifyLabel = "Sig
   const emailOn = methods.some((m) => m.id === "email");
   const others = methods.filter((m) => m.id !== "email");
   const started = () => onStart?.();
+  /** True when the refusal was the limited beta's and the page is going to the "beta is full" page. */
+  const full = (e) => {
+    if (!onFull || !betaFullRefusal(e, { signup })) return false;
+    onFull();
+    return true;
+  };
 
   async function send() {
     const address = email.trim();
@@ -91,7 +99,8 @@ export function ChooseMethod({ methods, signup = true, intro, verifyLabel = "Sig
       await sendCode({ email: address, disableSignup: !signup });
       setSentTo(address);
       setCode("");
-    } catch {
+    } catch (e) {
+      if (full(e)) return;
       setError("We could not send a code to that address. Check it and try again.");
     }
   }
@@ -104,7 +113,8 @@ export function ChooseMethod({ methods, signup = true, intro, verifyLabel = "Sig
     setError("");
     try {
       await loginWithCode({ code: value });
-    } catch {
+    } catch (e) {
+      if (full(e)) return;
       setError(
         signup
           ? "That code did not work. Check the latest email from YEET or send a new code."
@@ -116,7 +126,8 @@ export function ChooseMethod({ methods, signup = true, intro, verifyLabel = "Sig
     setError("");
     try {
       await initOAuth({ provider, disableSignup: !signup });
-    } catch {
+    } catch (e) {
+      if (full(e)) return;
       setError(signup ? "Sign in could not start. Please try again." : "That could not start in this window. Try again, or open this page in your browser.");
     }
   }
@@ -124,7 +135,8 @@ export function ChooseMethod({ methods, signup = true, intro, verifyLabel = "Sig
     setError("");
     try {
       await loginWithTelegram({ disableSignup: !signup });
-    } catch {
+    } catch (e) {
+      if (full(e)) return;
       setError("Telegram sign in did not finish. Please try again.");
     }
   }
@@ -175,7 +187,7 @@ export function ChooseMethod({ methods, signup = true, intro, verifyLabel = "Sig
         </>
       ) : (
         <>
-          <p>{words(intro ?? introLine(methods))}</p>
+          <p>{words(intro ?? introLine(methods, { signup }))}</p>
           {others.map((m, i) => (
             <button
               key={m.id}

@@ -453,3 +453,19 @@ test('fill: a slot without a value is never sent as text',()=>{
  assert.throws(()=>fill('{coin} stamp',{}));
  assert.equal(guidanceFor('daily_spin',{stamp:{coin:'WIF'}}),undefined,'a result the copy cannot read goes out without guidance');
 });
+
+test('BETA_FULL (private code): the catalogue shape, the guidance follows the rules, the waitlist link rides in the JSON only',()=>{
+ const r=toolError({error:'BETA_FULL',waitlist_url:'https://chatgpt.yeet.win/account/waitlist?from=chatgpt'},ALL_P2);
+ assert.equal(r.isError,true);assert.equal(Object.hasOwn(r,'structuredContent'),false);
+ const v=JSON.parse(r.content[0].text);
+ assert.deepEqual(Object.keys(v),['error','message','retryable','waitlist_url','guidance']);
+ assert.equal(v.error,'BETA_FULL');assert.equal(v.retryable,false);
+ assert.equal(v.message,'YEET is in a limited beta and every spot is taken right now. Join the waitlist and we will email you when a spot opens.');
+ assert.equal(v.guidance,COPY.errors.BETA_FULL);rules('BETA_FULL',v.guidance);
+ assert.ok(Object.values(r._meta??{}).some(m=>m?.error==='BETA_FULL'),'the card-only failure block names it');
+ // Only an https link is passed on; without one the refusal still stands.
+ for(const bad of ['http://chatgpt.yeet.win/account/waitlist','javascript:alert(1)',42,undefined])assert.equal(Object.hasOwn(JSON.parse(toolError({error:'BETA_FULL',waitlist_url:bad}).content[0].text),'waitlist_url'),false,String(bad));
+ // Another code never carries it.
+ assert.equal(Object.hasOwn(JSON.parse(toolError({error:'TRADING_PAUSED',waitlist_url:'https://x.example/'}).content[0].text),'waitlist_url'),false);
+ assert.ok(!FAILURE_CODES.includes('BETA_FULL'),'not a contract code: the vendored contract is unchanged');
+});

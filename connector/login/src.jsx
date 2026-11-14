@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { PrivyProvider, usePrivy, useUser, useLoginWithOAuth } from "@privy-io/react-auth";
 import { privyConfig } from "./privy-app.jsx";
-import { NO_METHOD_LINE, oauthRefusal } from "./login-methods.js";
+import { NO_METHOD_LINE, oauthRefusal, betaFullRefusal, betaFullPage } from "./login-methods.js";
 import { BOUND_CALLBACK_PATH, boundView, fromProvider, startedHere } from "./bound-return.js";
 import { ChooseMethod, useEnabledMethods } from "./choose-method.jsx";
 import { needsEmailStep } from "./email-step.js";
@@ -21,6 +21,20 @@ const WALLET_WAIT_MS = 20000;
 
 // The server sets up both wallets in one call; the step list moves to the Solana step after this long.
 const STEP_TICK_MS = 1200;
+
+/**
+ * The limited beta is full and this person has no YEET account (as/beta-full.mjs): the Privy session is ended (so the
+ * "Sign in" line there starts clean) and the page goes to the "beta is full" page the server put on the field.
+ */
+async function toBetaFull(logout) {
+  clearStarted();
+  try {
+    await logout?.();
+  } catch {
+    /* the page goes on either way */
+  }
+  location.assign(betaFullPage(document.getElementById("privy-login")?.dataset.full));
+}
 
 function EndSession() {
   const { ready, logout } = usePrivy();
@@ -167,6 +181,8 @@ function FinishSignIn({ config }) {
       await submitSession(getAccessToken, emailStep.current);
     } catch (e) {
       clearTimeout(tick);
+      // A new person while the beta is full: the server created no account and no wallet.
+      if (e?.code === "BETA_FULL") return toBetaFull(logout);
       // No client-error endpoint on the server yet: a structured, secret-free line in the browser console.
       console.error(JSON.stringify(setupErrorReport(e, userRef.current)));
       setFailMessage(e?.serverMessage || "");
@@ -202,6 +218,7 @@ function FinishSignIn({ config }) {
     try {
       await serverSetup();
     } catch (e) {
+      if (e?.code === "BETA_FULL") return toBetaFull(logout);
       console.error(JSON.stringify(setupErrorReport(e, user)));
       setSetupFailed(true);
       setError(
@@ -268,15 +285,22 @@ function FinishSignIn({ config }) {
 const LOADING = <p role="status">Loading secure sign in…</p>;
 
 function SignIn({ config }) {
-  const { ready, authenticated } = usePrivy();
+  const { ready, authenticated, logout } = usePrivy();
+  // false while the limited beta is full (as.mjs /account/identity-config): Privy signs in existing users only.
+  const signup = config.signup !== false;
   // Only the methods the server offers here (YEET_LOGIN_METHODS, sent with /account/identity-config).
   const methods = useEnabledMethods(config.methods);
   // A Google or Apple return that failed: that sign-in is over, and so is its "started here" flag.
   const { state: oauth } = useLoginWithOAuth();
   const oauthFailed = oauth?.status === "error";
+  // A Google or Apple return Privy refused for the limited beta: the "beta is full" page.
+  const oauthFull = oauthFailed && betaFullRefusal(oauth.error, { signup });
   useEffect(() => {
     if (oauthFailed) clearStarted();
-  }, [oauthFailed]);
+    if (oauthFull) toBetaFull(logout);
+    // logout is stable for the life of the page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [oauthFailed, oauthFull]);
   // Every sign-in method ends here, so the YEET signer step runs after email, Google, Apple, X and Telegram alike.
   const screen = !ready ? "loading" : authenticated ? "finish" : methods === null ? "loading" : !methods.length ? "none" : "methods";
   return (
@@ -288,7 +312,7 @@ function SignIn({ config }) {
       ) : screen === "none" ? (
         <p role="status">{words(NO_METHOD_LINE)}</p>
       ) : (
-        <ChooseMethod methods={methods} onStart={markStarted} />
+        <ChooseMethod methods={methods} signup={signup} onStart={markStarted} onFull={() => toBetaFull(logout)} />
       )}
     </Swap>
   );

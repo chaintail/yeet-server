@@ -205,6 +205,8 @@ export const COPY=Object.freeze({
   APP_OUTDATED:"YEET errors.APP_OUTDATED: {url} {steps}.",
   USERNAME_TAKEN:"YEET errors.USERNAME_TAKEN.",
   USERNAME_NOT_ALLOWED:"YEET errors.USERNAME_NOT_ALLOWED.",
+
+  BETA_FULL:"YEET errors.BETA_FULL.",
  },
 });
 

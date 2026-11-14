@@ -1,7 +1,7 @@
 // Sign-in methods from the Privy app configuration, without React or the network.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { LOGIN_METHODS, NO_ACCOUNT_LINE, NO_METHOD_LINE, enabledMethods, introLine, oauthRefusal } from "./login-methods.js";
+import { LOGIN_METHODS, NO_ACCOUNT_LINE, NO_METHOD_LINE, enabledMethods, introLine, oauthRefusal, betaFullRefusal, betaFullPage } from "./login-methods.js";
 
 const ids = (config) => enabledMethods(config).map((m) => m.id);
 
@@ -58,4 +58,17 @@ test("offered methods: Google and Apple by default; email only when the server o
   assert.equal(methodIds("nope"), null);
   assert.deepEqual(methodIds(" google , email "), ["google", "email"]);
   assert.match(introLine(offeredMethods(all, undefined)), /^Sign in with Google or Apple\./);
+});
+
+test("limited beta: with sign-up off the intro line promises no account; Privy's refusals that mean no spot go to the page", () => {
+  const methods = enabledMethods({ google_oauth: true, email_auth: true });
+  assert.equal(introLine(methods, { signup: false }), "Sign in with Google or your email.");
+  assert.match(introLine(methods), /New here\? Signing in creates your YEET account and wallets\.$/);
+  // Privy's own user limit, on any page that may sign people up; "no such user" only when sign-up was off.
+  for (const e of ["max_accounts_reached", { privyErrorCode: "max_accounts_reached" }, { code: "max_accounts_reached" }]) assert.equal(betaFullRefusal(e), true);
+  assert.equal(betaFullRefusal({ privyErrorCode: "user_does_not_exist" }, { signup: false }), true);
+  assert.equal(betaFullRefusal({ privyErrorCode: "user_does_not_exist" }), false, "sign-up on: not the beta");
+  for (const e of [undefined, null, "", "oauth_user_denied", { privyErrorCode: "invalid_credentials" }, { code: "too_many_requests" }]) assert.equal(betaFullRefusal(e, { signup: false }), false, JSON.stringify(e));
+  assert.equal(betaFullPage("/account/waitlist?from=chatgpt&back=%2Finteraction%2Fabc"), "/account/waitlist?from=chatgpt&back=%2Finteraction%2Fabc");
+  for (const bad of [undefined, "", "https://evil.example/account/waitlist?x", "/account/waitlist", "/account/waitlist?x=<y>", "//evil.example"]) assert.equal(betaFullPage(bad), "/account/waitlist?from=web", String(bad));
 });
