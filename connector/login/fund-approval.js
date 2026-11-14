@@ -44,3 +44,28 @@ export function readCheck(status, body) {
   if (status === 401) return { status: "signin" };
   return { status: "error" };
 }
+/**
+ * The funding page's screen and the addresses on it, from who is here now and the kept answer. One place decides
+ * both, so an address can only ever be on the "fund" screen and only from the current approval.
+ *   fundView({ready, authenticated, userId, wallets, kept, validAddress}) -> {screen, key, approval, addresses}
+ *   screen: loading | waiting | expired | mismatch | error | fund       addresses: {base, solana} (null off "fund")
+ */
+export function fundView({ ready, authenticated, userId, wallets, kept, validAddress = () => true }) {
+  const key = ready && authenticated ? approvalKey(userId, wallets) : null;
+  const approval = currentApproval(kept, key);
+  const shown = approvedAddresses({ userId, wallets, approval });
+  const addresses = {
+    base: shown && validAddress("base", shown.base) ? shown.base : null,
+    solana: shown && validAddress("solana", shown.solana) ? shown.solana : null,
+  };
+  const hasWallet = !!text(wallets?.base?.address);
+  const screen =
+    !ready || !authenticated ? "loading"
+    : !hasWallet ? "waiting"
+    : approval.status === "checking" ? "loading"
+    : approval.status === "expired" ? "expired"
+    : approval.status === "mismatch" || (approval.status === "ok" && !addresses.base) ? "mismatch"
+    : approval.status !== "ok" ? "error"
+    : "fund";
+  return { screen, key, hasWallet, approval, addresses: screen === "fund" ? addresses : { base: null, solana: null } };
+}

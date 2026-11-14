@@ -70,13 +70,87 @@ test("the server's answers as the page reads them", () => {
   for (const [s, b] of [[500, null], [503, { code: "TEMPORARILY_UNAVAILABLE" }], [409, {}], [403, null]]) assert.deepEqual(readCheck(s, b), { status: "error" });
 });
 
-test("the page source: addresses come only from the approval, and the user's own wallet object never reaches the wallet view", async () => {
+test("N2: when the user or the wallets change, the funding screen is out of the tree in that same render, with no exit animation", async () => {
+  const { fundView } = await import("./fund-approval.js");
+  const { shownScreen, exitMs, OUT_MS } = await import("./screen-swap.js");
+  const kept = approvalOf(keyOf(A), serverFor(A));
+  // Render 1: A is approved. The funding screen, with A's (server-confirmed) addresses.
+  const r1 = fundView({ ready: true, authenticated: true, userId: A.id, wallets: A.wallets, kept });
+  assert.equal(r1.screen, "fund"); assert.equal(r1.addresses.base, serverFor(A).addresses.base);
+  const settled = { id: r1.screen, leaving: false };
+  // Render 2: Privy's user is B now; the kept answer is still A's (the new check has not answered).
+  for (const [who, wallets] of [[B.id, B.wallets], [A.id, { base: B.wallets.base, solana: A.wallets.solana }], [B.id, A.wallets]]) {
+    const r2 = fundView({ ready: true, authenticated: true, userId: who, wallets, kept });
+    assert.notEqual(r2.screen, "fund");
+    assert.deepEqual(r2.addresses, { base: null, solana: null }, "what this render passes down holds no address");
+    // What the page's Swap puts in the tree for that render: this render's children, never the kept funding node.
+    const tree = shownScreen({ id: r2.screen, view: settled, instant: true });
+    assert.deepEqual(tree, { id: r2.screen, from: "children", leaving: false });
+    // The whole of what is rendered, as data: nothing of the previous approval is in it.
+    const rendered = JSON.stringify({ tree, screen: r2.screen, addresses: r2.addresses });
+    for (const old of [serverFor(A).addresses.base, serverFor(A).addresses.solana, A.wallets.base.address]) assert.ok(!rendered.includes(old), old);
+  }
+  // Signed out: the same.
+  const out = fundView({ ready: true, authenticated: false, userId: undefined, wallets: {}, kept });
+  assert.equal(out.screen, "loading"); assert.deepEqual(out.addresses, { base: null, solana: null });
+  assert.equal(shownScreen({ id: out.screen, view: settled, instant: true }).from, "children");
+  // Without `instant` the old node WOULD stay for the exit animation: that is the case the page must never use.
+  assert.deepEqual(shownScreen({ id: "loading", view: settled, instant: false }), { id: "fund", from: "kept", leaving: false });
+  assert.equal(exitMs({ instant: true }), 0); assert.equal(exitMs({}), OUT_MS); assert.equal(OUT_MS, 420); assert.equal(exitMs({ reducedMotion: true }), 0);
+  // The same screen asked again is simply the children.
+  assert.deepEqual(shownScreen({ id: "fund", view: settled }), { id: "fund", from: "children", leaving: false });
+});
+
+test("fundView: an address is only ever on the fund screen, and only the server's", async () => {
+  const { fundView } = await import("./fund-approval.js");
+  const base = { ready: true, authenticated: true, userId: A.id, wallets: A.wallets };
+  const at = (answer) => fundView({ ...base, kept: answer ? approvalOf(keyOf(A), answer) : null });
+  assert.equal(at(null).screen, "loading");
+  assert.equal(at({ status: "mismatch" }).screen, "mismatch");
+  assert.equal(at({ status: "expired", message: "e" }).screen, "expired");
+  assert.equal(at({ status: "error" }).screen, "error");
+  assert.equal(at({ ...serverFor(A), user: B.id }).screen, "mismatch", "an ok that is not about this user approves nothing");
+  assert.equal(fundView({ ...base, wallets: {}, kept: null }).screen, "waiting");
+  assert.equal(fundView({ ...base, ready: false, kept: approvalOf(keyOf(A), serverFor(A)) }).screen, "loading");
+  for (const v of [at(null), at({ status: "mismatch" }), at({ status: "expired" }), at({ status: "error" }), at({ ...serverFor(A), user: B.id })]) assert.deepEqual(v.addresses, { base: null, solana: null });
+  // An address the page's own validator refuses is not shown either.
+  assert.equal(fundView({ ...base, kept: approvalOf(keyOf(A), serverFor(A)), validAddress: () => false }).screen, "mismatch");
+});
+
+test("the page source: the screen and the addresses come from fundView, the Swap is instant, and the wallet view is keyed to the approval", async () => {
   const { readFileSync } = await import("node:fs");
   const src = readFileSync(new URL("./fund.jsx", import.meta.url), "utf8");
   const fund = src.slice(src.indexOf("function Fund("), src.indexOf("async function copyText"));
-  assert.match(fund, /const shown = approvedAddresses\(\{ userId: user\?\.id, wallets, approval \}\)/);
-  assert.match(fund, /<FundWallet readers=\{readers\} addresses=\{addresses\} \/>/);
-  assert.match(fund, /base: shown && validAddress\("base", shown\.base\) \? shown\.base : null/);
-  assert.doesNotMatch(fund, /addresses = \{[^}]*wallets\.(base|solana)/, "never the browser's own addresses");
-  assert.match(fund, /currentApproval\(kept, key\)/);
+  assert.match(fund, /const \{ screen, key, hasWallet, approval, addresses \} = fundView\(\{ ready, authenticated, userId: user\?\.id, wallets, kept, validAddress \}\)/);
+  assert.match(fund, /<Swap id=\{screen\} instant>/);
+  assert.match(fund, /<FundWallet key=\{approval\.key\} readers=\{readers\} addresses=\{addresses\} \/>/);
+  assert.doesNotMatch(fund, /wallets\.(base|solana)\??\.address/, "never the browser's own addresses");
+  const swap = readFileSync(new URL("./screen.jsx", import.meta.url), "utf8");
+  assert.match(swap, /const shown = shownScreen\(\{ id, view, instant \}\)/);
+  assert.match(swap, /\{shown\.from === "children" \? children : view\.node\}/);
+});
+
+test("N4: every wallet copy button runs: the address is copied and the note names the wallet", async () => {
+  const { WALLET_NAMES, copyToWallet, walletLinks, NETWORKS } = await import("./fund-links.js");
+  const { readFileSync } = await import("node:fs");
+  const ids = new Set();
+  const ADDRESS = { base: "0x8dC686928241E69D693A7a7A7a7270429e3c6c50", solana: "7x3qiZtcsqC2paa7p7XnfUffedPDNP7GvZVuMD7VXvDe" };
+  for (const network of Object.keys(ADDRESS)) for (const l of walletLinks(network, ADDRESS[network], "25")) if (l.copy) ids.add(l.id);
+  assert.deepEqual([...ids].sort(), ["coinbase", "phantom", "rainbow", "solflare"]);
+  assert.ok(NETWORKS);
+  for (const id of ids) {
+    assert.equal(typeof WALLET_NAMES[id], "string", id);
+    for (const ok of [true, false]) {
+      const copied = [], notes = [];
+      const line = await copyToWallet({ id, address: "ADDR", amount: "25", asset: "USDC", copy: async (t) => { copied.push(t); return ok; }, note: (t) => notes.push(t) });
+      assert.deepEqual(copied, ["ADDR"], id); assert.deepEqual(notes, [line], id);
+      assert.ok(line.includes(WALLET_NAMES[id]), line); assert.doesNotMatch(line, /undefined/);
+      assert.match(line, ok ? /^Address copied\. In .+, send 25 USDC to it\.$/ : /^Copy did not work here\./);
+    }
+  }
+  assert.throws(() => copyToWallet({ id: "metamask", address: "A", amount: "1", asset: "USDC", copy: async () => true, note() {} }), /No wallet named metamask/);
+  // The page calls that function and names nothing it does not import or define.
+  const src = readFileSync(new URL("./fund.jsx", import.meta.url), "utf8");
+  assert.match(src, /copyToWallet\(\{ id, address, amount: sendValue, asset: net\.asset, copy: copyText, note: setLinkNote \}\)/);
+  assert.doesNotMatch(src, /WALLET_NAMES/);
 });

@@ -118,3 +118,22 @@ export function walletLinks(network, address, amount) {
     ];
   throw Error("invalid-network");
 }
+
+/** The name of each wallet a copy button stands for (the ids of walletLinks above). */
+export const WALLET_NAMES = Object.freeze({ rainbow: "Rainbow", coinbase: "Coinbase Wallet", phantom: "Phantom", solflare: "Solflare" });
+/**
+ * What a wallet's copy button does, with the page's own copy and note functions handed in (fund.jsx):
+ * copies the address, then says where to paste it. Returns the promise of the note it set.
+ *   copyToWallet({id, address, amount, asset, copy: async text => boolean, note: text => void})
+ */
+export function copyToWallet({ id, address, amount, asset, copy, note }) {
+  const wallet = WALLET_NAMES[id];
+  if (!wallet) throw Error(`No wallet named ${id}`);
+  return copy(address).then((ok) => {
+    const line = ok
+      ? `Address copied. In ${wallet}, send ${amount} ${asset} to it.`
+      : `Copy did not work here. Select the address above and send ${amount} ${asset} to it in ${wallet}.`;
+    note(line);
+    return line;
+  });
+}

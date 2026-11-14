@@ -15,11 +15,11 @@ import { createRoot } from "react-dom/client";
 import { PrivyProvider, usePrivy, useDepositFunds, useFundWallet } from "@privy-io/react-auth";
 import { embeddedWallets, privyConfig } from "./privy-app.jsx";
 import { DEFAULT_AMOUNT, baseUsdcReader, solanaUsdcReader, cardDeposit, formatUsdc, fundOptions, validAmount } from "./fund-balance.js";
-import { AMOUNT_CHIPS, NETWORKS, chipFromSearch, sendAmount, validAddress, walletLinks } from "./fund-links.js";
+import { AMOUNT_CHIPS, NETWORKS, chipFromSearch, copyToWallet, sendAmount, validAddress, walletLinks } from "./fund-links.js";
 import { watchBalance } from "./fund-watch.js";
 import { qrCode, qrPath } from "./qr.js";
 import { Swap } from "./screen.jsx";
-import { approvalKey, approvalOf, approvedAddresses, currentApproval, readCheck } from "./fund-approval.js";
+import { approvalOf, fundView, readCheck } from "./fund-approval.js";
 import { words } from "./brand-words.jsx";
 
 // The link this page was opened from may carry a signed hint for ONE account (as/account-bound.mjs): the server put
@@ -54,12 +54,12 @@ async function checkAccount(getAccessToken) {
 function Fund({ readers }) {
   const { ready, authenticated, user, getAccessToken, logout } = usePrivy();
   const wallets = embeddedWallets(user);
-  // The approval is tied to who is here and which wallets the browser holds (fund-approval.js). When either changes,
-  // `key` changes in this same render: the kept answer no longer counts, nothing is shown, and the server is asked again.
-  const key = ready && authenticated ? approvalKey(user?.id, wallets) : null;
   const [kept, setKept] = useState(null);
   const [attempt, setAttempt] = useState(0);
-  const hasWallet = !!wallets.base?.address;
+  // The approval is tied to who is here and which wallets the browser holds (fund-approval.js fundView). When either
+  // changes, `key` changes in this same render: the kept answer no longer counts, the screen is no longer "fund",
+  // no address is passed down, and the server is asked again. Only what the server confirmed is ever in `addresses`.
+  const { screen, key, hasWallet, approval, addresses } = fundView({ ready, authenticated, userId: user?.id, wallets, kept, validAddress });
   useEffect(() => {
     if (ready && !authenticated) location.assign(SIGN_IN);
   }, [ready, authenticated]);
@@ -76,13 +76,6 @@ function Fund({ readers }) {
       live = false;
     };
   }, [key, hasWallet, getAccessToken, attempt]);
-  const approval = currentApproval(kept, key);
-  // Only what the server confirmed for the bound account, and only while the same Privy user is here.
-  const shown = approvedAddresses({ userId: user?.id, wallets, approval });
-  const addresses = {
-    base: shown && validAddress("base", shown.base) ? shown.base : null,
-    solana: shown && validAddress("solana", shown.solana) ? shown.solana : null,
-  };
   /** Another account is here. The person presses this: it ends that session and opens the sign-in for the right one. */
   async function tryAgain() {
     try {
@@ -92,16 +85,10 @@ function Fund({ readers }) {
     }
     location.assign(SIGN_IN);
   }
-  const screen =
-    !ready || !authenticated ? "loading"
-    : !hasWallet ? "waiting"
-    : approval.status === "checking" ? "loading"
-    : approval.status === "expired" ? "expired"
-    : approval.status === "mismatch" || (approval.status === "ok" && !addresses.base) ? "mismatch"
-    : approval.status !== "ok" ? "error"
-    : "fund";
   return (
-    <Swap id={screen}>
+    // `instant`: the funding screen (address, wallet links, payment buttons) never lingers for an exit animation.
+    // The moment the approval no longer holds, it is out of the tree in that same render (screen-swap.js).
+    <Swap id={screen} instant>
       {screen === "loading" ? (
         <p role="status">{words("Loading your YEET wallet…")}</p>
       ) : screen === "expired" ? (
@@ -129,7 +116,8 @@ function Fund({ readers }) {
       ) : screen === "waiting" ? (
         <p role="status">{words("Your YEET wallets are still being set up. Reload this page in a moment.")}</p>
       ) : (
-        <FundWallet readers={readers} addresses={addresses} />
+        // Keyed to the approval: other addresses or another user is a new screen, never the old one updated.
+        <FundWallet key={approval.key} readers={readers} addresses={addresses} />
       )}
     </Swap>
   );
@@ -221,14 +209,7 @@ function FundWallet({ readers, addresses }) {
   }
 
   function copyFor(id) {
-    const wallet = WALLET_NAMES[id];
-    copyText(address).then((ok) =>
-      setLinkNote(
-        ok
-          ? `Address copied. In ${wallet}, send ${sendValue} ${net.asset} to it.`
-          : `Copy did not work here. Select the address above and send ${sendValue} ${net.asset} to it in ${wallet}.`,
-      ),
-    );
+    copyToWallet({ id, address, amount: sendValue, asset: net.asset, copy: copyText, note: setLinkNote });
   }
 
   const PAID = "Payment sent. Card payments can take a few minutes to reach your wallet.";
