@@ -17,7 +17,8 @@ import {versionInfo} from './version.mjs';
 import {overview,totalUsdc,welcomeSuggestions} from './overview.mjs';
 import {winnerOf} from './trade/pnl.mjs';
 import {boardAnswer} from './xp/boards.mjs';
-import {TERMS_VERSION,termsObject,checkAcceptance,termsOpen} from './terms.mjs';
+import {TERMS_VERSION,termsObject,checkAcceptance,termsOpen,termsLinkFor} from './terms.mjs';
+import {linkKey} from '#shared/link-token.mjs';
 import {acceptanceOf,recordAcceptance,referralOf,decideReferral,referralCode} from './terms-store.mjs';
 import {createAccountLogin,withCardAccount} from './account-login.mjs';
 import {hasScope} from '#scope-catalog';
@@ -155,7 +156,11 @@ app.use((q,r,next)=>{if(q.role==='mcp'){const needed=routeScope(q.method,q.path)
 // terms.accepted false and "review and accept the YEET terms" as its first suggestion) and the terms routes
 // themselves. The sign-in server's own routes (the account page, wallet set-up, the trade page of a trade that already
 // exists) and the operator's are not gated here.
-const termsOf=accountId=>termsObject(acceptanceOf(accountId,TERMS_VERSION));
+// The key the page links are signed with (shared/link-token.mjs: derived from core-as). Without it the links are plain.
+const pageKey=()=>{try{return linkKey()}catch{return null}};
+// terms.page_url is this account's own link: the terms page opens on the statements and Accept with no sign-in.
+const withTermsLink=(terms,accountId)=>terms.page_url?{...terms,page_url:termsLinkFor(accountId,{pageUrl:terms.page_url,key:pageKey()})}:terms;
+const termsOf=accountId=>withTermsLink(termsObject(acceptanceOf(accountId,TERMS_VERSION)),accountId);
 app.use((q,r,next)=>{
  if(q.role!=='mcp'||termsOpen(q.method,q.path))return next();
  const terms=termsOf(q.subject);
@@ -165,6 +170,9 @@ app.use((q,r,next)=>{
 app.get('/terms',(q,r)=>{if(q.role!=='mcp'&&q.role!=='as')return r.sendStatus(403);r.json({terms:termsOf(q.subject)})});
 // yeet_accept_terms (source chat, with ChatGPT's conversation id when it sent one) and the /account/terms page (source
 // page). Refused unless the version is the current one and every required statement is among `confirmed`.
+// `via: "link"` (sign-in server only): accepted on the page through the account's signed link, with no sign-in
+// (as/terms-page.mjs). Still source `page`; the client column says which of the two page paths it was.
+const TERMS_LINK_CLIENT='terms-link';
 app.post('/terms/accept',async(q,r)=>{
  if(q.role!=='mcp'&&q.role!=='as')return r.sendStatus(403);
  const b=q.body??{};
@@ -176,9 +184,9 @@ app.post('/terms/accept',async(q,r)=>{
   return r.status(403).json({...failure('TERMS_REQUIRED'),terms:termsOf(q.subject),reason:check.reason,missing:check.missing});
  }
  const session=source==='chat'&&typeof b.session==='string'?b.session.slice(0,200):null;
- const {record,fresh}=recordAcceptance({accountId:q.subject,version:TERMS_VERSION,statements:check.confirmed,source,clientId:q.role==='mcp'?q.principal.client:'terms-page',session});
+ const {record,fresh}=recordAcceptance({accountId:q.subject,version:TERMS_VERSION,statements:check.confirmed,source,clientId:q.role==='mcp'?q.principal.client:b.via==='link'?TERMS_LINK_CLIENT:'terms-page',session});
  console.log(JSON.stringify({event:'terms_accepted',account:q.subject,version:record.version,statements:record.statements,accepted_at:record.accepted_at,source:record.source,client:record.client_id,session:record.session,fresh}));
- const terms=termsObject(record);
+ const terms=withTermsLink(termsObject(record),q.subject);
  if(q.role==='as')return r.json({terms});
  // The overview, so the conversation continues; null when it cannot be read just now (the acceptance stands).
  let view=null;

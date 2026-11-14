@@ -65,6 +65,7 @@ import {
 } from "#shared/common.mjs";
 import { issuableScopes } from "./scopes.mjs";
 import { loginMethods } from "./login-methods.mjs";
+import { linkKey, verifyLinkToken } from "#shared/link-token.mjs";
 configuredRefreshWindow();
 // YEET_LOGIN_METHODS (login-methods.mjs): a wrong value stops the server here, not at the first sign-in.
 loginMethods();
@@ -349,6 +350,7 @@ function limit(max) {
 if (PUBLIC) {
   app.use("/account/login", limit(20));
   app.use("/account/wallets", limit(30));
+  app.use("/account/terms", limit(40));
   app.use("/interaction", limit(64));
   app.use("/reg", limit(20));
   app.use("/auth", limit(60));
@@ -652,7 +654,7 @@ app.post(USERNAME_PATH, formBody, async (q, r) => {
 // through Privy funding (Coinbase Onramp). Needs a YEET sign-in session and the Privy sign-in.
 fundRoutes(app, { enabled: () => process.env.PRIVY_LOGIN === "1", session });
 // The YEET terms as a first-party page with checkboxes (terms-page.mjs): the same record as yeet_accept_terms.
-termsRoutes(app, { session, originOK, equal, formBody, core: (route, account, body) => coreSend(route, account, secret("core-as"), body), document: authDocument });
+termsRoutes(app, { session, originOK, equal, formBody, linkToken: (t) => { try { return verifyLinkToken(linkKey(), t, { purpose: "terms" }); } catch { return null; } }, core: (route, account, body) => coreSend(route, account, secret("core-as"), body), document: authDocument });
 // Card signing (sign-page.mjs): the signer script the trade card loads, and the first-party signing page with its two
 // routes. The page's caller is the Privy user signed in on the page, matched to the account already linked to it.
 signRoutes(app, {

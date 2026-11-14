@@ -5,7 +5,8 @@
 //     statements   JSON array of the statement ids the person confirmed
 //     accepted_at  ms
 //     source       'chat' (yeet_accept_terms) or 'page' (/account/terms)
-//     client_id    the OAuth client the call came through (chat), or 'terms-page'
+//     client_id    the OAuth client the call came through (chat); 'terms-page' (the page, signed in) or 'terms-link'
+//                  (the page, through the account's signed link with no sign-in)
 //     session      ChatGPT's anonymized conversation id (_meta["openai/session"]) when it sent one, else NULL
 //   referrals(account_id)                    the win code: applied once (stands), or skipped (may still be applied).
 //
