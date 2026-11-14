@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {z} from 'zod';
 import {createMarket,cleanText,httpsUrl,xUrl,priceString,pct,mintOf,WRAPPED_SOL} from './market.mjs';
-import {coins,coin,coinSuggestions,symbolOf,tradable,coinLimits} from './coins.mjs';
+import {coins,coin,coinSuggestions,symbolOf,tradable,coinLimits,PAUSED} from './coins.mjs';
 import {limitsFromEnv} from './trade/limits.mjs';
 import {accountingFromEnv} from './trade/accounting.mjs';
 import {toolSchemas,zodSchema} from '../mcp/tool-contract.mjs';
@@ -177,14 +177,15 @@ test('yeet_coins: every coin with price and change, one request; with the source
  const value=await coins({market:createMarket({fetch:n.fetch,now:()=>1_800_000_000_000,env:{},log:quiet})});
  zodSchema(z,toolSchemas.yeet_coins.output).parse(value);
  assert.equal(n.urls.length,1,'what is moving is one call');
- assert.deepEqual(value.coins.map(c=>c.symbol),tradable().map(e=>e.symbol));
+ assert.deepEqual(value.coins.map(c=>c.symbol),tradable().map(e=>e.symbol).filter(s=>!PAUSED.has(s)));
+ assert.equal(await coin('MELANIA'),null,'a paused coin is not offered');
  assert.deepEqual(value.coins.find(c=>c.symbol==='WIF'),{symbol:'WIF',name:'dogwifhat',kind:'meme',price_usd:'0.143951',change_pct:{h1:-0.16,h6:-2.22,h24:-4.73}});
  assert.deepEqual(value.coins.find(c=>c.symbol==='BOME'),{symbol:'BOME',name:'BOOK OF MEME',kind:'meme',price_usd:null,change_pct:{h1:null,h6:null,h24:null}});
  assert.equal(value.as_of,'2027-01-15T08:00:00Z');
  assert.ok(JSON.stringify(value).length<2600,`the model reads this: ${JSON.stringify(value).length} characters`);
  const down=await coins({market:createMarket({fetch:net({'api.jup.ag':Error('down')}).fetch,env:{},log:quiet})});
  zodSchema(z,toolSchemas.yeet_coins.output).parse(down);
- assert.equal(down.as_of,null);assert.ok(down.coins.length>=9&&down.coins.every(c=>c.price_usd===null&&c.change_pct.h24===null));
+ assert.equal(down.as_of,null);assert.ok(down.coins.length>=8&&down.coins.every(c=>c.price_usd===null&&c.change_pct.h24===null));
  assert.deepEqual(down.limits,value.limits);
 });
 
@@ -201,7 +202,7 @@ test('yeet_coin: one coin with everything; each missing piece is null on its own
  assert.deepEqual(wif.suggestions.map(s=>[s.id,s.label]),[['research','Research WIF deeper'],['yeet','YEET WIF'],['moving','What else is moving?']]);
  assert.match(wif.suggestions[0].say,/history and recent news/);assert.equal(wif.suggestions[1].say,'YEET WIF','the words the card sends too');
  // Jupiter's own website and X stand in when the profile has none.
- const loud=await coin('LOUD',{market:createMarket({fetch:net({'api.jup.ag':jupiter,'/info':info({description:null,websites:[],twitter_handle:null})}).fetch,env:{},log:quiet})});
+ const loud=await coin('LOUD',{paused:new Set(),market:createMarket({fetch:net({'api.jup.ag':jupiter,'/info':info({description:null,websites:[],twitter_handle:null})}).fetch,env:{},log:quiet})});
  zodSchema(z,toolSchemas.yeet_coin.output).parse(loud);
  assert.deepEqual([loud.description,loud.website,loud.x,loud.holding],[null,'https://www.stayloud.io/','https://x.com/stayloudio',null]);
  assert.deepEqual(loud.change_pct,{h1:null,h6:null,h24:null});assert.equal(loud.price_usd,'0.000175729');assert.equal(loud.card_chart,undefined,'no history, no chart');

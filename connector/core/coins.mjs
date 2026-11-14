@@ -5,9 +5,13 @@ import {readFileSync} from 'node:fs';
 import {createMarket} from './market.mjs';
 import {limitsFromEnv} from './trade/limits.mjs';
 const catalogue=JSON.parse(readFileSync(new URL('../vendor/yeet-win/router/dist/src/catalog.json',import.meta.url),'utf8'));
+/** Coins the quote service has no route for right now: left out of the list and of single lookups until it has one. */
+export const PAUSED=new Set(['MELANIA','LOUD','NEARKAT']);
 export function tradable(entries=catalogue){
  return entries.filter(e=>e.chain==='solana'&&e.kind!=='funding');
 }
+/** The coins yeet_coins lists and yeet_coin answers for: the tradable ones minus the paused. */
+const listed=(paused=PAUSED)=>tradable().filter(e=>!paused.has(e.symbol));
 const usdcText=raw=>{const s=(raw/1_000_000n).toString(),f=(raw%1_000_000n).toString().padStart(6,'0').replace(/0+$/,'');return f?`${s}.${f}`:s};
 /** The same minimum leg and account-blind per-trade ceiling the trade engine enforces (trade/limits.mjs): an unset,
  * empty or blank variable (compose passes unset ones as '') is its default, as it is there. */
@@ -24,7 +28,7 @@ const defaultMarket=()=>shared??=createMarket();
 /** yeet_coins: every tradable coin with its price and its change over 1 hour, 6 hours and 24 hours, so "what is
  * moving" is one call. as_of: when the prices were read; null (and every price null) when they could not be. */
 export async function coins({market=defaultMarket()}={}){
- const list=tradable().slice(0,25);
+ const list=listed().slice(0,25);
  const {as_of,bySymbol}=await market.quotes(list);
  return {
   coins:list.map(e=>{const q=bySymbol.get(e.symbol);return {symbol:e.symbol,name:e.name,kind:e.kind,price_usd:q?.price_usd??null,change_pct:q?{...q.change_pct}:{...NO_CHANGE}}}),
@@ -49,10 +53,10 @@ export const coinSuggestions=symbol=>[
  * person's portfolio read, or null. `card_chart` (the 24 hourly prices) is for the card only: the connector moves it
  * to the result's _meta and the model never reads it. description, website and x are third-party (market.mjs).
  */
-export async function coin(symbol,{market=defaultMarket(),holding=null}={}){
- const e=tradable().slice(0,25).find(c=>c.symbol===symbol);
+export async function coin(symbol,{market=defaultMarket(),holding=null,paused=PAUSED}={}){
+ const e=listed(paused).slice(0,25).find(c=>c.symbol===symbol);
  if(!e)return null;
- const [{as_of,bySymbol},profile,points]=await Promise.all([market.quotes(tradable().slice(0,25)),market.profile(e),market.history(e)]);
+ const [{as_of,bySymbol},profile,points]=await Promise.all([market.quotes(listed(paused).slice(0,25)),market.profile(e),market.history(e)]);
  const q=bySymbol.get(e.symbol)??null;
  return {
   symbol:e.symbol,name:e.name,kind:e.kind,
