@@ -59,6 +59,8 @@ export const COPY=Object.freeze({
 
   balance_low_funding:"YEET propose_yeet.balance_low_funding: {base} {solana}.",
   cost_high:"YEET propose_yeet.cost_high: {cost_pct}.",
+
+  first_buy:", YEET propose_yeet.first_buy: {per_trade} {daily} {min}.",
   risk:"YEET propose_yeet.risk.",
  },
 
@@ -144,6 +146,9 @@ export const COPY=Object.freeze({
  },
 
  errors:{
+
+  LIMIT_EXCEEDED_trade:"YEET errors.LIMIT_EXCEEDED_trade: {tier}.",
+  LIMIT_EXCEEDED_daily:"YEET errors.LIMIT_EXCEEDED_daily: {tier} {hours} {s}.",
   LIMIT_EXCEEDED_Noob:"YEET errors.LIMIT_EXCEEDED_Noob: {winner_xp} {vip_over_xp}.",
   LIMIT_EXCEEDED_Winner:"YEET errors.LIMIT_EXCEEDED_Winner: {vip_over_xp}.",
   LIMIT_EXCEEDED_VIP:"YEET errors.LIMIT_EXCEEDED_VIP.",
@@ -176,6 +181,10 @@ export function fill(template,vars={}){
  return template.replace(/\{([a-z_]+)\}/g,(_m,k)=>{if(vars[k]===undefined||vars[k]===null)throw Error(`guidance slot ${k}`);return String(vars[k])});
 }
 const plural=n=>n===1?'':'s';
+
+const MAX_LENGTH=500;
+
+export const hoursToReset=(ms=Date.now())=>Math.max(1,Math.ceil((86_400_000-(ms%86_400_000))/3_600_000));
 const join=(...parts)=>parts.filter(Boolean).join(' ');
 const hasWheel=ctx=>!ctx||!ctx.tools||ctx.tools.has('daily_spin');
 const hasLucky=ctx=>!ctx||!ctx.tools||ctx.tools.has('lucky_wheel');
@@ -201,6 +210,13 @@ function home(r,ctx){
  const usdc=r.wallets?.base?.usdc;
  return positive(usdc)?fill(c.ready_usdc,{usdc}):c.ready;
 }
+const amount=v=>typeof v==='string'&&/^\d+(\.\d+)?$/.test(v);
+
+export function firstBuy(r){
+ const l=r?.limits;
+ if(r?.direction!=='yeet'||!l||!amount(l.per_trade_usdc)||!amount(l.daily_limit_usdc)||!amount(l.left_today_usdc)||!amount(r.min_leg_usdc))return null;
+ return Number(l.left_today_usdc)===Number(l.daily_limit_usdc)?{per_trade:l.per_trade_usdc,daily:l.daily_limit_usdc,min:r.min_leg_usdc}:null;
+}
 function proposal(r){
  const w=new Set(r.warnings??[]);
  if(r.direction==='skeet'){
@@ -212,7 +228,10 @@ function proposal(r){
  const low=both?fill(c.balance_low_funding,{base:r.funding.base_usdc,solana:r.funding.solana_usdc}):c.balance_low;
  const note=w.has('SIGNER_MISSING')?c.signer_missing:w.has('BALANCE_LOW')?low:w.has('COST_HIGH')?fill(c.cost_high,{cost_pct:r.totals?.cost_pct}):'';
  const head=!f?c.base:usdcOf(f,otherOf(f.chosen).toLowerCase())===null?fill(c.base_funded_unread,{network:netName(f.chosen),other:otherOf(f.chosen)}):fill(c.base_funded,{network:netName(f.chosen)});
- return join(head,note,c.risk);
+
+ const first=w.has('SIGNER_MISSING')||w.has('BALANCE_LOW')?null:firstBuy(r);
+ const intro=first?join(`${head.slice(0,-1)}${fill(c.first_buy,first)}.`,note,c.risk):'';
+ return intro&&intro.length<=MAX_LENGTH?intro:join(head,note,c.risk);
 }
 function trade(r,ctx){
  const c=COPY.trade,skeet=r.direction==='skeet',left=(r.sign_requests??[]).length;
@@ -303,12 +322,15 @@ export function guidanceFor(name,result,ctx){
  try{return f(result,ctx)}catch{return undefined}
 }
 
-export function refusalGuidance(code,message,ctx,{terms,reason}={}){
+export function refusalGuidance(code,message,ctx,{terms,reason,now=Date.now}={}){
  const e=COPY.errors;
  if(code==='TERMS_REQUIRED')return termsGuidance(terms,reason);
  if(code==='LIMIT_EXCEEDED'){
   const tier=typeof message==='string'?message.match(/\bas a (Noob|Winner|VIP)\b/)?.[1]:undefined;
-  return fill(tier?e[`LIMIT_EXCEEDED_${tier}`]:e.LIMIT_EXCEEDED,TIER_XP);
+  const kind=typeof message!=='string'?undefined:/\bper-trade limit\b/.test(message)?'trade':/\bdaily limit\b/.test(message)?'daily':undefined;
+  if(!tier||!kind)return e.LIMIT_EXCEEDED;
+  const hours=hoursToReset(now());
+  return join(fill(e[`LIMIT_EXCEEDED_${kind}`],{tier,hours,s:plural(hours)}),fill(e[`LIMIT_EXCEEDED_${tier}`],TIER_XP));
  }
  if(code==='TRADING_PAUSED'&&!hasWheel(ctx))return e.TRADING_PAUSED_no_wheel;
  if(code==='BALANCE_LOW'&&typeof message==='string'&&/you can trade up to/.test(message))return e.BALANCE_LOW_usdc;

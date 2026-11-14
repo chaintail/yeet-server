@@ -5,14 +5,16 @@ import assert from 'node:assert/strict';
 import {z} from 'zod';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
-import {COPY,TIER_XP,GUIDED_TOOLS,guidanceFor,refusalGuidance,fill} from '../guidance.mjs';
+import {COPY,TIER_XP,GUIDED_TOOLS,guidanceFor,refusalGuidance,fill,firstBuy,hoursToReset} from '../guidance.mjs';
 import {createMcpServer} from '../tool-registration.mjs';
 import {CARD_BUILD} from '../refresh.mjs';
 import {toolError} from '../errors.mjs';
 import {contract,toolSchemas,zodSchema} from '../tool-contract.mjs';
 import {FAILURE_CODES} from '#contracts/errors';
 import {allScopes} from '#scope-catalog';
-import {TIER_DEFAULTS,checkBasket,limitsFromEnv} from '../../core/trade/limits.mjs';
+import {TIER_DEFAULTS,checkBasket,checkDaily,capsFor,capsView,limitsFromEnv} from '../../core/trade/limits.mjs';
+import {utcDay} from '../../core/trade/util.mjs';
+import {instructions} from '../instructions.mjs';
 
 const ALL_P2={tools:new Set(Object.keys(contract.tools))};
 const P01={tools:new Set(Object.entries(contract.tools).filter(([,t])=>t.priority!=='P2').map(([n])=>n))};
@@ -232,6 +234,82 @@ test('refusals: LIMIT_EXCEEDED names the tier from the core sentence and what un
  assert.equal(refusalGuidance('TRADING_PAUSED',null,P01),COPY.errors.TRADING_PAUSED_no_wheel);
  assert.match(refusalGuidance('TEMPORARILY_UNAVAILABLE'),/could not get a price/,'no route or no liquidity comes back as TEMPORARILY_UNAVAILABLE');
  assert.match(refusalGuidance('CONFIRMATION_REQUIRED'),/expired and nothing was traded/);
+});
+
+// The limits as the core computes them for one account (limits.mjs capsFor over a daily_spend row), so no number here
+// is typed in: `spent` is today's BUY spend in USDC.
+const fakeDb=spent=>({prepare:()=>({get:()=>spent===null?undefined:{usdc_raw:String(BigInt(spent)*1_000_000n)}})});
+const coreLimits=limitsFromEnv({});
+const capsOf=(xpTotal,spent=null)=>capsFor(fakeDb(spent),coreLimits,'yeet-privy-a',Date.UTC(2026,10,14,12),xpTotal);
+const minLeg=String(coreLimits.minLegRaw/1_000_000n);
+const withLimits=(xpTotal,spent,over={})=>proposal({min_leg_usdc:minLeg,limits:capsView(capsOf(xpTotal,spent)),...over});
+const VOICE=/\bsign(s|ed|ing)?\b|\bsignatures?\b|\bwallets?\b|\bBase\b|\bSolana\b|\bNEAR\b|\bEthereum\b|profit|recommend/i;
+
+test('first buy: the proposal guidance says the account\'s own limits once, from the result; never after a buy counted today',()=>{
+ for(const [xpTotal,name] of [[0,'Noob'],[69,'Winner'],[1001,'VIP']]){
+  const tier=TIER_DEFAULTS.find(t=>t.name===name),r=withLimits(xpTotal,null);
+  assert.equal(r.limits.tier,name);
+  for(const tool of ['yeet_propose','yeet_quote']){
+   const out=g(tool,r);
+   assert.equal(out,`YEET text: ${tier.trade} ${tier.daily} ${minLeg}.`,`${name} ${tool}`);
+   assert.doesNotMatch(out.replace(COPY.propose_yeet.risk,''),VOICE,name);
+  }
+ }
+ assert.deepEqual(firstBuy(withLimits(0,null)),{per_trade:'25',daily:'100',min:'3'},'the Noob numbers of limits.mjs, read from the result');
+ // An account with a buy already counted today: the line is gone, on the proposal and on every fresh quote.
+ const bought=withLimits(0,10);
+ assert.equal(bought.limits.left_today_usdc,'90');assert.equal(firstBuy(bought),null);
+ for(const tool of ['yeet_propose','yeet_quote']){
+  assert.equal(g(tool,bought),`${COPY.propose_yeet.base} ${COPY.propose_yeet.risk}`,tool);assert.doesNotMatch(g(tool,bought),/limits/);
+ }
+ // With the network that pays, and with the cost note: still one result, within the contract's 500 characters.
+ const funded=g('yeet_propose',withLimits(0,null,{funding:{base_usdc:'40',solana_usdc:null,chosen:'base'},warnings:['COST_HIGH'],totals:{in_usd:'20',out_usd:'18.6',cost_pct:7,time_estimate_s:40}}));
+ assert.match(funded,/YEET/);
+ assert.match(funded,/swap costs are 7% of this basket right now\. Meme coins can go to zero\.$/);assert.ok(funded.length<=500,String(funded.length));
+ // They cannot trade yet (set-up or USDC missing): the line waits for the proposal they can use.
+ for(const warn of ['SIGNER_MISSING','BALANCE_LOW'])assert.doesNotMatch(g('yeet_propose',withLimits(0,null,{warnings:[warn]})),/limits/,warn);
+ // Never on a SKEET, and never without the numbers (an engine without XP tiers sends no limits).
+ const skeet=withLimits(0,null,{direction:'skeet',next:'⚡ SKEET is ready in the card.'});
+ assert.equal(g('skeet_propose',skeet),COPY.propose_skeet.base);
+ assert.equal(g('yeet_propose',proposal({min_leg_usdc:minLeg})),`${COPY.propose_yeet.base} ${COPY.propose_yeet.risk}`);
+ assert.equal(firstBuy({...withLimits(0,null),min_leg_usdc:undefined}),null);
+});
+
+test('limit refusals: which limit, the numbers from the core sentence, what works now, the reset, and that limits rise with XP',()=>{
+ const at=Date.UTC(2026,10,14,19,30),told=e=>{try{e()}catch(x){return x.userMessage}assert.fail('no refusal')};
+ 
+ const tradeMsg=told(()=>checkBasket(coreLimits,[26n*1_000_000n],capsOf(0)));
+ assert.match(tradeMsg,/25 USDC per-trade limit as a Noob/);
+ const trade=refusalGuidance('LIMIT_EXCEEDED',tradeMsg,ALL_P2,{now:()=>at});rules('trade',trade);
+ assert.match(trade,/YEET/);
+ assert.match(trade,/YEET/);
+ assert.doesNotMatch(trade,/hour/,'the per-trade limit has no reset');
+ // Daily: what is left today (in the core sentence), or when the day starts again.
+ const dailyMsg=told(()=>checkDaily(fakeDb(90),coreLimits,'yeet-privy-a',at,20n*1_000_000n,0));
+ assert.match(dailyMsg,/100 USDC daily limit as a Noob \(0 XP\): you have 10 USDC left today/);
+ const daily=refusalGuidance('LIMIT_EXCEEDED',dailyMsg,ALL_P2,{now:()=>at});rules('daily',daily);
+ assert.equal(daily,"YEET text.");
+ // The reset is the core's own day (trade/util.mjs utcDay): the hour count always lands in the next day, never before.
+ for(const ms of [at,Date.UTC(2026,10,14,0,0,0),Date.UTC(2026,10,14,23,59,59),Date.UTC(2026,10,14,23,0,0)]){
+  const h=hoursToReset(ms);assert.ok(h>=1&&h<=24,String(h));
+  assert.notEqual(utcDay(ms+h*3_600_000),utcDay(ms));assert.equal(utcDay(ms+(h-1)*3_600_000-1),utcDay(ms));
+ }
+ assert.match(refusalGuidance('LIMIT_EXCEEDED',dailyMsg,ALL_P2,{now:()=>Date.UTC(2026,10,14,23,30)}),/in about 1 hour\./);
+ const vip=refusalGuidance('LIMIT_EXCEEDED',told(()=>checkBasket(coreLimits,[501n*1_000_000n],capsOf(5000))),ALL_P2,{now:()=>at});
+ assert.match(vip,/YEET/);
+ // Under the minimum per coin: the number is in the catalogue message, the guidance says what would work.
+ const small=JSON.parse(toolError({error:'AMOUNT_TOO_SMALL'}).content[0].text);
+ assert.match(small.message,new RegExp(`\\(${minLeg} USDC\\)`));
+ assert.equal(small.guidance,'YEET errors.AMOUNT_TOO_SMALL.');
+ for(const text of [trade,daily,vip,small.guidance])assert.doesNotMatch(text,VOICE);
+ // Through the tool error the model reads: the core sentence and the guidance together.
+ const v=JSON.parse(toolError({error:'LIMIT_EXCEEDED',message:dailyMsg}).content[0].text);
+ assert.equal(v.message,dailyMsg);assert.match(v.guidance,/YEET/);
+});
+
+test('instructions: why the limits are low, in one line',()=>{
+ assert.match(instructions,/YEET/);
+ assert.doesNotMatch(instructions,/\bNEAR\b/);
 });
 
 test('tool errors carry guidance in the JSON the model reads; the failure shape still validates and the card fields are unchanged',()=>{
