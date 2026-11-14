@@ -2,7 +2,7 @@
 // itself against a stand-in for Privy's useLinkEmail and for POST /account/email-step.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { COPY, RESEND_SECONDS, codeDigits, createEmailStep, linkProblem, maskEmail, needsEmailStep, personOf, resendIn } from "./email-step.js";
+import { COPY, MAX_SENDS, RESEND_DELAYS, RESEND_SECONDS, codeDigits, createEmailStep, linkProblem, mark, maskEmail, needsEmailStep, personOf, resendIn, tokenUser } from "./email-step.js";
 
 const google = (email = "luke@gmail.com") => ({ type: "google_oauth", email });
 const apple = (email = null) => ({ type: "apple_oauth", email });
@@ -13,8 +13,13 @@ const LIAM = person("liam", google(), wallet);
 
 const refuse = (code, status = 400) => Object.assign(Error(code), { privyErrorCode: code, status });
 /** Privy and the server as the step calls them. `sent` / `codes`: what went out. */
-function world({ user = LIAM, taken = [], start = async () => "note-1", after = null, sendFails = null } = {}) {
-  const w = { sent: [], codes: [], starts: 0, states: [], clock: 1_000_000 };
+function memory(text = null) {
+  const m = { text, get: () => m.text, set: (v) => { m.text = v; } };
+  return m;
+}
+function world({ user = LIAM, taken = [], start = async () => "note-1", after = null, sendFails = null, store = memory(), clock = 1_000_000 } = {}) {
+  // `here`: the Privy user id of the browser's session right now (another tab can change it under the screen).
+  const w = { sent: [], codes: [], starts: 0, states: [], clock, here: user?.id ?? null, asked: 0, store };
   let address = "";
   w.step = createEmailStep({
     user,
@@ -34,6 +39,8 @@ function world({ user = LIAM, taken = [], start = async () => "note-1", after = 
       },
     },
     start: async () => { w.starts++; return start(); },
+    current: async () => { w.asked++; if (w.here instanceof Error) throw w.here; return w.here; },
+    store,
     onChange: (s) => w.states.push(s),
     now: () => w.clock,
   });
@@ -235,7 +242,192 @@ test("Send again waits out its cooldown, then sends to the same address", async 
   assert.equal(resendIn(w.step.state(), w.clock), 0);
   await w.step.resend();
   assert.deepEqual(w.sent, ["luke@gmail.com", "luke@gmail.com"]);
-  assert.equal(resendIn(w.step.state(), w.clock), RESEND_SECONDS);
+});
+
+test("every code goes through one gate: 30 s, then 60 s, then 120 s per address, five codes per step", async () => {
+  assert.deepEqual([...RESEND_DELAYS], [30, 60, 120]);
+  assert.equal(MAX_SENDS, 5);
+  const w = world();
+  await w.step.begin();
+  const waits = [];
+  for (let i = 0; i < 4; i++) {
+    waits.push(resendIn(w.step.state(), w.clock));
+    w.clock += waits.at(-1) * 1000;
+    await w.step.resend();
+  }
+  assert.deepEqual(waits, [30, 60, 120, 120]);
+  assert.equal(w.sent.length, 5);
+  assert.equal(w.step.state().sendsLeft, 0);
+  // The sixth never goes out: not by Send again, not by typing an address.
+  w.clock += 3600_000;
+  await w.step.resend();
+  assert.equal(w.step.state().error, COPY.no_more);
+  w.step.different();
+  await w.step.sendTo("luke@work.example");
+  assert.equal(w.step.state().error, COPY.no_more);
+  assert.equal(w.sent.length, 5);
+  w.step.skip();
+  assert.equal(w.step.state().outcome, "skipped", "the person still connects");
+});
+
+test("Use a different email with the SAME address does not get around the wait", async () => {
+  const w = world();
+  await w.step.begin();
+  w.step.different();
+  await w.step.sendTo("luke@gmail.com");
+  assert.deepEqual(w.sent, ["luke@gmail.com"], "no second code");
+  let s = w.step.state();
+  assert.equal(s.view, "code");
+  assert.equal(s.typing, false);
+  assert.equal(s.error, null);
+  assert.equal(resendIn(s, w.clock), RESEND_SECONDS, "the countdown is the one that was running");
+  // Another address gets its code, and going back to the first one inside its wait is refused with the seconds.
+  w.clock += 5000;
+  w.step.different();
+  await w.step.sendTo("luke@work.example");
+  assert.deepEqual(w.sent, ["luke@gmail.com", "luke@work.example"]);
+  w.step.different();
+  await w.step.sendTo("LUKE@gmail.com");
+  s = w.step.state();
+  assert.equal(s.error, COPY.wait(25));
+  assert.equal(s.email, "luke@work.example");
+  assert.equal(w.sent.length, 2);
+});
+
+test("a reload inside the wait sends nothing by itself; the count and the wait come back from the store", async () => {
+  const store = memory();
+  const first = world({ store });
+  await first.step.begin();
+  assert.deepEqual(first.sent, ["luke@gmail.com"]);
+  // What the browser keeps: counts and times. No address, no user id.
+  assert.doesNotMatch(store.text, /liam|gmail|did:privy|@/);
+  assert.deepEqual(Object.keys(JSON.parse(store.text)).sort(), ["a", "n", "u"]);
+  // The page is loaded again 10 seconds later.
+  const again = world({ store, clock: first.clock + 10_000 });
+  await again.step.begin();
+  let s = again.step.state();
+  assert.deepEqual(again.sent, [], "no code by itself");
+  assert.equal(s.view, "code");
+  assert.equal(s.masked, "l•••@g•••.com");
+  assert.equal(resendIn(s, again.clock), 20, "Send again in 20s");
+  assert.equal(s.error, COPY.reloaded);
+  await again.step.resend();
+  assert.deepEqual(again.sent, []);
+  // The code from before the reload cannot be used on this page, and is never handed to Privy.
+  await again.step.confirm("123456");
+  assert.deepEqual(again.codes, []);
+  assert.equal(again.step.state().error, COPY.reloaded);
+  // After the wait: Send again sends the second code, and the wait after it is the second one.
+  again.clock += 20_000;
+  await again.step.resend();
+  assert.deepEqual(again.sent, ["luke@gmail.com"]);
+  assert.equal(resendIn(again.step.state(), again.clock), 60);
+  await again.step.confirm("123456");
+  assert.equal(again.step.state().outcome, "linked");
+  // A reload after the wait sends by itself, and counts.
+  const third = world({ store, clock: again.clock + 600_000 });
+  await third.step.begin();
+  assert.deepEqual(third.sent, ["luke@gmail.com"]);
+  assert.equal(third.step.state().sendsLeft, MAX_SENDS - 3);
+  // Another person in the same browser starts with a clean count; a record that does not read is a clean count too.
+  const ava = world({ store, user: person("ava", apple("ava@icloud.com")), clock: third.clock });
+  assert.equal(ava.step.state().sendsLeft, MAX_SENDS);
+  assert.equal(world({ store: memory("{not json") }).step.state().sendsLeft, MAX_SENDS);
+  assert.equal(world({ store: null }).step.state().sendsLeft, MAX_SENDS);
+  assert.notEqual(mark("did:privy:liam|luke@gmail.com"), mark("did:privy:liam|luke@work.example"));
+});
+
+test("the browser's session became someone else before the code is SENT: nothing is sent, the step stops", async () => {
+  const w = world();
+  w.here = "did:privy:someone-else";
+  await w.step.begin();
+  assert.equal(w.step.state().view, "changed");
+  assert.equal(w.starts, 0, "not even the server is asked");
+  assert.deepEqual(w.sent, []);
+  // Later, on Send again and on a typed address.
+  for (const act of [(v) => v.step.resend(), async (v) => { v.step.different(); await v.step.sendTo("x@work.example"); }]) {
+    const v = world();
+    await v.step.begin();
+    v.clock += 31_000;
+    v.here = "did:privy:someone-else";
+    await act(v);
+    assert.equal(v.step.state().view, "changed");
+    assert.equal(v.step.state().token, "");
+    assert.deepEqual(v.sent, ["luke@gmail.com"]);
+  }
+});
+
+test("the browser's session became someone else before the code is USED: Privy is never called with it", async () => {
+  for (const here of ["did:privy:someone-else", null, Error("no session")]) {
+    const w = world();
+    await w.step.begin();
+    w.here = here;
+    await w.step.confirm("123456");
+    const s = w.step.state();
+    assert.deepEqual(w.codes, [], "linkWithCode did not run");
+    assert.equal(s.view, "changed");
+    assert.equal(s.outcome, null);
+    assert.equal(s.token, "");
+    // Nothing brings the stopped screen back, even when the first person returns.
+    w.here = LIAM.id;
+    await w.step.confirm("123456");
+    await w.step.resend();
+    w.step.different();
+    w.step.skip();
+    await w.step.check();
+    assert.deepEqual(w.codes, []);
+    assert.equal(w.step.state().view, "changed");
+    assert.equal(w.step.state().outcome, null);
+  }
+});
+
+test("the user is read at the moment of each call, not remembered", async () => {
+  const w = world();
+  await w.step.begin();
+  const before = w.asked;
+  await w.step.confirm("000000");
+  assert.equal(w.asked, before + 1);
+  await w.step.confirm("123456");
+  assert.equal(w.asked, before + 2);
+  // A step with no way to read the live user never sends anything.
+  const blind = createEmailStep({ user: LIAM, link: { sendCode: async () => assert.fail("sent"), linkWithCode: async () => assert.fail("linked") }, start: async () => "note" });
+  await blind.begin();
+  assert.equal(blind.state().view, "changed");
+});
+
+test("coming back to the page (focus, visibility, a changed Privy user): a stale screen stops before it is used", async () => {
+  const w = world();
+  await w.step.begin();
+  await w.step.check();
+  assert.equal(w.step.state().view, "code", "the same person: nothing happens");
+  w.here = "did:privy:someone-else";
+  await w.step.check();
+  assert.equal(w.step.state().view, "changed");
+  // A call that is still open when the step stops cannot finish it.
+  let release;
+  const slow = world();
+  await slow.step.begin();
+  const held = createEmailStep({
+    user: LIAM,
+    link: { sendCode: async () => {}, linkWithCode: () => new Promise((r) => { release = () => r({ ...LIAM, linkedAccounts: [...LIAM.linkedAccounts, emailLogin("luke@gmail.com")] }); }) },
+    start: async () => "note",
+    current: async () => slow.here,
+  });
+  await held.begin();
+  const pending = held.confirm("123456");
+  await new Promise((r) => setImmediate(r));
+  slow.here = null;
+  await held.check();
+  release();
+  await pending;
+  assert.equal(held.state().view, "changed");
+  assert.equal(held.state().outcome, null);
+});
+
+test("the user id in an access token", () => {
+  const token = (claims) => `h.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.s`;
+  assert.equal(tokenUser(token({ sub: "did:privy:liam" })), "did:privy:liam");
+  for (const bad of [token({}), token({ sub: 7 }), "harness-token", "", null, undefined, "a.b.c"]) assert.equal(tokenUser(bad), null);
 });
 
 test("no address from Apple: the person types one, with the line about hidden addresses", async () => {

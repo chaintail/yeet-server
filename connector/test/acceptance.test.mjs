@@ -727,7 +727,16 @@ test('the email step of the connect screen: the note is for one Privy user; a si
  r=await plain(MALLORY,again);assert.equal(r.status,409);assert.ok((await r.text()).includes(CHANGED_LINE));
  r=await plain(ALICE,again);assert.equal(r.status,302);
  // The setting off: the route is gone (the page is told with /account/identity-config and never asks).
+ // A form from a page that was still open carries a note: it is not read. Every sign-in that was refused above
+ // goes through exactly as it did before the step existed.
  process.env.YEET_SIGNUP_EMAIL_STEP='0';
- try{assert.equal((await start(ALICE)).status,404)}finally{delete process.env.YEET_SIGNUP_EMAIL_STEP}
+ try{
+  assert.equal((await start(ALICE)).status,404);
+  r=await login(MALLORY,again);assert.equal(r.status,303);
+  r=await login(ALICE,step+'x');assert.equal(r.status,303);
+  r=await login(ALICE,'');assert.equal(r.status,303);
+  r=await plain(ALICE,'nonsense');assert.equal(r.status,302);
+ }finally{delete process.env.YEET_SIGNUP_EMAIL_STEP}
+ r=await login(ALICE,step+'x');assert.equal(r.status,409);
  assert.equal((await start(ALICE)).status,200);
 });

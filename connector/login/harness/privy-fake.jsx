@@ -13,7 +13,8 @@ export function usePrivy() {
     ready: h.ready !== false,
     authenticated: !!h.authenticated,
     user: h.user || null,
-    getAccessToken: async () => "harness-token",
+    // Shaped like an access token whose user is the harness user (the email step reads who the session is from it).
+    getAccessToken: async () => (h.user?.id ? `h.${btoa(JSON.stringify({ sub: h.user.id }))}.s` : "harness-token"),
     logout: async () => {},
   };
 }

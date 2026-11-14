@@ -16,6 +16,7 @@ const identity = async ({privy_access_token: t}) => { if (!Object.hasOwn(TOKENS,
 let lookups = 0, coreDown = false;
 const lookup = async ({privy_access_token: t}) => { lookups++; if (coreDown) throw Error('core'); return TOKENS[t]?.account ?? null; };
 const read = stepReader(key);
+const ON = () => true, OFF = () => false;
 
 test('YEET_SIGNUP_EMAIL_STEP: on by default, off with 0, off, false or no; anything else stops the server', () => {
   for (const on of [undefined, null, '', '1', 'on', 'true', 'yes', ' ON ']) assert.equal(signupEmailStep(on), true, String(on));
@@ -51,32 +52,32 @@ test('a link token never verifies as a note, and a note never as a link token', 
 
 test('the sign-in with no note is the sign-in as it always was: nobody is verified twice', async () => {
   let asked = 0;
-  assert.equal(await stepGuard({privy_access_token: 'tok:gina'}, {read, identity: async (b) => { asked++; return identity(b); }}), null);
+  assert.equal(await stepGuard({privy_access_token: 'tok:gina'}, {read, on: ON, identity: async (b) => { asked++; return identity(b); }}), null);
   assert.equal(asked, 0);
   assert.doesNotThrow(() => stepAccount(null, GINA));
 });
 
 test('same user: the person who signs in is the person the step was started by', async () => {
   const note = mintStepToken(key, {did: 'did:privy:gina', account: GINA});
-  const step = await stepGuard({privy_access_token: 'tok:gina', [STEP_FIELD]: note}, {read, identity});
+  const step = await stepGuard({privy_access_token: 'tok:gina', [STEP_FIELD]: note}, {read, identity, on: ON});
   assert.equal(step.d, 'did:privy:gina');
   assert.doesNotThrow(() => stepAccount(step, GINA));
   // A new person: the note names no account; the sign-in may then create theirs.
-  const fresh = await stepGuard({privy_access_token: 'tok:new', [STEP_FIELD]: mintStepToken(key, {did: 'did:privy:new'})}, {read, identity});
+  const fresh = await stepGuard({privy_access_token: 'tok:new', [STEP_FIELD]: mintStepToken(key, {did: 'did:privy:new'})}, {read, identity, on: ON});
   assert.doesNotThrow(() => stepAccount(fresh, 'yeet-privy-newAAAAAAAAAAAAAAAAAA'));
 });
 
 test('mismatch: another Privy user, or another account, is refused before anything is resolved', async () => {
   const note = mintStepToken(key, {did: 'did:privy:gina', account: GINA});
-  await assert.rejects(stepGuard({privy_access_token: 'tok:emil', [STEP_FIELD]: note}, {read, identity}), (e) => e instanceof StepChanged && e.why === 'user');
-  await assert.rejects(stepGuard({privy_access_token: 'tok:new', [STEP_FIELD]: note}, {read, identity}), StepChanged);
-  const step = await stepGuard({privy_access_token: 'tok:gina', [STEP_FIELD]: note}, {read, identity});
+  await assert.rejects(stepGuard({privy_access_token: 'tok:emil', [STEP_FIELD]: note}, {read, identity, on: ON}), (e) => e instanceof StepChanged && e.why === 'user');
+  await assert.rejects(stepGuard({privy_access_token: 'tok:new', [STEP_FIELD]: note}, {read, identity, on: ON}), StepChanged);
+  const step = await stepGuard({privy_access_token: 'tok:gina', [STEP_FIELD]: note}, {read, identity, on: ON});
   assert.throws(() => stepAccount(step, EMIL), (e) => e instanceof StepChanged && e.why === 'account');
   assert.throws(() => stepAccount(step, null), StepChanged);
   // An identity check that answers nothing usable is a refusal, never a pass.
-  await assert.rejects(stepGuard({[STEP_FIELD]: note}, {read, identity: async () => ({})}), StepChanged);
+  await assert.rejects(stepGuard({[STEP_FIELD]: note}, {read, on: ON, identity: async () => ({})}), StepChanged);
   // A credential that does not verify stays what it was: the sign-in's own failure.
-  await assert.rejects(stepGuard({privy_access_token: 'tok:nobody', [STEP_FIELD]: note}, {read, identity}), /invalid/);
+  await assert.rejects(stepGuard({privy_access_token: 'tok:nobody', [STEP_FIELD]: note}, {read, identity, on: ON}), /invalid/);
 });
 
 test('a note that was supplied but does not verify is refused, never dropped', async () => {
@@ -85,7 +86,7 @@ test('a note that was supplied but does not verify is refused, never dropped', a
   const note = mintStepToken(key, {did: 'did:privy:gina', account: GINA});
   for (const bad of [stale, foreign, '', 'nonsense', [note, note], `${note}x`]) {
     let asked = 0;
-    await assert.rejects(stepGuard({privy_access_token: 'tok:gina', [STEP_FIELD]: bad}, {read, identity: async (b) => { asked++; return identity(b); }}), (e) => e instanceof StepChanged && e.why === 'expired');
+    await assert.rejects(stepGuard({privy_access_token: 'tok:gina', [STEP_FIELD]: bad}, {read, on: ON, identity: async (b) => { asked++; return identity(b); }}), (e) => e instanceof StepChanged && e.why === 'expired');
     assert.equal(asked, 0);
   }
   assert.deepEqual(read.state(undefined), {supplied: false, step: null});
@@ -148,12 +149,27 @@ test('the setting off: the route is gone, and a sign-in without a note goes on a
   on = true;
   assert.equal(r.status, 404);
   assert.equal(r.body, null);
-  assert.equal(await stepGuard({privy_access_token: 'tok:gina'}, {read, identity}), null);
+  assert.equal(await stepGuard({privy_access_token: 'tok:gina'}, {read, identity, on: OFF}), null);
+});
+
+test('the setting off: a note on an old form is not read at all (no refusal, nobody verified for it)', async () => {
+  const note = mintStepToken(key, {did: 'did:privy:gina', account: GINA});
+  const stale = mintStepToken(key, {did: 'did:privy:gina', account: GINA, now: Date.now() - (STEP_TTL_S + 1) * 1000});
+  let asked = 0, reads = 0;
+  const counting = Object.assign((t) => { reads++; return read(t); }, {state: (v) => { reads++; return read.state(v); }});
+  const identityCounted = async (b) => { asked++; return identity(b); };
+  for (const on of [OFF, undefined, () => 'yes', () => 1])
+    for (const [token, value] of [['tok:gina', note], ['tok:emil', note], ['tok:gina', stale], ['tok:gina', 'nonsense'], ['tok:gina', ''], ['tok:nobody', note]])
+      assert.equal(await stepGuard({privy_access_token: token, [STEP_FIELD]: value}, {read: counting, identity: identityCounted, on}), null);
+  assert.equal(asked, 0);
+  assert.equal(reads, 0);
+  // stepAccount with no step passes anyone, as before the step existed.
+  assert.doesNotThrow(() => stepAccount(null, EMIL));
 });
 
 test('the whole trip: start, then the sign-in of the same person passes and of another is refused', async () => {
   const {body: {step}} = await post({privy_access_token: 'tok:gina'});
-  const claims = await stepGuard({privy_access_token: 'tok:gina', [STEP_FIELD]: step}, {read, identity});
+  const claims = await stepGuard({privy_access_token: 'tok:gina', [STEP_FIELD]: step}, {read, identity, on: ON});
   assert.doesNotThrow(() => stepAccount(claims, TOKENS['tok:gina'].account));
-  await assert.rejects(stepGuard({privy_access_token: 'tok:emil', [STEP_FIELD]: step}, {read, identity}), StepChanged);
+  await assert.rejects(stepGuard({privy_access_token: 'tok:emil', [STEP_FIELD]: step}, {read, identity, on: ON}), StepChanged);
 });

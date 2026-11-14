@@ -24,6 +24,7 @@
 //     created, linked or switched for them;
 //   - a note that was SUPPLIED but does not verify (expired, altered) is refused the same way. It is never dropped
 //     in favour of whoever is signed in. A sign-in with no note at all is the sign-in as it always was;
+//   - with the setting off the field is not read at all: no refusal, no call to the core, whatever an old page posts;
 //   - the server never links, merges or moves an email, and keeps no record of the step. Whether an account has an
 //     email login is read from Privy when a card needs it (core/account-login.mjs).
 //
@@ -99,9 +100,12 @@ export class StepChanged extends Error{
  *   body      the sign-in form            read: stepReader(key)
  *   identity  (body) -> {did}: the verified identity behind the form's credential (shared/common.mjs
  *             verifiedIdentity; it throws when the credential does not verify, and so does this)
- * -> null (no note: the sign-in as it always was) or the note's claims. Throws StepChanged.
+ *   on        () -> the setting. Off: the field is not read at all, whatever a form still carries (a page that was
+ *             open when the step was turned off): the sign-in is exactly the sign-in without the step
+ * -> null (no note, or the step is off: the sign-in as it always was) or the note's claims. Throws StepChanged.
  */
-export async function stepGuard(body,{read,identity}){
+export async function stepGuard(body,{read,identity,on}){
+ if(typeof on!=='function'||on()!==true)return null;
  const {supplied,step}=read.state(body?.[STEP_FIELD]);
  if(!supplied)return null;
  if(!step)throw new StepChanged('expired');

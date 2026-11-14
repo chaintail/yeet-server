@@ -7,8 +7,8 @@
 // A method still appears only when the Privy app has it on (login/login-methods.js enabledMethods), so Apple shows up
 // by itself once it is switched on there. `google,apple,email` is the behaviour before this setting existed.
 //
-// Why email is off by default: Privy keeps one user per login method and never merges an email-code user into a
-// Google user with the same address, so a person who uses both ends up with two YEET accounts and two wallets.
+// Why email is off by default: a person who comes in once with an emailed code and once with Google can end up
+// with two YEET accounts and two wallets, and YEET never merges accounts or moves a login between them.
 export const METHOD_IDS=Object.freeze(['google','apple','email']);
 export const DEFAULT_LOGIN_METHODS=Object.freeze(['google','apple']);
 /** The setting as a list in page order. Throws on an unknown name or an empty list (the server then does not start). */

@@ -10,7 +10,7 @@
 //            It is never called when the session turned out to be someone else: the page stops there.
 import React, { useEffect, useRef, useState } from "react";
 import { usePrivy, useLinkEmail } from "@privy-io/react-auth";
-import { COPY, codeDigits, createEmailStep, resendIn } from "./email-step.js";
+import { COPY, codeDigits, createEmailStep, resendIn, tokenUser } from "./email-step.js";
 import { words } from "./brand-words.jsx";
 import { Swap } from "./screen.jsx";
 
@@ -27,6 +27,37 @@ async function startOnServer(getAccessToken) {
   if (!res.ok) throw Error(`email-step-${res.status}`);
   const body = await res.json();
   return typeof body?.step === "string" ? body.step : "";
+}
+
+/** What the step keeps across a reload of the page: how many codes went out and when the next may (email-step.js). */
+const SENDS_KEY = "yeet-email-step";
+const sendStore = {
+  get: () => {
+    try {
+      return sessionStorage.getItem(SENDS_KEY);
+    } catch {
+      return null;
+    }
+  },
+  set: (text) => {
+    try {
+      sessionStorage.setItem(SENDS_KEY, text);
+    } catch {
+      /* kept for this page only */
+    }
+  },
+};
+
+/**
+ * The Privy user of this browser's session at this moment, or null. Two readings that must agree: the user the
+ * React SDK holds now (not the one this screen started with), and the user in the access token the SDK hands out
+ * now, which it reads from the browser's storage that every tab of this site shares.
+ */
+async function sessionUser(calls) {
+  const held = calls.current.user?.id;
+  if (typeof held !== "string" || !held) return null;
+  const token = await calls.current.getAccessToken();
+  return token && tokenUser(token) === held ? held : null;
 }
 
 /** The page heading (as/viewer/page.js draws it in the display type); the page's own heading comes back after. */
@@ -56,7 +87,7 @@ export function EmailStep({ onDone }) {
   const { sendCode, linkWithCode } = useLinkEmail();
   // The hooks hand out new functions as the session changes; the step always calls the latest.
   const calls = useRef({});
-  calls.current = { sendCode, linkWithCode, getAccessToken };
+  calls.current = { sendCode, linkWithCode, getAccessToken, user };
   const [state, setState] = useState(null);
   const [code, setCode] = useState(""),
     [email, setEmail] = useState(""),
@@ -71,12 +102,35 @@ export function EmailStep({ onDone }) {
         linkWithCode: async (value) => (await calls.current.linkWithCode({ code: value })).user,
       },
       start: () => startOnServer(calls.current.getAccessToken),
+      current: () => sessionUser(calls),
+      store: sendStore,
       onChange: setState,
     });
   const s = state ?? step.current.state();
 
   useEffect(() => {
     step.current.begin();
+  }, []);
+  // Whose screen is this? Asked again whenever the SDK's user changes and whenever the page comes back into view
+  // (another tab may have changed the session meanwhile): a stale screen stops before anyone can use it.
+  const userId = user?.id ?? "";
+  useEffect(() => {
+    step.current.check();
+  }, [userId]);
+  useEffect(() => {
+    const look = () => {
+      if (document.visibilityState !== "hidden") step.current.check();
+    };
+    window.addEventListener("focus", look);
+    window.addEventListener("pageshow", look);
+    window.addEventListener("storage", look);
+    document.addEventListener("visibilitychange", look);
+    return () => {
+      window.removeEventListener("focus", look);
+      window.removeEventListener("pageshow", look);
+      window.removeEventListener("storage", look);
+      document.removeEventListener("visibilitychange", look);
+    };
   }, []);
   useEffect(() => {
     if (!s.outcome || told.current) return;
@@ -199,7 +253,7 @@ export function EmailStep({ onDone }) {
             {s.wait && s.doing === "check" ? COPY.checking : COPY.confirm}
           </button>
           {notice}
-          <button type="button" className="link" disabled={s.wait || waitS > 0} onClick={() => step.current.resend()}>
+          <button type="button" className="link" disabled={s.wait || waitS > 0 || !s.sendsLeft} onClick={() => step.current.resend()}>
             {waitS > 0 ? COPY.resend_in(waitS) : COPY.resend}
           </button>
           <button type="button" className="link quiet" aria-expanded={s.typing} disabled={s.wait} onClick={() => step.current.different()}>

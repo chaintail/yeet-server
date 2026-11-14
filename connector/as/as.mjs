@@ -650,7 +650,7 @@ app.post("/account/login", formBody, async (q, r) => {
       return r.redirect(q.body.next === FUND_NEXT ? `/fund?h=${encodeURIComponent(bound.token)}` : afterSignIn(q.body.next));
     }
     // The email step ran on the page (signup-email.mjs): whoever signs in must be the person it was started by.
-    const step = await stepGuard(q.body, { read: readStep, identity: verifiedIdentity });
+    const step = await stepGuard(q.body, { read: readStep, identity: verifiedIdentity, on: signupEmailStep });
     const id = await verifyIdentity(q.body);
     stepAccount(step, id);
     if (!sameOwner(session(q), id) || !(await eligible(id)))
@@ -856,7 +856,7 @@ app.post("/interaction/:uid", formBody, async (q, r, next) => {
       // Checked before anyone is resolved, so a changed sign-in creates no account.
       let step;
       try {
-        step = await stepGuard(q.body, { read: readStep, identity: verifiedIdentity });
+        step = await stepGuard(q.body, { read: readStep, identity: verifiedIdentity, on: signupEmailStep });
       } catch (e) {
         if (e instanceof StepChanged) return stepChangedPage(r, promptTitle("connect-login"));
         throw e;
