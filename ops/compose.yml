@@ -47,6 +47,8 @@ services:
       YEET_LOGIN_METHODS: ${YEET_LOGIN_METHODS:-}
       # The email code right after a Google or Apple sign-in on the connect screen. Default on; 0 turns it off.
       YEET_SIGNUP_EMAIL_STEP: ${YEET_SIGNUP_EMAIL_STEP:-}
+      # The agent approval page /agent/approve (Privy CLI and agent access, connector/as/agent-page.mjs). on serves it; default off (404).
+      YEET_AGENT_ACCESS: ${YEET_AGENT_ACCESS:-}
       STATE_DIR: /state
       CORE_INTERNAL: ${CORE_INTERNAL:-}
       YEET_DAILY_CAP_USDC: ${YEET_DAILY_CAP_USDC:-}

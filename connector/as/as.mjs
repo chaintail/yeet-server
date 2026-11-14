@@ -16,6 +16,7 @@ import { providerCsp } from "./provider-csp.mjs";
 import { fundRoutes, privyPageCsp, afterSignIn, nextField, boundNext, FUND_NEXT } from "./fund-page.mjs";
 import { hintReader, mismatchBody, expiredBody, switchBody, BOUND_RETURN_PATH, BOUND_COOKIE, BOUND_COOKIE_AGE, boundCookieValue, readBoundCookie } from "./account-bound.mjs";
 import { signRoutes } from "./sign-page.mjs";
+import { agentRoutes, agentAccess } from "./agent-page.mjs";
 import { ACCOUNT_TITLE, USERNAME_PATH, accountBody, usernameMessage } from "./account-page.mjs";
 import {
   compatibilityClient,
@@ -768,6 +769,9 @@ signRoutes(app, {
   core: (route, account, body, timeoutMs) => coreSend(route, account, secret("core-as"), body, timeoutMs),
   originOK,
 });
+// Agent approval (agent-page.mjs): the Verification URI of Privy's CLI and agent access. The page talks only to Privy,
+// with the person's own token; this server serves the page and nothing else. Off unless YEET_AGENT_ACCESS=on.
+agentRoutes(app, { on: () => agentAccess(process.env.YEET_AGENT_ACCESS), enabled: () => process.env.PRIVY_LOGIN === "1" });
 // Browsers ask for /favicon.ico on their own; answer with the YEET icon the pages link to.
 const ICON = fs.readFileSync(new URL("./viewer/icon.svg", import.meta.url));
 app.get("/favicon.ico", (_q, r) => r.set("Cache-Control", "public, max-age=86400").type("image/svg+xml").send(ICON));
