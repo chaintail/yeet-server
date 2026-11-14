@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import {applyConsentScopes,consentSelection,consentForm,submittedScopes,ignoreRefreshScope,skipsConnectPage,legalLine} from './consent-selection.mjs';
+import {applyConsentScopes,consentSelection,consentForm,submittedScopes,ignoreRefreshScope,skipsConnectPage,legalLine,AGENT_CONNECT_LEAD} from './consent-selection.mjs';
 import {termsRoutes} from './terms-page.mjs';
 import {
   observeAuthorization,
@@ -36,11 +36,13 @@ import {
   requireFreshBinding,
   bindInteraction,
   chatgptRedirect,
+  clientClass,
   registrationRequest,
   CLIENT_AUTH_METHODS,
   rateLimiter,
 } from "./security-policy.mjs";
 import { inspectBody } from "./body-replay.mjs";
+import { agentRouteOn, agentResource, wrongRoute } from "#shared/agent-route.mjs";
 import { SQLiteAdapter as Adapter } from "./adapter.mjs";
 import Provider, { errors } from "oidc-provider";
 import { resourceUserinfo } from "./userinfo.mjs";
@@ -51,6 +53,7 @@ import fs from "node:fs";
 import {
   AS,
   RESOURCE,
+  RESOURCE as RESOURCE_CHATGPT,
   read,
   write,
   verifyIdentity,
@@ -120,6 +123,21 @@ if (!jwks) {
   write("keys.json", jwks);
 }
 const INTERACTION_TTL = 600;
+// The agent route (shared/agent-route.mjs, connector/docs/AGENT-ROUTE.md). Off (the default): AGENT_ON is false and every use
+// below leaves the provider exactly as before.
+const AGENT_ON = agentRouteOn();
+const AGENT_RESOURCE = AGENT_ON ? agentResource() : null;
+/** The class of a provider client (its redirect URIs); null for the internal clients and anything unclassable. */
+if (PUBLIC && AGENT_ON && new URL(AGENT_RESOURCE).protocol !== "https:") throw Error("Invalid public configuration");
+const classOf = (c) => clientClass(c?.redirectUris ?? c?.redirect_uris);
+/** The resource a client of this class may get tokens for. */
+const resourceOfClass = (cls) => (AGENT_ON && cls === "agent" ? AGENT_RESOURCE : RESOURCE);
+/** The OAuth refusal of a client asking for the other route's resource: invalid_target, WRONG_ROUTE first in the
+ * description, then the sentence for the person and the right URL. */
+const wrongRouteError = (expected) => {
+  const w = wrongRoute(expected);
+  return new errors.InvalidTarget(`${w.error}: ${w.message}`);
+};
 const client = {
   client_id: "local-chatgpt-fixture",
   redirect_uris: ["http://127.0.0.1:38314/callback"],
@@ -217,10 +235,15 @@ const provider = new Provider(AS, {
     clientIdMetadataDocument: { enabled: true, ack: "draft-02" },
     resourceIndicators: {
       enabled: true,
-      defaultResource: () => RESOURCE,
+      defaultResource: (_ctx, c) => (AGENT_ON ? resourceOfClass(classOf(c)) : RESOURCE),
       useGrantedResource: () => true,
-      getResourceServerInfo: (_ctx, r) => {
-        if (r !== RESOURCE && !(TEST && r === "https://other.example/resource"))
+      getResourceServerInfo: (_ctx, r, c) => {
+        if (AGENT_ON && (r === RESOURCE || r === AGENT_RESOURCE)) {
+          // Both directions: an agent asking for the ChatGPT endpoint, ChatGPT asking for the agent endpoint.
+          const cls = classOf(c);
+          if (r === AGENT_RESOURCE && cls !== "agent") throw wrongRouteError("chatgpt");
+          if (r === RESOURCE && cls === "agent") throw wrongRouteError("agent");
+        } else if (r !== RESOURCE && !(TEST && r === "https://other.example/resource"))
           throw new errors.InvalidTarget("Unknown resource");
         return {
           scope: issuableScopes.join(" "),
@@ -231,6 +254,11 @@ const provider = new Provider(AS, {
     },
   },
   findAccount,
+  // The agent route: every access token names its client's class (introspection returns it; shared/introspection.mjs).
+  ...(AGENT_ON ? { extraTokenClaims: (ctx, token) => {
+    const cls = classOf(ctx?.oidc?.client);
+    return cls ? { yeet_route: cls } : undefined;
+  } } : {}),
   // Errors the provider shows in the browser (unknown client, redirect_uri mismatch) use the YEET page, not the
   // library page with its external font. Only the OAuth error code is shown; its description stays in the logs.
   renderError: async (ctx, out) => {
@@ -373,7 +401,7 @@ const formBody = express.urlencoded({ extended: false, limit: "32kb" });
 app.post(
   "/reg",
   inspectBody("json", (body) => {
-    const out = registrationRequest(body);
+    const out = registrationRequest(body, { agent: AGENT_ON });
     return out.problem ? { reject: { status: 400, body: out.problem } } : { body: out.body };
   }),
 );
@@ -479,6 +507,8 @@ async function foreignClient(d) {
     const c = await provider.Client.find(d.params.client_id);
     uri = c?.redirectUris?.length === 1 ? c.redirectUris[0] : undefined;
   }
+  // The agent route: a client of class agent is not foreign (its resource was checked by the provider).
+  if (AGENT_ON && classOf(await provider.Client.find(d.params.client_id)) === "agent") return false;
   return !chatgptRedirect(uri);
 }
 const foreignClientBody = "<p>Only ChatGPT can connect to YEET. Start again from ChatGPT.</p>";
@@ -535,6 +565,8 @@ async function chatgptClient(d) {
 }
 /** Makes the grant for this authorization (the advertised and accepted scope names only) and returns to the client. */
 async function finishConnect(q, r, d) {
+  // The resource of this client's class (the ChatGPT endpoint unless the agent route is on and the client is an agent).
+  const RESOURCE = AGENT_ON ? resourceOfClass(classOf(await provider.Client.find(d.params.client_id))) : RESOURCE_CHATGPT;
   if ((d.params.resource || RESOURCE) !== RESOURCE) throw Error("Invalid resource");
   const requested = (d.params.scope || "").split(" ").filter(Boolean);
   const granted = submittedScopes(requested, { consent: "yes" });
@@ -821,6 +853,7 @@ app.get("/interaction/:uid", async (q, r, next) => {
       r.type("html").send(
         authDocument(r, promptTitle(d.prompt.name), consentForm({
           csrf: data.csrf, name: who.name || who.username || "",
+          ...(AGENT_ON && classOf(await provider.Client.find(d.params.client_id)) === "agent" ? { lead: AGENT_CONNECT_LEAD } : {}),
           connectedSeconds: compatibilityClient(d.params.client_id) ? configuredRefreshWindow() : 0,
         })),
       );

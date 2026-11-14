@@ -7,7 +7,10 @@ import {introspectBearer,validatePrincipal} from '#shared/introspection.mjs';
 import {secret,equal,read,write,port,TEST,DEV_APP_ID} from '#shared/common.mjs';
 import {coins,coin,symbolOf} from './coins.mjs';
 import {unavailable,failure,withUserMessage} from './failure.mjs';
-import {tradeEngine,onTradeSettled} from './trade/runtime.mjs';
+import {tradeEngine,onTradeSettled,agentService} from './trade/runtime.mjs';
+import {agentRouteOn} from '#shared/agent-route.mjs';
+import {AGENT_ROUTE_SCOPES,routeGuard,mountAgentRoutes,mountAgentPageRoutes} from './agent/http.mjs';
+import {AGENT_PREFIX,agentLimitsFromEnv} from './agent/agents.mjs';
 import {ledgerConfig} from './ledger-route/config.mjs';
 import {loadSolverKey} from './ledger-route/solver.mjs';
 import {xpRuntime,p2On,homeXp,homeXpKeys,checkSpinTable} from './xp/xp.mjs';
@@ -33,10 +36,15 @@ if(process.env.PRIVY_LOGIN!=='1'&&!devStub)throw Error('No identity verifier con
 // in YEET_LEDGER_ACCOUNTS, a missing or malformed solver setting, or a key file that is absent or belongs to another
 // account, stops the core here. With the route off (the default) nothing is read.
 {const ledger=ledgerConfig(process.env);if(ledger.enabled)loadSolverKey({accountId:ledger.solverAccount,keyFile:ledger.solverKeyFile})}
+// The agent route (core/agent/, connector/docs/AGENT-ROUTE.md): YEET_AGENT_ROUTE=on needs the ledger route and valid agent caps,
+// checked here. Off (the default): nothing below is mounted and every route answers as before.
+const AGENT_ON=agentRouteOn();
+if(AGENT_ON){if(!ledgerConfig(process.env).enabled)throw Error('The agent route needs the ledger route (YEET_ROUTE=ledger or YEET_LEDGER_ACCOUNTS)');agentLimitsFromEnv()}
 initializeIdentityStore({app:process.env.PRIVY_LOGIN==='1'?process.env.PRIVY_APP_ID:DEV_APP_ID});
 const user=id=>account(id);
 // XP (lane E, YEET_P2=1): trade settlement pays through the tracker's onSettled hook; read per event so the flag is live.
-onTradeSettled(e=>{if(p2On()){xpRuntime().onSettled(e);luckySettled(e)}});
+// An agent's trades (core/agent/) earn no XP and no lucky wheel: those belong to the person's own trades.
+onTradeSettled(e=>{if(p2On()&&!String(e?.accountId??'').startsWith(AGENT_PREFIX)){xpRuntime().onSettled(e);luckySettled(e)}});
 /** XP never stands in the way of the answer it decorates: a failure is logged and the XP part is left out. */
 /** yeet_home's xp fields as the pinned contract lists them; the summary is cut to these. */
 const HOME_XP_KEYS=homeXpKeys(toolSchemas.yeet_home.output);
@@ -130,6 +138,7 @@ app.post('/operator/trades/status',operatorTrade('status',(e,ctx,a)=>{
  return {...(p2On()?{...view,xp_award:xpSafe('trade',()=>xpRuntime().tradeAward(ctx.accountId,view),null)}:view),record:e.tracker.record(ctx,a.trade_id)};
 }));
 app.use(async(q,r,next)=>{if(Object.keys(q.query).length)return r.sendStatus(400);if(q.role==='operator')return r.sendStatus(403);let subject,client;if(q.role==='mcp'){try{q.principal=validatePrincipal(await introspectBearer(q.headers['x-delegated-bearer'],'core-resource','core-introspection'));subject=q.principal.subject;client=q.principal.client}catch{return r.sendStatus(401)}}else subject=q.headers['x-yeet-subject'];if(!user(subject))return r.sendStatus(400);q.subject=subject;const p=read('policy.json')[subject];if(p?.suspended||q.role==='mcp'&&p?.clients?.[client])return r.sendStatus(403);next()});
+if(AGENT_ON)app.use(routeGuard);
 app.get('/eligibility',(q,r)=>q.role==='mcp'?r.json({ok:true}):r.sendStatus(403));
 /** Scope each connector route needs; a route not listed here is refused for the connector. */
 export const ROUTE_SCOPES=Object.freeze([
@@ -155,9 +164,21 @@ export const ROUTE_SCOPES=Object.freeze([
  ['GET',/^\/lucky$/,'yeet:read'],
  ['POST',/^\/lucky\/spin$/,'yeet:write'],
  ['POST',/^\/username$/,'yeet:write'],
+ ...(AGENT_ON?AGENT_ROUTE_SCOPES:[]),
 ]);
 export const routeScope=(method,path)=>ROUTE_SCOPES.find(([m,p])=>m===method&&p.test(path))?.[2]??null;
 app.use((q,r,next)=>{if(q.role==='mcp'){const needed=routeScope(q.method,q.path);if(!needed||!hasScope(q.principal.scopes,needed))return r.sendStatus(403)}next()});
+// The agent route's own routes (agent/http.mjs) answer before the terms gate below: they check the owner's terms
+// themselves and say so in a sentence the agent can relay. The signing page's two calls for a budget link (a_...) answer
+// before the trade page's.
+if(AGENT_ON){
+ mountAgentRoutes(app,{agents:agentService,terms:subject=>termsOf(subject)});
+ mountAgentPageRoutes(app,{agents:agentService,refusal:(e,q,r)=>{
+  if(e?.name==='TradeError'){console.error(JSON.stringify({event:'sign_page_refused',route:q.route?.path,code:e.code,detail:String(e.detail??'').slice(0,200)}));
+   return r.status(CODE_STATUS[e.code]??409).json(typeof e.userMessage==='string'?{...failure(e.code),message:e.userMessage}:failure(e.code))}
+  console.error(JSON.stringify({event:'sign_page_failed',route:q.route?.path,error:String(e?.message??e).slice(0,200)}));unavailable(r);
+ }});
+}
 // ---- The YEET terms (terms.mjs, terms-store.mjs, docs/TERMS-IN-CHAT.md). Until the person accepted the CURRENT version,
 // every connector route answers 403 TERMS_REQUIRED with the terms, except the overview (it answers, with
 // terms.accepted false and "review and accept the YEET terms" as its first suggestion) and the terms routes

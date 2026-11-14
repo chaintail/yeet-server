@@ -1,6 +1,7 @@
 import {allScopes,expandScopes} from '#scope-catalog';
 import { request } from "node:http";
 import { AS, AS_INTERNAL, RESOURCE, secret } from "./common.mjs";
+import { agentRouteOn, agentResource, ROUTE_CLASSES } from "./agent-route.mjs";
 // One absolute deadline covers connect, headers and the full body: a trickling AS cannot extend it
 // (ClientRequest.setTimeout only measures inactivity). Exported for the deadline regression.
 export const INTROSPECTION_DEADLINE_MS = 2000;
@@ -62,11 +63,16 @@ export async function introspectBearer(bearer, client, credential) {
   }, body);
 }
 export const SUBJECT = /^yeet-privy-[a-zA-Z0-9_-]{1,80}$/;
-export function validatePrincipal(token) {
+export function validatePrincipal(token, env = process.env) {
+  // With the agent route on (shared/agent-route.mjs) a token may also be one issued for the agent endpoint. `route` is
+  // the client class the sign-in server stamped (yeet_route), else the resource it was issued for; each endpoint
+  // refuses the other class with WRONG_ROUTE. Off: exactly the ChatGPT resource, as before, and every token is chatgpt.
+  const agentOn = agentRouteOn(env), agentAud = agentOn ? agentResource(env) : null;
+  const route = !agentOn ? "chatgpt" : ROUTE_CLASSES.includes(token?.yeet_route) ? token.yeet_route : token?.aud === agentAud ? "agent" : "chatgpt";
   if (
     token?.active !== true ||
     token.iss !== AS ||
-    token.aud !== RESOURCE ||
+    (token.aud !== RESOURCE && !(agentOn && token.aud === agentAud)) ||
     !Number.isFinite(token.exp) ||
     token.exp <= Date.now() / 1000 ||
     typeof token.sub !== "string" ||
@@ -82,5 +88,6 @@ export function validatePrincipal(token) {
     client: token.client_id,
     // An old scope name also counts under its current name (scope-catalog.mjs: yeet:trade is yeet:prepare).
     scopes: expandScopes(token.scope.split(" ").filter(s => allScopes.includes(s))),
+    route,
   };
 }

@@ -38,13 +38,16 @@
 import {readFileSync} from "node:fs";
 import {randomBytes} from "node:crypto";
 import express from "express";
+import {agentRouteOn} from "#shared/agent-route.mjs";
 import {html} from "./auth-pages.mjs";
 import {privyPageCsp} from "./fund-page.mjs";
 import {DEFAULT_LOGIN_METHODS, knownMethods} from "./login-methods.mjs";
 import {MISMATCH_CODE, MISMATCH_LINE, EXPIRED_CODE, EXPIRED_LINK_LINE, NO_HINTS} from "./account-bound.mjs";
 import {APP_ID, PRIVY_API, SIGN_PAGE_PATH, SIGNER_PATH_PREFIX, signerAsset} from "#shared/signing.mjs";
 
-const TRADE_ID = /^t_[a-z0-9]{20}$/;
+// With the agent route on (shared/agent-route.mjs) the page also opens an agent budget link (a_..., core/agent/agents.mjs):
+// the person signs one transfer from their own ledger account to their agent's. Off: trades only, as before.
+const TRADE_ID = agentRouteOn() ? /^[ta]_[a-z0-9]{20}$/ : /^t_[a-z0-9]{20}$/;
 const read = (file) => readFileSync(new URL(file, import.meta.url));
 const ASSETS = {
   "/sign/sign.js": ["text/javascript; charset=utf-8", read("./viewer/sign/sign.js")],
@@ -56,6 +59,7 @@ const ASSETS = {
   "/sign/wallet-request.mjs": ["text/javascript; charset=utf-8", read("../core/pipeline/wallet-request.mjs")],
 };
 export const SIGN_TITLE = "Finish your trade";
+export const AGENT_TITLE = "Approve your agent’s budget";
 /** Script headers: any card origin (a ChatGPT card host) may load it. */
 const SCRIPT_HEADERS = {
   "Content-Type": "text/javascript; charset=utf-8",
@@ -89,8 +93,9 @@ export function signPageHtml({appId, tradeId, asset, back, nonce, methods = DEFA
     ["trade-id", TRADE_ID.test(tradeId ?? "") ? tradeId : ""],
     ["back", back ?? ""],
   ].map(([k, v]) => ` data-${k}="${html(v)}"`).join("");
+  const title = /^a_/.test(tradeId ?? "") && TRADE_ID.test(tradeId) ? AGENT_TITLE : SIGN_TITLE;
   const signer = asset ? `<script nonce="${html(nonce)}" src="${html(asset.path)}"></script>` : "";
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#09071C"><meta name="referrer" content="no-referrer"><meta property="csp-nonce" content="${html(nonce)}"><title>${html(SIGN_TITLE)} · YEET</title><link rel="icon" type="image/svg+xml" href="/account/icon.svg"><link rel="stylesheet" href="/sign/sign.css">${signer}<script nonce="${html(nonce)}" type="module" src="/sign/sign.js"></script></head><body><main id="yeet-sign"${data}><section class="card" aria-live="polite"><header class="top"><span class="mark">YEET</span><h1>${html(SIGN_TITLE)}</h1></header><div id="sign-body"><p class="line" role="status">Getting your trade…</p></div></section></main></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#09071C"><meta name="referrer" content="no-referrer"><meta property="csp-nonce" content="${html(nonce)}"><title>${html(title)} · YEET</title><link rel="icon" type="image/svg+xml" href="/account/icon.svg"><link rel="stylesheet" href="/sign/sign.css">${signer}<script nonce="${html(nonce)}" type="module" src="/sign/sign.js"></script></head><body><main id="yeet-sign"${data}><section class="card" aria-live="polite"><header class="top"><span class="mark">YEET</span><h1>${html(title)}</h1></header><div id="sign-body"><p class="line" role="status">Getting your trade…</p></div></section></main></body></html>`;
 }
 
 /**

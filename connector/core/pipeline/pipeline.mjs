@@ -60,12 +60,13 @@ const batchMode=a=>{if(!a?.batch_json)return null;try{return JSON.parse(a.batch_
 const explorer=(chain,hash)=>hash?(chain==='base'?`https://basescan.org/tx/${hash}`:`https://solscan.io/tx/${hash}`):null;
 
 /** The gate re-read on every call (design guard 1 / 9): kill switch, YEET_LIVE, YEET_LIVE_ACCOUNTS, the chain pause. */
-export function liveGate(env=process.env){
+// accountFor: the account whose place in YEET_LIVE_ACCOUNTS counts (an agent's owner, core/agent/agents.mjs); itself by default.
+export function liveGate(env=process.env,{accountFor=id=>id}={}){
  return chain=>accountId=>{
   const l=limitsFromEnv(env);
   if(l.killSwitch)refuse('TRADING_PAUSED','kill switch');
   if(!l.live)refuse('TRADING_PAUSED','YEET_LIVE is not set');
-  if(!accountLive(l,accountId))refuse('TRADING_PAUSED','account not in YEET_LIVE_ACCOUNTS');
+  if(!accountLive(l,accountFor(accountId)??accountId))refuse('TRADING_PAUSED','account not in YEET_LIVE_ACCOUNTS');
   // chain null: the account gates alone (a BUY whose network is not chosen yet).
   if(chain&&chainPaused(env,chain))refuse('TRADING_PAUSED','SOURCE_PAUSED');
  };
@@ -75,11 +76,14 @@ const chainEnv=(env,name)=>{const v=env[name]?.trim()||'sol';if(!CHAINS.includes
 export function createPipeline({db,env=process.env,client,wallets,directory,balances,drivers,ledger,catalog=CATALOG,now=Date.now,fetch=globalThis.fetch,didFor,
  onSettled,trackerIntervalMs=5000,log=line=>console.log(line),driverOverrides,liveBroadcast=true,
  landingPollMs=1000,landingWatchMs=60_000,landingWatchMax=200,sleep=ms=>new Promise(r=>{const h=setTimeout(r,ms);h.unref?.()}),
- xpOf=id=>xpRuntime(env).total(id),ledgerOverrides}){
+ xpOf=id=>xpRuntime(env).total(id),ledgerOverrides,agents}){
  const limits=limitsFromEnv(env);
  /** The account's XP for the tier caps (limits.mjs); an unreadable XP store counts as 0 XP (Noob, the lowest caps). */
  const xpTotal=id=>{try{const n=Number(xpOf(id));return Number.isFinite(n)?n:0}catch{return 0}};
- const gateFor=liveGate(env);
+ // agents (core/agent/agents.mjs agentAccounts, only with YEET_AGENT_ROUTE=on): accounts that are an agent's own key.
+ // They trade on the ledger route only, their wallet is that key, and the owner's place in YEET_LIVE_ACCOUNTS counts.
+ // Without it (the default) nothing below changes.
+ const gateFor=liveGate(env,agents?{accountFor:id=>agents.isAgent(id)?agents.ownerOf(id):id}:{});
  // buyChain: the YEET_BUY_CHAIN override, or 'auto' (the network is chosen per trade, funding.mjs).
  const buyChain=forcedBuyChain(env)??'auto',sellChain=chainEnv(env,'YEET_SELL_CHAIN');
  const event=e=>{try{log(JSON.stringify(e))}catch{}};
@@ -90,6 +94,7 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
  // use below is behind it, so the chain route runs exactly as before. An account on the ledger route has its
  // spendable USDC and its coins read from its own ledger account.
  const ledgerCfg=ledgerConfig(env);
+ if(agents&&!ledgerCfg.enabled)throw Error('The agent route needs the ledger route (YEET_ROUTE=ledger or YEET_LEDGER_ACCOUNTS)');
  let ledgerRoute=null,ledgerVerifier=null,ledgerRpc=null,ledgerDeposits=null,ledgerDepositNetworks=null,ledgerUsdcIds=[USDC_SOL_TOKEN_ID];
  if(ledgerCfg.enabled){
   // With Base offered for deposits (YEET_LEDGER_DEPOSIT_NETWORKS=solana,base) USDC sent there is credited under
@@ -101,9 +106,10 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   ledgerVerifier=ledgerOverrides?.verifier??createVerifier({rpc:ledgerRpc});
   const byAddress=db.prepare('SELECT account_id FROM wallets WHERE address=? OR lower(address)=lower(?)');
   balances=ledgerBalances(balances,{verifier:ledgerVerifier,catalog,usdcTokenIds:ledgerUsdcIds,
-   isLedgerAddress:address=>ledgerCfg.route==='ledger'||byAddress.all(address,address).some(r=>ledgerCfg.accounts.has(r.account_id))});
+   isLedgerAddress:address=>ledgerCfg.route==='ledger'||byAddress.all(address,address).some(r=>ledgerCfg.accounts.has(r.account_id)||!!agents?.isAgent(r.account_id))});
  }
  directory??=walletDirectoryFromEnv({env,fetch,didFor});
+ if(agents){const inner=directory;directory={stable:inner.stable,async lookup(accountId){return agents.isAgent(accountId)?agents.walletsOf(accountId):inner.lookup(accountId)}}}
  wallets??=createWallets({db,directory,balances,now});
  ledger??=createLedger({db,now,sponsorLimits:readSponsorshipLimits(env),log:l=>event(JSON.parse(l))});
  drivers??=createDrivers({env,db,ledger,fetch,now,log:event,gateFor,liveBroadcast,overrides:driverOverrides});
@@ -290,7 +296,7 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
    ...(ledgerOverrides?.sleep?{sleep:ledgerOverrides.sleep}:{}),log:event,...(ledgerOverrides?.pollMs!==undefined?{pollMs:ledgerOverrides.pollMs}:{})});
   // The gate of a ledger trade is the account's alone (kill switch, YEET_LIVE, YEET_LIVE_ACCOUNTS): no network's pause.
   const ledgerPaused=t=>{try{gateFor(null)(t.account_id);return null}catch(e){return e?.detail??'paused'}};
-  ledgerRoute=createLedgerRoute({db,cfg:ledgerCfg,verifier:ledgerVerifier,solver,client,catalog,usdcTokenIds:ledgerUsdcIds,now,log:event,signWindowMs:SIGN_WINDOW_MS,
+  ledgerRoute=createLedgerRoute({db,cfg:ledgerCfg,verifier:ledgerVerifier,solver,client,catalog,usdcTokenIds:ledgerUsdcIds,now,log:event,signWindowMs:SIGN_WINDOW_MS,alsoHandles:agents?.isAgent,
    ...(ledgerOverrides?.unloadWaitMs!==undefined?{unloadWaitMs:ledgerOverrides.unloadWaitMs}:{}),
    hooks:{trade,legsOf,settle:(id,lastError)=>settle(id,lastError),refresh:id=>{try{tracker.refresh(id)}catch(e){ledger.note(id,`refresh: ${e?.message}`)}},
     apply:(id,idx,res)=>tracker.apply(id,idx,res),legNotSent:(id,idx,evidence)=>ledger.legNotSent(id,idx,evidence),raiseAlert:a=>ledger.raiseAlert(a),

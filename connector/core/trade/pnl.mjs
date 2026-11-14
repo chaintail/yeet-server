@@ -11,7 +11,9 @@
 // never move money.
 const SETTLED=`SELECT t.id trade_id,t.account_id,t.direction,l.idx,l.symbol,l.amount_in_raw,l.settled_out_raw,l.updated_at
  FROM trade_legs l JOIN trades t ON t.id=l.trade_id
- WHERE l.oneclick_status='SUCCESS' AND l.settled_out_raw IS NOT NULL`;
+ WHERE l.oneclick_status='SUCCESS' AND l.settled_out_raw IS NOT NULL
+ AND t.account_id NOT LIKE 'yeet-agent-%'`;
+// An agent's own account (core/agent/, agent route) is not a person: its trades rank on no board.
 const units=(raw,decimals)=>Number(BigInt(raw))/10**decimals;
 /** Decimals of a tradable coin on Solana, or null (USDC is the money side, never a position). */
 export function coinDecimals(catalog,symbol){

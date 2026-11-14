@@ -121,7 +121,7 @@ export function diffOf({gives,receives}){
  return d;
 }
 
-export function createLedgerRoute({db,cfg,verifier,solver,client,catalog=CATALOG,usdcTokenIds=[USDC_SOL_TOKEN_ID],now=Date.now,sleep=ms=>new Promise(r=>setTimeout(r,ms)),log=()=>{},hooks,signWindowMs=10*60_000,unloadEveryMs=60_000,unloadWaitMs=90_000}){
+export function createLedgerRoute({db,cfg,verifier,solver,client,alsoHandles=()=>false,catalog=CATALOG,usdcTokenIds=[USDC_SOL_TOKEN_ID],now=Date.now,sleep=ms=>new Promise(r=>setTimeout(r,ms)),log=()=>{},hooks,signWindowMs=10*60_000,unloadEveryMs=60_000,unloadWaitMs=90_000}){
  db.exec(SCHEMA);
  const event=e=>{try{log(e)}catch{}};
  const usdc=catalog.find(e=>e.chain==='solana'&&e.assetId===USDC_SOL_TOKEN_ID);
@@ -582,7 +582,10 @@ export function createLedgerRoute({db,cfg,verifier,solver,client,catalog=CATALOG
 
  return {
   cfg,solverAccount:solver.accountId,
-  handles:accountId=>onLedger(cfg,accountId),
+  // alsoHandles: accounts that trade here whatever the route switch says (an agent's own key, core/agent/agents.mjs)
+  handles:accountId=>onLedger(cfg,accountId)||!!alsoHandles(accountId),
+  /** The solver and the ledger reader (the agent route relays its budget transfers through the same solver). */
+  solver,verifier,
   owns:tradeId=>!!row(tradeId),
   row,attempt,previewClient:preview,livePlan,draft,commit,signRequests,submit,recover,close,tick,explorerUrl,
   driver:Object.freeze({chain:'sol',kind:null,route:'ledger',prepareLegs,readiness:()=>({ok:true,reasons:[]})}),

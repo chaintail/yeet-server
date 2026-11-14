@@ -5,7 +5,9 @@
 import {openTradeDb} from './db.mjs';
 import {createPipeline} from '../pipeline/pipeline.mjs';
 import {didFor} from '../identity-store.mjs';
-import {TEST} from '#shared/common.mjs';
+import {TEST,AS} from '#shared/common.mjs';
+import {agentRouteOn} from '#shared/agent-route.mjs';
+import {agentAccounts,createAgents,agentLimitsFromEnv} from '../agent/agents.mjs';
 
 let pending,overrides={};
 const listeners=new Set();
@@ -23,8 +25,15 @@ export function configureTradeEngine(o={}){
 }
 export function tradeEngine(){
  return pending??=(async()=>{
-  const e=createPipeline({db:overrides.db??openTradeDb(),didFor,onSettled:settled,...overrides});
+  const db=overrides.db??openTradeDb();
+  // The agent route (core/agent/agents.mjs, YEET_AGENT_ROUTE=on): agent accounts trade on the ledger with their own key.
+  // Off: the pipeline is created exactly as before.
+  const agents=agentRouteOn()?agentAccounts(db):undefined;
+  const e=createPipeline({db,didFor,onSettled:settled,...(agents?{agents}:{}),...overrides});
+  if(agents)e.agentService=createAgents({db,engine:e,limits:agentLimitsFromEnv(),pageUrl:id=>`${AS}/sign?trade_id=${id}`,...(overrides.now?{now:overrides.now}:{}),log:l=>console.log(JSON.stringify(l))});
   e.tracker.start();
   return e;
  })();
 }
+/** The agent service (only with YEET_AGENT_ROUTE=on). */
+export const agentService=async()=>{const e=await tradeEngine();if(!e.agentService)throw Error('agent route off');return e.agentService};
