@@ -157,6 +157,10 @@ test('the agent end to end: register its own key, the owner approves the budget 
  for(const t of list.json.result.tools)assert.equal(t._meta,undefined,`${t.name}: no card metadata`);
  assert.match((await call('agent_how_it_works')).text,/Keep the private key there; YEET never asks for it/);
  assert.equal((await call('agent_overview')).state,'not_registered');
+ // YEET_AGENT_OWNER_ACCOUNT unset: account "owner" is refused, machine-readably; the overview is the base overview
+ for(const [name,args] of [['agent_quote',{side:'buy',coins:['WIF'],amount_usdc:'3',account:'owner'}],['agent_balance',{account:'owner'}],['agent_positions',{account:'owner'}],['agent_return_budget',{account:'owner'}]])
+  assert.deepEqual([(await call(name,args)).error?.error,(await call(name,args)).error?.retryable],['OWNER_ACCOUNT_OFF',false],name);
+ assert.equal(Object.hasOwn(await call('agent_overview'),'owner_account'),false);
  const key=localSigner(),agentLedger=ed25519AccountId(key.address);
  const reg=await call('agent_register_key',{public_key:`ed25519:${key.address}`,budget_usdc:'10'});
  assert.equal(reg.state,'awaiting_budget');assert.equal(reg.agent_account,agentLedger);

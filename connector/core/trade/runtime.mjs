@@ -7,7 +7,7 @@ import {createPipeline} from '../pipeline/pipeline.mjs';
 import {didFor} from '../identity-store.mjs';
 import {TEST,AS} from '#shared/common.mjs';
 import {agentRouteOn} from '#shared/agent-route.mjs';
-import {agentAccounts,createAgents,agentLimitsFromEnv} from '../agent/agents.mjs';
+import {agentAccounts,createAgents,agentLimitsFromEnv,agentOwnerAccountOn} from '../agent/agents.mjs';
 
 let pending,overrides={};
 const listeners=new Set();
@@ -30,7 +30,7 @@ export function tradeEngine(){
   // Off: the pipeline is created exactly as before.
   const agents=agentRouteOn()?agentAccounts(db):undefined;
   const e=createPipeline({db,didFor,onSettled:settled,...(agents?{agents}:{}),...overrides});
-  if(agents)e.agentService=createAgents({db,engine:e,limits:agentLimitsFromEnv(),pageUrl:id=>`${AS}/sign?trade_id=${id}`,...(overrides.now?{now:overrides.now}:{}),log:l=>console.log(JSON.stringify(l))});
+  if(agents)e.agentService=createAgents({db,engine:e,limits:agentLimitsFromEnv(),pageUrl:id=>`${AS}/sign?trade_id=${id}`,ownerAccount:agentOwnerAccountOn(process.env,true),...(overrides.now?{now:overrides.now}:{}),log:l=>console.log(JSON.stringify(l))});
   e.tracker.start();
   return e;
  })();

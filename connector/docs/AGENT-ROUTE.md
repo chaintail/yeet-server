@@ -21,6 +21,21 @@ The switch is `YEET_AGENT_ROUTE=on`. It is off by default. While it is off:
 
 In the pipeline, an agent is an account of its own, `yeet-agent-<40 hex>`, whose wallet is the agent key. It gets the pipeline's proposals, confirm codes, tier caps, trade rows, receipts and the ledger route unchanged. The confirm code never leaves the server. The agent's account trades on the ledger route whatever `YEET_ROUTE` says. Its place in `YEET_LIVE_ACCOUNTS` is its owner's. Agent trades earn no XP, do not spin the lucky wheel and rank on no leaderboard.
 
+## Owner account mode
+
+The switch is `YEET_AGENT_OWNER_ACCOUNT=on` (core). It is off by default and needs `YEET_AGENT_ROUTE=on`: `on` without it, or any value other than `on`, `off` or empty, stops core. While it is off, `account: "owner"` is refused with `OWNER_ACCOUNT_OFF` (403, `retryable: false`), the owner tables are not created, and every call without `account` (or with `account: "agent"`) answers exactly as before.
+
+In this mode the agent trades the person's OWN ledger account, the one their Privy Solana wallet owns. The agent does not need a key of its own or a budget:
+
+- The person approves the agent once in the browser through Privy's device authorization flow (the `/agent/approve` page, a separate branch). After that the agent obtains each signature from the person's Privy Solana wallet itself (Solana `signMessage` over the message's UTF-8 bytes). That happens between the agent and Privy only: YEET is not on the signing path and sees nothing but the resulting signature.
+- One wallet and one portfolio for ChatGPT and the agent.
+
+The path is the ChatGPT card's own path, under the person's account id: the pipeline's proposal, quote, floors, confirm code, execute, nonce, deadline, the ledger route's unsigned `token_diff`, its `raw_ed25519` check against the person's wallet key, simulate, then settle. The person's own caps and gate apply as on the card (tier caps, daily cap, `YEET_LIVE_ACCOUNTS`, the kill switch), plus the agent caps: `YEET_AGENT_MAX_TRADE_USDC` per buy, and `YEET_AGENT_MAX_DAY_USDC` per UTC day per agent connection. The day counts this connection's owner-mode buys (legs not given back as not sent) together with its own key's spend when it has one. The person's ChatGPT trades do not count against the agent.
+
+Owner-mode trades are the person's own trades: the trade row, the proposal and the receipt belong to the person's account (not to a `yeet-agent-...` account). So the tracker's settle event carries the person's account id, core pays XP exactly as for a card trade (`onTradeSettled`, P2), the trade ranks on the boards, and it shows in `yeet_portfolio` and `trade_status` on the ChatGPT route. The lucky wheel is not involved: an owner-mode proposal is never linked to a wheel.
+
+The person's account must be on the ledger route (`YEET_ROUTE=ledger`, or listed in `YEET_LEDGER_ACCOUNTS`). Otherwise owner mode is refused with `OWNER_NOT_ON_LEDGER`.
+
 ## Interface (MCP tools on the agent host)
 
 | Tool | What it does |
@@ -36,6 +51,20 @@ In the pipeline, an agent is an account of its own, `yeet-agent-<40 hex>`, whose
 | `agent_positions` | USDC, the held coins with their USD value, the last 5 trades and what is left of today's limit. |
 | `agent_return_budget` | The unsigned transfer of one token (USDC first) of the balance to the owner's ledger account. `remaining_tokens` says whether to call it again. |
 
+`account` selector (owner account mode). `agent_quote`, `agent_prepare_trade`, `agent_submit_signature`, `agent_trade_status`, `agent_balance` and `agent_positions` take an optional `account: "agent" | "owner"`. The default `"agent"` is the route as described above. `agent_return_budget` takes it only to refuse `"owner"`. No tool takes an account id: the account is always the token's subject. Any other value fails the tool's schema, and core refuses it with `INVALID_ARGUMENT`.
+
+| Tool with `account: "owner"` | Input | Answer (fields added or changed) |
+|---|---|---|
+| `agent_quote` | `{side, coins[], amount_usdc \| percent, account:"owner"}` | `{account:"owner", quote_id, revision, side, amount_usdc, legs[], cost_pct, quoted_at, warnings, next}` |
+| `agent_prepare_trade` | `{quote_id, revision?, account:"owner"}` | `{account:"owner", trade_id, status, request:{request_id, standard:"raw_ed25519", message, message_base64, public_key:"ed25519:<person's wallet>", signer_id:<person's ledger account>, deadline, sign_before, gives, receives, how}}` |
+| `agent_submit_signature` | `{request_id, signature, account:"owner"}`, the 64-byte signature by the person's wallet, base64 or hex | `{account:"owner", request_id, kind:"trade", trade_id, status, trade?, renewed?}` |
+| `agent_trade_status` | `{trade_id, account:"owner"}` | `{account:"owner", trade_id, status, direction, received[], legs[], updated_at}`: any trade of the person |
+| `agent_balance` | `{account:"owner"}` | `{account:"owner", ledger_account, usdc, coins[]}` |
+| `agent_positions` | `{account:"owner"}` | `{account:"owner", ledger_account, usdc, holdings[], total_usd, recent_trades[] (the person's last 5, each with via_agent), limits}` |
+| `agent_overview` | (none) | With the mode on, it also returns `owner_account:{available, ledger_account, limits, how}`. With it off, the answer is unchanged. |
+
+Core takes `account` in the POST bodies, plus new `POST /agent/balance` and `POST /agent/positions` (core refuses query strings). The connector sends a GET as before when `account` is not given.
+
 Every refusal is `{error, message, retryable}`, where `message` is a sentence a model can relay. Codes the route adds:
 
 - `WRONG_ROUTE`
@@ -50,6 +79,10 @@ Every refusal is `{error, message, retryable}`, where `message` is a sentence a 
 - `REQUEST_CLOSED`
 - `SIGNATURE_INVALID`
 - `NOTHING_TO_RETURN`
+- `OWNER_ACCOUNT_OFF` (owner mode is switched off)
+- `OWNER_NOT_ON_LEDGER` (the person's account is not on the ledger route)
+- `OWNER_TRADES_ONLY` (a transfer, return or non-trade message on the person's account)
+- `REQUEST_USED` (an owner-mode request was already submitted)
 
 These tools and their texts live in this private repo only (`mcp/agent.mjs`). The public contract, the ChatGPT tool list, its lock and `x-yeet-tools-version` are unchanged, so no tools-version bump is needed.
 
@@ -76,6 +109,7 @@ Core routes (connector credential and the agent's delegated bearer): `GET /agent
 | `YEET_AGENT_MAX_TRADE_USDC` | core | 10 | The most one agent buy spends. Checked at quote and again at prepare. |
 | `YEET_AGENT_MAX_DAY_USDC` | core | 50 | The most an agent buys per UTC day (the pipeline's own daily spend of the agent account). |
 | `YEET_AGENT_MAX_BUDGET_USDC` | core | 100 | The largest budget one link asks for. |
+| `YEET_AGENT_OWNER_ACCOUNT` | core | off | `on` allows `account: "owner"` (owner account mode). It needs `YEET_AGENT_ROUTE=on`. Any other value stops core. |
 
 With the switch on, core needs the ledger route (`YEET_ROUTE=ledger` or `YEET_LEDGER_ACCOUNTS`, plus its solver settings), or it does not start. The allowed coins are the catalogue's Solana coins that the ledger holds. Sells are not capped and not counted, as on the ChatGPT route: they turn coins back into USDC inside the agent's own account.
 
@@ -118,9 +152,21 @@ With the switch on, core needs the ledger route (`YEET_ROUTE=ledger` or `YEET_LE
 - **Token confusion.** The class comes from the redirect URIs, and the resource binding is enforced at authorization, token, introspection, connector and core. A token minted for one endpoint is refused by the other. A ChatGPT look-alike redirect host is class agent, never chatgpt.
 - **One key per connection.** A key already linked to another connection is refused (`AGENT_KEY_TAKEN`). An active key cannot be swapped (`AGENT_KEY_LINKED`): the agent returns the budget first or connects as a new agent. The owner's own wallet key and the solver's key are refused as agent keys.
 - **Replay.** Every message carries a fresh versioned nonce that ends with it. Trades keep the ledger route's attempt rules. A budget or return message is valid for 5 minutes and is simulated alone before it is sent.
+- **Owner mode: Privy's grant is not scoped.** The device-flow approval gives the agent a Privy session that can sign ANY message with the person's Solana wallet. Privy does not limit it to YEET trades, so the agent could sign other things directly with Privy: for example a ledger `transfer` it sends to `intents.near` itself, or a Solana transaction. Our caps and checks bind only the trades sent through this route. They are no bound on what an agent with that grant can do elsewhere. The real bound is the person's trust in the agent and revoking the Privy grant. The approval page (branch feat/agent-verify) should say so to the person.
+- **Owner mode: what this route enforces.**
+  - The signature must verify (`raw_ed25519`, over the exact message bytes) against the token subject's own wallet key, read from the wallet directory at submit time. An agent key, another person's wallet, or other bytes are `SIGNATURE_INVALID`.
+  - The account is always the token's subject: there is no parameter to name another one.
+  - Quotes, trades and request ids are stored per person AND per agent connection (`agent_owner_quote`, `agent_owner_trade`), so another connection, another person or agent mode cannot use them.
+  - The confirm code is minted for the client id `agent-owner:<client>`, so the ChatGPT route cannot execute an agent quote, and back.
+  - The ChatGPT connector's `/trades/:id/signature` refuses an owner-mode trade (`INVALID_ARGUMENT`). The YEET signing page is not guarded: it is the person's own session, so the person can still approve the trade there.
+  - A request id is single use: the first submission claims it (`agent_owner_request`). A replay, later or concurrent, is `REQUEST_USED`. A claim is given back only when the ledger attempt is still waiting (a refused signature), so a corrected signature can go through once.
+  - Trades only: `agent_return_budget` and `a_` request ids are `OWNER_TRADES_ONLY`. At prepare and again at submit, the message must be exactly one `token_diff` with the person's ledger account as `signer_id`. A transfer, a withdrawal or an extra intent is refused even when the person signed it.
 - **Disconnect.** The operator's per-client disconnect (`/policy`) cuts the agent's token. Its balance stays in its own account.
 
 ## Not done yet
+
+- Owner mode: the Privy device-flow approval page and the agent's own Privy signing client are not in this branch. The tests use a locally generated key in place of the person's Privy wallet on the fake ledger. No live Privy `signMessage` signature over a ledger message has been checked against this route.
+- Owner mode: the agent caps are checked in one process (a per-connection lock around check and execute). Two core processes would not share that lock.
 
 - A budget paid with Base-credited USDC: a budget link asks for Solana USDC only.
 - Live proof on mainnet, the Caddy and DNS change, and the deploy itself.
