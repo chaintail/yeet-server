@@ -281,7 +281,7 @@ test('lucky wheel end to end: lucky_wheel -> lucky_spin -> YEET 5 USDC into the 
  assert.equal(xpRuntime().summary(gus.sub).spins_available,0);
 });
 
-test('yeet_home: needs_funds carries fund_url on the public origin; a funded wallet carries none',async()=>{
+test('yeet_home: needs_funds with no answer from Privy about the account carries NO fund_url (a funding link is only handed out bound to the account); a funded wallet carries none',async()=>{
  // BUY pays with USDC on Solana: the funding check reads the Solana USDC holding.
  const f=fakeRuntime({usdc:'0.5',holdings:[{mint:USDC_SOLANA,raw:500_000n,decimals:6}]}),{balances}=f;
  configureTradeEngine(f.overrides);
@@ -289,7 +289,10 @@ test('yeet_home: needs_funds carries fund_url on the public origin; a funded wal
  const low=await carol.call('yeet_home');
  assert.equal(low.isError,undefined,JSON.stringify(low.content));
  assert.equal(low.structuredContent.ready,'needs_funds');
- assert.equal(low.structuredContent.fund_url,`${ORIGIN}/fund`);
+ // This stand-in has no Privy credentials, so the account's sign-in methods are unknown and no hint can be made:
+ // the answer leaves the link out rather than hand ChatGPT one that names no account (core.mjs fundLink).
+ assert.equal('fund_url' in low.structuredContent,false);
+ assert.doesNotMatch(JSON.stringify(low),/\/fund\b/);
  assert.equal(low.structuredContent.xp.next_streak_milestone.days,3);
  balances.holdings=[{mint:USDC_SOLANA,raw:100_000_000n,decimals:6}];
  const ok=await carol.call('yeet_home');

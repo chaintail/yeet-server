@@ -11,6 +11,7 @@
 // document changes.
 import {AS} from '#shared/common.mjs';
 import {mintLinkToken,withLinkToken,TERMS_LINK_TTL_S} from '#shared/link-token.mjs';
+import {randomBytes} from 'node:crypto';
 export const TERMS_VERSION='2026-11-13';
 export const TERMS_URL='https://yeet.win/terms';
 export const PRIVACY_URL='https://yeet.win/privacy';
@@ -42,14 +43,15 @@ export function termsPageUrl(as=AS){
 }
 /**
  * The terms page link for ONE account: the page URL with a signed token (shared/link-token.mjs, purpose `terms`,
- * bound to the account and the current version, 10 minutes). The page then shows the statements and Accept with no
- * sign-in, and records the acceptance for exactly that account. The token grants nothing else. Without a key (or a
- * page URL) the plain URL is returned: the page then asks the person to sign in, as before.
+ * bound to the account and the current version, 10 minutes, with its own id `j` so it is used once). The page then
+ * shows the required statements and Accept with no sign-in, and records the acceptance for exactly that account. The
+ * token grants nothing else. Null when there is no page or the token cannot be made: no link is handed out then,
+ * never an unbound one.
  */
-export function termsLinkFor(accountId,{pageUrl=termsPageUrl(),key=null,now=Date.now()}={}){
- if(!pageUrl||!key)return pageUrl;
- try{return withLinkToken(pageUrl,'t',mintLinkToken(key,{purpose:'terms',account:accountId,ttl:TERMS_LINK_TTL_S,claims:{v:TERMS_VERSION},now}))}
- catch{return pageUrl}
+export function termsLinkFor(accountId,{pageUrl=termsPageUrl(),key=null,now=Date.now(),id=randomBytes(12).toString('base64url')}={}){
+ if(!pageUrl||!key)return null;
+ try{return withLinkToken(pageUrl,'t',mintLinkToken(key,{purpose:'terms',account:accountId,ttl:TERMS_LINK_TTL_S,claims:{v:TERMS_VERSION,j:id},now}))}
+ catch{return null}
 }
 /** The contract's `terms` object. record: the acceptance of the CURRENT version, or null. */
 export function termsObject(record,{mode=termsMode(),pageUrl=termsPageUrl()}={}){

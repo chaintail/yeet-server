@@ -17,10 +17,10 @@ import {versionInfo} from './version.mjs';
 import {overview,totalUsdc,welcomeSuggestions} from './overview.mjs';
 import {winnerOf} from './trade/pnl.mjs';
 import {boardAnswer} from './xp/boards.mjs';
-import {TERMS_VERSION,termsObject,checkAcceptance,termsOpen,termsLinkFor} from './terms.mjs';
+import {TERMS_VERSION,REQUIRED_IDS,termsObject,checkAcceptance,termsOpen,termsLinkFor} from './terms.mjs';
 import {requireLinkKey,withLinkToken} from '#shared/link-token.mjs';
-import {acceptanceOf,recordAcceptance,referralOf,decideReferral,referralCode} from './terms-store.mjs';
-import {createAccountLogin,withCardAccount,hintFor,methodsOf} from './account-login.mjs';
+import {acceptanceOf,recordAcceptance,useTermsLink,referralOf,decideReferral,referralCode} from './terms-store.mjs';
+import {createAccountLogin,withCardAccount,hintFor} from './account-login.mjs';
 import {hasScope} from '#scope-catalog';
 // Accounts are created on the first verified sign-in (identity-store.mjs). The identity app is Privy in
 // production and the development stub only under TEST_PROFILE=1 with DEV_IDENTITY_STUB=1.
@@ -159,14 +159,16 @@ app.use((q,r,next)=>{if(q.role==='mcp'){const needed=routeScope(q.method,q.path)
 // ---- Account-bound page links (shared/link-token.mjs purpose `hint`; account-login.mjs hintFor). A link the core
 // hands out for the connected account names that account and the sign-in methods its Privy user has (read from
 // Privy with the app credentials, cached as the card facts are). The pages show only those methods and refuse any
-// other account. No answer from Privy: the link is plain and the page offers the default methods.
+// other account. No answer from Privy: no link is handed out (fund_url is left out, the card gets no trade page
+// address) until the next answer can make one. The binding is never dropped to keep a link.
 let accountLogin;
 const logins=()=>(accountLogin??=createAccountLogin());
 const signHint=(ctx,facts)=>hintFor(ctx.accountId,facts,{key:pageKey()});
 /** The hint from facts that are already cached, or null. Never waits. */
 function knownHint(accountId){try{const did=didFor(accountId),facts=did?logins().peek(did):null;return facts?hintFor(accountId,facts,{key:pageKey()}):null}catch{return null}}
-/** The account's funding page link (waits for Privy once, 4 s at most; then cached). */
-async function fundLink(accountId){try{const did=didFor(accountId),facts=did?await logins()(did):null;return fundUrlWithHint(facts?hintFor(accountId,facts,{key:pageKey()}):null)}catch{return fundUrlWithHint(null)}}
+/** The account's funding page link (waits for Privy once, 4 s at most; then cached). Null when the hint cannot be
+ * made (Privy did not answer): the answer then carries no fund_url. An unbound funding link is never handed out. */
+async function fundLink(accountId){try{const did=didFor(accountId),facts=did?await logins()(did):null;return fundUrlWithHint(facts?hintFor(accountId,facts,{key:pageKey()}):null)}catch{return null}}
 // The key the page links are signed with (shared/link-token.mjs: derived from core-as). Checked when the core starts:
 // with no usable key the core does not start, rather than hand out links that bind nothing.
 const LINK_KEY=requireLinkKey('core');
@@ -174,7 +176,14 @@ const pageKey=()=>LINK_KEY;
 // terms.page_url is this account's own link: the terms page opens on the statements and Accept with no sign-in.
 // It also carries the account's sign-in hint when the methods are already known (never waiting for Privy), so a
 // link that has expired still offers the right methods.
-const withTermsLink=(terms,accountId)=>terms.page_url?{...terms,page_url:withLinkToken(termsLinkFor(accountId,{pageUrl:terms.page_url,key:pageKey()}),'h',knownHint(accountId))}:terms;
+// A link that cannot be signed is not handed out at all (the chat then is the only place): never a bare page URL.
+function withTermsLink(terms,accountId){
+ if(!terms.page_url)return terms;
+ const link=termsLinkFor(accountId,{pageUrl:terms.page_url,key:pageKey()});
+ if(link)return {...terms,page_url:withLinkToken(link,'h',knownHint(accountId))};
+ const {page_url:_,...rest}=terms;
+ return {...rest,mode:'chat'};
+}
 const termsOf=accountId=>withTermsLink(termsObject(acceptanceOf(accountId,TERMS_VERSION)),accountId);
 app.use((q,r,next)=>{
  if(q.role!=='mcp'||termsOpen(q.method,q.path))return next();
@@ -186,20 +195,28 @@ app.get('/terms',(q,r)=>{if(q.role!=='mcp'&&q.role!=='as')return r.sendStatus(40
 // yeet_accept_terms (source chat, with ChatGPT's conversation id when it sent one) and the /account/terms page (source
 // page). Refused unless the version is the current one and every required statement is among `confirmed`.
 // `via: "link"` (sign-in server only): accepted on the page through the account's signed link, with no sign-in
-// (as/terms-page.mjs). Still source `page`; the client column says which of the two page paths it was.
-const TERMS_LINK_CLIENT='terms-link';
+// (as/terms-page.mjs). Source `terms-link`. Such a link is a bearer, so: it records the required statements ONLY
+// (an optional one in the request is dropped), and it is used once: the token's id (`token_id`) is marked with the
+// acceptance, and a second call with it records nothing and answers 409 LINK_USED with the terms as they stand.
+const TERMS_LINK='terms-link';
 app.post('/terms/accept',async(q,r)=>{
  if(q.role!=='mcp'&&q.role!=='as')return r.sendStatus(403);
  const b=q.body??{};
  if(typeof b.version!=='string'||!Array.isArray(b.confirmed)||b.confirmed.length>12||b.confirmed.some(x=>typeof x!=='string'))return r.status(400).json(failure('INVALID_ARGUMENT'));
- const source=q.role==='as'?'page':'chat';
- const check=checkAcceptance({version:b.version,confirmed:b.confirmed});
+ const viaLink=q.role==='as'&&b.via==='link';
+ if(viaLink&&(typeof b.token_id!=='string'||!/^[A-Za-z0-9_-]{16,32}$/.test(b.token_id)))return r.status(400).json(failure('INVALID_ARGUMENT'));
+ const source=q.role==='as'?(viaLink?TERMS_LINK:'page'):'chat';
+ const check=checkAcceptance({version:b.version,confirmed:viaLink?b.confirmed.filter(id=>REQUIRED_IDS.includes(id)):b.confirmed});
  if(!check.ok){
   console.log(JSON.stringify({event:'terms_refused',account:q.subject,version:String(b.version).slice(0,20),reason:check.reason,missing:check.missing,source}));
   return r.status(403).json({...failure('TERMS_REQUIRED'),terms:termsOf(q.subject),reason:check.reason,missing:check.missing});
  }
+ if(viaLink&&!useTermsLink(b.token_id,q.subject)){
+  console.log(JSON.stringify({event:'terms_link_reused',account:q.subject}));
+  return r.status(409).json({error:'LINK_USED',terms:termsOf(q.subject)});
+ }
  const session=source==='chat'&&typeof b.session==='string'?b.session.slice(0,200):null;
- const {record,fresh}=recordAcceptance({accountId:q.subject,version:TERMS_VERSION,statements:check.confirmed,source,clientId:q.role==='mcp'?q.principal.client:b.via==='link'?TERMS_LINK_CLIENT:'terms-page',session});
+ const {record,fresh}=recordAcceptance({accountId:q.subject,version:TERMS_VERSION,statements:check.confirmed,source,clientId:q.role==='mcp'?q.principal.client:viaLink?TERMS_LINK:'terms-page',session});
  console.log(JSON.stringify({event:'terms_accepted',account:q.subject,version:record.version,statements:record.statements,accepted_at:record.accepted_at,source:record.source,client:record.client_id,session:record.session,fresh}));
  const terms=withTermsLink(termsObject(record),q.subject);
  if(q.role==='as')return r.json({terms});
@@ -336,14 +353,15 @@ app.post('/sign/account/login-refresh',(q,r)=>{
  if(did)accountLogin?.forget(did);
  r.json({ok:true});
 });
-/** What a page tells a person who came in with ANOTHER account (as/account-bound.mjs): the sign-in methods of the
- * account the link names (`x-yeet-subject`, from a verified hint) and the masked address behind each. Read from
- * Privy; `known: false` when it did not answer. Sign-in server only. */
-app.get('/account/sign-in',async(q,r)=>{
+/** The funding page's account check (as/fund-page.mjs POST /fund/api/check): the Privy user id linked to the account
+ * (`x-yeet-subject`) and ITS wallet addresses as the core holds them. The page shows only these. Sign-in server only. */
+app.get('/account/wallets',async(q,r)=>{
  if(q.role!=='as')return r.sendStatus(403);
- let facts=null;
- try{const did=didFor(q.subject);facts=did?await logins()(did):null}catch{facts=null}
- r.json(facts?{known:true,methods:methodsOf(facts),labels:facts.labels??{}}:{known:false,methods:[],labels:{}});
+ try{
+  const user=didFor(q.subject),w=await (await tradeEngine()).wallets.require(q.subject);
+  if(!user||typeof w?.base?.address!=='string')return unavailable(r);
+  r.json({user,addresses:{base:w.base.address,solana:typeof w.solana?.address==='string'?w.solana.address:null}});
+ }catch(e){console.error(JSON.stringify({event:'account_wallets_failed',error:String(e?.code??e?.message??e).slice(0,120)}));unavailable(r)}
 });
 // Leaderboard and daily spin (P2): answered only with YEET_P2=1, otherwise a typed retryable failure.
 function xpRoute(tool,fn){

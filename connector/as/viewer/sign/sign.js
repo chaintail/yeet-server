@@ -227,10 +227,10 @@ function draw(s) {
   if (s.view === 'loading') return show(line('Getting your trade…'));
   if (s.view === 'unavailable') return show(line(s.message, 'bad'));
   if (s.view === 'mismatch') {
-    // `bound`: the link was made for one account and this is another. The right method is named; one button to retry.
+    // `bound`: the link was made for one account and this is another. One line, and one button the person presses
+    // to end the session here and try again. Nothing about the right account is shown.
     const other = el('button', s.bound ? '' : 'quiet', s.bound ? 'Try again' : 'Use another account'); other.id = 'sign-other'; other.onclick = () => flow.useAnother();
-    const use = s.use ? line(s.use) : null; if (use) use.id = 'sign-use';
-    return show(line(s.message, 'bad'), use, s.who ? line(`You’re here as ${s.who}.`) : null, other);
+    return show(line(s.message, 'bad'), s.who ? line(`You’re here as ${s.who}.`) : null, other);
   }
   if (s.view === 'nothing') return show(...tradeRows(s), line(s.message, s.kind), linkedLine(s));
   if (s.view === 'ready' || s.view === 'sending') {
@@ -249,6 +249,8 @@ function draw(s) {
 }
 
 async function main() {
+  // The link carried a hint that no longer verifies (the server says so): nothing else happens on this page.
+  if (root.dataset.link === 'expired') return show(line('This link has expired. Go back to ChatGPT and ask for a new one.', 'bad'));
   if (!cfg.tradeId) return show(line('Open this page from the YEET card in ChatGPT.'));
   if (!cfg.appId || !window.YeetSigner) return show(line('This page isn’t available right now. Try again in a minute.', 'bad'));
   try { signer = window.YeetSigner.create({appId: cfg.appId}); } catch { return show(line('This page isn’t available right now. Try again in a minute.', 'bad')); }

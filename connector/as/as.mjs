@@ -14,7 +14,7 @@ import { document, credentials, html, expiredAuthorizationBody, promptTitle, pro
 import express from "express";
 import { providerCsp } from "./provider-csp.mjs";
 import { fundRoutes, privyPageCsp, afterSignIn, nextField, boundNext, FUND_NEXT } from "./fund-page.mjs";
-import { hintReader, expectedReader, mismatchBody, EXPIRED_LINK_LINE } from "./account-bound.mjs";
+import { hintReader, mismatchBody, expiredBody, switchBody } from "./account-bound.mjs";
 import { signRoutes } from "./sign-page.mjs";
 import { ACCOUNT_TITLE, USERNAME_PATH, accountBody, usernameMessage } from "./account-page.mjs";
 import {
@@ -401,15 +401,15 @@ function authDocument(res, title, body) {
   );
   return document(title, body, nonce);
 }
-// `bound` (a page opened from an account-bound link, account-bound.mjs): only that account's methods, no new
-// account, and a clean start when the person is trying again after coming in as someone else.
-const loginFields = (bound = null, again = false) =>
+// `bound` (a page opened from an account-bound link, account-bound.mjs): only that account's methods and no new
+// account. The page's own address carries the hint; Google and Apple come back to the bare /account/login (a fixed
+// address, as Privy's allowed redirect list needs) and the page goes on from what the tab kept (login/bound-return.js).
+const loginFields = (bound = null) =>
   process.env.PRIVY_LOGIN === "1"
-    ? `<div id="privy-login"${bound ? ` data-bound="1" data-methods="${bound.methods.join(",")}"${again ? ' data-again="1"' : ""}` : ""}><p role="status">Loading secure sign in…</p></div><script type="module" src="/account/privy-login/login.js"></script>`
+    ? `<div id="privy-login"${bound ? ` data-bound="1" data-methods="${bound.methods.join(",")}"` : ""}><p role="status">Loading secure sign in…</p></div><script type="module" src="/account/privy-login/login.js"></script>`
     : credentials();
 // Signed hints on account-bound links (shared/link-token.mjs purpose `hint`): verified here, never trusted from the page.
 const readHint = hintReader((t) => verifyLinkToken(LINK_KEY, t, { purpose: "hint" }));
-const expectedAccount = expectedReader((route, account) => coreSend(route, account, secret("core-as")));
 // Public values only: the sign-in page needs the app id.
 app.get("/account/identity-config", (_q, r) =>
   process.env.PRIVY_LOGIN === "1"
@@ -538,16 +538,20 @@ async function finishConnect(q, r, d) {
 }
 app.get("/account/login", (q, r) => {
   const next = nextField(q.query.next);
+  r.set({ "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
   // From an account-bound link (the funding page, or the terms page whose own token ran out): the hint rides along.
-  const bound = boundNext(q.query.next) ? readHint(q.query.h) : null;
+  // A hint that is there but does not verify, or that is aimed at a destination it is not for, is refused: the page
+  // never turns into the plain sign-in, which would let any account in.
+  const { supplied, hint: found } = readHint.state(q.query.h);
+  const bound = found && boundNext(q.query.next) ? found : null;
+  if (supplied && !bound) return r.status(410).type("html").send(authDocument(r, promptTitle("login"), expiredBody()));
   const c = randomBytes(24).toString("hex");
   cookie(r, "yeet_login", c, 300);
-  r.set({ "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
   r.type("html").send(
     authDocument(
       r,
       promptTitle("login"),
-      `<form method="POST" data-yeet-prompt="login"><input type="hidden" name="csrf" value="${c}">${next}${bound ? `<input type="hidden" name="hint" value="${html(bound.token)}">` : ""}${loginFields(bound, q.query.again === "1")}${process.env.PRIVY_LOGIN === "1" ? "" : '<button type="submit">Sign in</button>'}</form>`,
+      `<form method="POST" data-yeet-prompt="login"><input type="hidden" name="csrf" value="${c}">${next}${bound ? `<input type="hidden" name="hint" value="${html(bound.token)}">` : ""}${loginFields(bound)}${process.env.PRIVY_LOGIN === "1" ? "" : '<button type="submit">Sign in</button>'}</form>`,
     ),
   );
 });
@@ -572,21 +576,25 @@ app.post("/account/login", formBody, async (q, r) => {
       ?.slice(11);
     if (!c || !equal(c, q.body.csrf) || !originOK(q)) return r.sendStatus(403);
     // The form came from an account-bound link (account-bound.mjs): the person must be the link's account. They are
-    // looked up, never resolved: no account is created here, and none is linked or switched.
-    if (typeof q.body.hint === "string" && q.body.hint) {
+    // looked up, never resolved: no account is created here, and none is linked. A hint that is on the form but does
+    // not verify is refused; it never becomes a plain sign-in.
+    if (q.body.hint !== undefined) {
       r.set({ "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
       const bound = boundNext(q.body.next) ? readHint(q.body.hint) : null;
-      if (!bound) return r.status(400).type("html").send(authDocument(r, promptTitle("login"), `<p class="notice" role="alert">${html(EXPIRED_LINK_LINE)}</p>`));
+      if (!bound) return r.status(410).type("html").send(authDocument(r, promptTitle("login"), expiredBody()));
       const id = await lookupAccount(q.body);
-      if (id !== bound.account) {
-        const say = await expectedAccount(bound);
-        const retry = `/account/login?next=${q.body.next}&h=${encodeURIComponent(bound.token)}&again=1`;
-        return r.status(403).type("html").send(authDocument(r, promptTitle("login"), mismatchBody({ use: say.use, retry })));
-      }
+      // Another account, or nobody's: the one line and Try again. Nothing about the right account is said.
+      if (id !== bound.account)
+        return r.status(403).type("html").send(authDocument(r, promptTitle("login"), mismatchBody({ retry: `/account/login?next=${q.body.next}&h=${encodeURIComponent(bound.token)}` })));
       if (!(await eligible(id))) return r.sendStatus(403);
-      // A YEET session of another account in this browser ends here: the person just proved they are this one.
+      // This browser holds a YEET session of ANOTHER account. It is replaced only when the person presses
+      // "Switch to the account in your ChatGPT" (the same form again, with switch=yes), never by itself.
       const current = session(q);
       if (current && current.id !== id) {
+        if (q.body.switch !== "yes")
+          return r.status(409).type("html").send(authDocument(r, promptTitle("login"), switchBody({
+            fields: [["csrf", q.body.csrf], ["next", q.body.next], ["hint", bound.token], ["privy_access_token", q.body.privy_access_token], ["identity_token", q.body.identity_token]],
+          })));
         const db = read("sessions.json");
         delete db[current.token];
         write("sessions.json", db);
@@ -690,7 +698,11 @@ app.post(USERNAME_PATH, formBody, async (q, r) => {
 });
 // Add funds: a direct USDC transfer on Base or on Solana (address, QR code, wallet links), or USDC on Base by card
 // through Privy funding (Coinbase Onramp). Needs a YEET sign-in session and the Privy sign-in.
-fundRoutes(app, { enabled: () => process.env.PRIVY_LOGIN === "1", session, hint: readHint, expected: expectedAccount, lookup: lookupAccount, originOK });
+fundRoutes(app, {
+  enabled: () => process.env.PRIVY_LOGIN === "1", session, hint: readHint, lookup: lookupAccount, originOK,
+  // The account's Privy user id and wallet addresses as the core holds them: the only addresses the page may show.
+  wallets: async (account) => { const { status, body } = await coreSend("/account/wallets", account, secret("core-as"), undefined, 8000); return status === 200 ? body : null; },
+});
 // The YEET terms as a first-party page with checkboxes (terms-page.mjs): the same record as yeet_accept_terms.
 termsRoutes(app, { session, originOK, equal, formBody, hint: readHint, linkToken: (t) => { try { return verifyLinkToken(LINK_KEY, t, { purpose: "terms" }); } catch { return null; } }, core: (route, account, body) => coreSend(route, account, secret("core-as"), body), document: authDocument });
 // Card signing (sign-page.mjs): the signer script the trade card loads, and the first-party signing page with its two
@@ -700,7 +712,6 @@ signRoutes(app, {
   appId: () => process.env.PRIVY_APP_ID ?? "",
   methods: loginMethods,
   hint: readHint,
-  expected: expectedAccount,
   lookup: lookupAccount,
   core: (route, account, body, timeoutMs) => coreSend(route, account, secret("core-as"), body, timeoutMs),
   originOK,

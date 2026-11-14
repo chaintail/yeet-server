@@ -10,6 +10,14 @@ import {staleness as processStaleness,staleKey,appRefresh,withRefresh,BUILD_META
 import {refreshGuidance} from './guidance.mjs';
 import {hasScope} from '#scope-catalog';
 import {withLinkToken} from '#shared/link-token.mjs';
+/**
+ * The card's signer for one result. The trade page address is handed out only bound to the account (the core's
+ * signed hint on it); with no hint the card gets the signer without a page address, never an unbound one.
+ */
+export function boundSigner(signer,hint){
+ const {sign_page_url:page,...rest}=signer;
+ return hint?{...rest,sign_page_url:withLinkToken(page,'h',hint)}:rest;
+}
 /** The shape of a signed link token (shared/link-token.mjs); the connector only passes it on, it holds no key. */
 const LINK_TOKEN=/^v1\.[A-Za-z0-9_-]{8,300}\.[A-Za-z0-9_-]{43}$/;
 /** Card-only `_meta` key for the connected account (contract x-yeet-meta.account): the device check in the trade card. */
@@ -142,7 +150,7 @@ export function createMcpServer({token,callCore,env=process.env,staleness=proces
     if(!parsed.success)return toolError({error:'TEMPORARILY_UNAVAILABLE'},ctx);
     const text=TEXT[name]?TEXT[name](result):JSON.stringify(parsed.data);
     // Card only: the server's card build, so a card built from another commit can tell it is stale.
-    const cardMeta={[BUILD_META_KEY]:staleness.build,...(confirm?{[CONFIRM_META_KEY]:confirm}:{}),...(account?{[ACCOUNT_META_KEY]:account}:{}),...(signer&&SIGNER_TOOLS.has(name)?{[SIGNER_META_KEY]:hint?{...signer,sign_page_url:withLinkToken(signer.sign_page_url,'h',hint)}:signer}:{})};
+    const cardMeta={[BUILD_META_KEY]:staleness.build,...(confirm?{[CONFIRM_META_KEY]:confirm}:{}),...(account?{[ACCOUNT_META_KEY]:account}:{}),...(signer&&SIGNER_TOOLS.has(name)?{[SIGNER_META_KEY]:boundSigner(signer,hint)}:{})};
     // The one-sentence tools (spin, lucky wheel) carry the guidance as a second text block; JSON text already has it.
     const content=[{type:'text',text},...(TEXT[name]&&parsed.data.guidance?[{type:'text',text:parsed.data.guidance}]:[])];
     return {structuredContent:parsed.data,...(Object.keys(cardMeta).length?{_meta:cardMeta}:{}),content};

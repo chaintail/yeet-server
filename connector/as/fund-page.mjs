@@ -6,7 +6,7 @@
 import { randomBytes } from "node:crypto";
 import express from "express";
 import { document, html } from "./auth-pages.mjs";
-import { MISMATCH_CODE, MISMATCH_LINE, mismatchBody } from "./account-bound.mjs";
+import { MISMATCH_CODE, MISMATCH_LINE, EXPIRED_CODE, EXPIRED_LINK_LINE, NO_HINTS, mismatchBody, expiredBody } from "./account-bound.mjs";
 
 export const FUND_PATH = "/fund";
 /** The only post-sign-in destination the sign-in form accepts besides its default. */
@@ -70,9 +70,8 @@ export const fundCsp = (nonce) =>
 export const FUND_TITLE = "Add funds";
 const fundBody = (hint) =>
   `<div id="yeet-fund"${hint ? ` data-hint="${html(hint)}"` : ""}><p role="status">Loading your YEET wallet…</p></div><script type="module" src="/account/privy-login/fund.js"></script>`;
-/** The sign-in page for the funding page; `h` carries the link's signed hint on, `again` asks for a clean start. */
-export const fundSignIn = (loginPath, hint, again = false) =>
-  `${loginPath}?next=${FUND_NEXT}${hint ? `&h=${encodeURIComponent(hint.token)}` : ""}${hint && again ? "&again=1" : ""}`;
+/** The sign-in page for the funding page; `h` carries the link's signed hint on. */
+export const fundSignIn = (loginPath, hint) => `${loginPath}?next=${FUND_NEXT}${hint ? `&h=${encodeURIComponent(hint.token)}` : ""}`;
 
 /**
  * GET /fund. Requires a YEET sign-in session; without one the person is sent to the sign-in page, which returns here.
@@ -80,32 +79,34 @@ export const fundSignIn = (loginPath, hint, again = false) =>
  *
  * The account the page is for (as/account-bound.mjs). A link the core minted for the connected account carries
  * ?h=<signed hint>: the page is then for THAT account. A browser signed in to YEET as another account is refused
- * here; with no session the sign-in page gets the hint and offers only that account's methods. Without a valid hint
- * the page is for the account of the YEET session, as before.
+ * here; with no session the sign-in page gets the hint and offers only that account's methods. A hint that is on the
+ * link but does not verify (expired, altered) is refused with the expired state: it is never dropped in favour of
+ * the session the browser happens to hold. Only a link with no hint at all is for the account of the YEET session.
  *
- * POST /fund/api/check {privy_access_token, hint?} -> {ok: true}, or 409 ACCOUNT_MISMATCH {message, use}.
- * The page shows wallet addresses of the Privy user in the browser, so before it shows any, the server compares the
- * account behind that Privy user with the account the page is for (lookup never creates an account). Money sent to
- * the address of another account would land in the wrong wallet: the page shows nothing until this answers ok.
- *   hint(text) -> {token, account, methods} or null     expected(hint) -> {message, use}
+ * POST /fund/api/check {privy_access_token, hint?} -> {ok: true, user, addresses: {base, solana}}, or
+ * 409 ACCOUNT_MISMATCH, or 410 LINK_EXPIRED (a hint that was sent and does not verify).
+ * The server compares the account behind the Privy user in the browser with the account the page is for (lookup
+ * never creates an account), and answers with that account's Privy user id and ITS wallet addresses as the core
+ * holds them. The page shows only those addresses, and only while the Privy user in the browser is that user
+ * (login/fund-approval.js): money sent to the address of another account would land in the wrong wallet.
+ *   hint                account-bound.mjs hintReader
  *   lookup(body) -> account id or null; throws when the Privy token does not verify     originOK(req)
+ *   wallets(account) -> {user: did, addresses: {base, solana}} or null (core /account/wallets)
  */
-export function fundRoutes(app, { enabled, session, loginPath = "/account/login", hint = () => null, expected = async () => ({ message: MISMATCH_LINE, use: null }), lookup = null, originOK = () => false }) {
+export function fundRoutes(app, { enabled, session, loginPath = "/account/login", hint = NO_HINTS, lookup = null, wallets = async () => null, originOK = () => false }) {
   app.get(FUND_PATH, async (q, r) => {
     if (!enabled()) return r.sendStatus(404);
-    r.set("Cache-Control", "no-store");
-    const bound = hint(q.query.h), s = session(q);
+    r.set({ "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
+    const { supplied, hint: bound } = hint.state(q.query.h), s = session(q);
+    if (supplied && !bound) return r.status(410).type("html").send(document(FUND_TITLE, expiredBody()));
     if (!s) return r.redirect(303, fundSignIn(loginPath, bound));
-    if (bound && s.id !== bound.account) {
-      const say = await expected(bound).catch(() => ({ use: null }));
-      return r.status(403).set("Referrer-Policy", "no-referrer").type("html").send(document(FUND_TITLE, mismatchBody({ use: say.use, retry: fundSignIn(loginPath, bound, true) })));
-    }
+    if (bound && s.id !== bound.account)
+      return r.status(403).type("html").send(document(FUND_TITLE, mismatchBody({ retry: fundSignIn(loginPath, bound) })));
     const nonce = randomBytes(24).toString("base64");
     r.set({
       "Content-Security-Policy": fundCsp(nonce),
       // Privy watches the Coinbase popup it opens (window.closed); a stricter opener policy would cut that link.
       "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
-      "Referrer-Policy": "no-referrer",
       "X-Content-Type-Options": "nosniff",
     });
     r.type("html").send(document(FUND_TITLE, fundBody(bound?.token), nonce));
@@ -117,15 +118,21 @@ export function fundRoutes(app, { enabled, session, loginPath = "/account/login"
     if (!originOK(q)) return r.sendStatus(403);
     const s = session(q);
     if (!s) return r.status(401).json({ code: "SIGN_IN_REQUIRED", message: "Your session here ended. Sign in again." });
-    const b = q.body ?? {}, bound = hint(b.hint);
-    // The account the page is for: the link's when it carries a valid hint, else the YEET session's.
-    const want = bound ?? { token: null, account: s.id, methods: [] };
+    const b = q.body ?? {}, { supplied, hint: bound } = hint.state(b.hint);
+    if (supplied && !bound) return r.status(410).json({ code: EXPIRED_CODE, message: EXPIRED_LINK_LINE });
+    // The account the page is for: the link's when it carries a hint, else (no hint at all) the YEET session's.
+    const want = bound ? bound.account : s.id;
     let account;
     try { account = await lookup({ privy_access_token: b.privy_access_token, identity_token: b.identity_token }); }
     catch { return r.status(401).json({ code: "SIGN_IN_REQUIRED", message: "Your session here ended. Sign in again." }); }
-    if (account === want.account && s.id === want.account) return r.json({ ok: true });
-    const say = await expected(want).catch(() => ({ message: MISMATCH_LINE, use: null }));
-    r.status(409).json({ code: MISMATCH_CODE, message: MISMATCH_LINE, use: say.use ?? null });
+    if (account !== want || s.id !== want) return r.status(409).json({ code: MISMATCH_CODE, message: MISMATCH_LINE });
+    // The addresses come from the core's own record of THAT account, never from the browser.
+    let own = null;
+    try { own = await wallets(want); } catch { own = null; }
+    const ok = (v) => typeof v === "string" && v.length >= 20 && v.length <= 64;
+    if (!own || typeof own.user !== "string" || !ok(own.addresses?.base))
+      return r.status(503).json({ code: "TEMPORARILY_UNAVAILABLE", message: "YEET could not read your wallets just now. Try again in a moment." });
+    r.json({ ok: true, user: own.user, addresses: { base: own.addresses.base, solana: ok(own.addresses.solana) ? own.addresses.solana : null } });
   });
 }
 

@@ -22,18 +22,10 @@ export function loginFacts(user){
 }
 /** The sign-in methods a Privy user actually has, in page order (google, apple, email), from loginFacts. */
 export const methodsOf=facts=>facts?[...(facts.google?['google']:[]),...(facts.apple?['apple']:[]),...(facts.email?['email']:[])]:[];
-/** The masked address behind each method ({google, apple, email}, each l•••@c•••.xyz or null): what a page shows a
- * person who came in with another account, so they know which of their own to use. */
-export function signInLabels(user){
- const accounts=Array.isArray(user?.linked_accounts)?user.linked_accounts:[];
- const of=(type,field)=>maskEmail(accounts.find(a=>a?.type===type)?.[field]);
- return {google:of('google_oauth','email'),apple:of('apple_oauth','email'),email:of('email','address')};
-}
 /**
  * The signed hint an account-bound page link carries (shared/link-token.mjs, purpose `hint`): the account id and the
  * methods its Privy user has. The funding and trade pages then show only those methods and refuse any other account.
- * Null when the methods are not known (Privy did not answer) or there is no key: the link is then plain and the page
- * offers the default methods.
+ * Null when the methods are not known (Privy did not answer) or there is no key: no link is handed out then.
  */
 export function hintFor(accountId,facts,{key,now=Date.now()}={}){
  const m=methodsOf(facts);
@@ -61,9 +53,7 @@ export function createAccountLogin({env=process.env,fetch=globalThis.fetch,api,n
   const hit=fresh(did);
   if(hit)return hit;
   try{
-   const user=await client.app('GET',`/v1/users/${did}`);
-   // `labels` (signInLabels) rides beside the facts for the pages; the card's facts are picked field by field.
-   const value=Object.assign(loginFacts(user),{labels:signInLabels(user)});
+   const value=loginFacts(await client.app('GET',`/v1/users/${did}`));
    cache.set(did,{at:now(),value});if(cache.size>MAX)cache.delete(cache.keys().next().value);
    return value;
   }catch{return null}

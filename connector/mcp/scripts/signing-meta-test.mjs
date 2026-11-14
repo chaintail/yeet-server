@@ -92,7 +92,9 @@ test('resources: overview, basket, portfolio, receipt and lucky declare exactly 
 
 test("results: _meta['yeet/signer'] on the proposal and trade results only (never the welcome card), card-only, next to the confirm code",async()=>{
  assert.deepEqual([...SIGNER_TOOLS].sort(),['execute_trade','skeet_propose','submit_trade_signature','trade_status','yeet_propose','yeet_quote']);
- const want={privy_app_id:APP,script_url:`${ORIGIN}${asset.path}`,sign_page_url:`${ORIGIN}/sign`};
+ // With no hint from the core the card gets the signer WITHOUT a page address: the trade page link is only handed
+ // out bound to the account (boundSigner). The hint test below covers the bound address.
+ const want={privy_app_id:APP,script_url:`${ORIGIN}${asset.path}`};
  const {client,close}=await connect(ENV);
  try{
   for(const [name,args] of Object.entries(CALLS)){
@@ -163,7 +165,7 @@ test('trade_status with the account facts (the person confirmed an email on the 
  }finally{await plain.close();await client.close();await server.close()}
 });
 
-test('the trade page hint (core card_hint): on the card-only signer page address, never in what the model reads; a malformed one is dropped',async()=>{
+test('the trade page hint (core card_hint): on the card-only signer page address, never in what the model reads; a malformed one is dropped and then there is no page address at all',async()=>{
  const hint=`v1.${Buffer.from(JSON.stringify({m:['google'],p:'hint',a:'yeet-privy-ginaAAAAAAAAAAAAAAAAA',e:1900000000})).toString('base64url')}.${'A'.repeat(43)}`;
  const withHint=h=>createMcpServer({token:{scope:allScopes.join(' ')},callCore:async route=>{
   const base=route==='/proposals'||route==='/proposals/skeet'||/\/quote$/.test(route)?{...proposal,confirm}:await core(route);
@@ -187,7 +189,8 @@ test('the trade page hint (core card_hint): on the card-only signer page address
   try{
    const r=await s.client.callTool({name:'yeet_propose',arguments:CALLS.yeet_propose});
    assert.equal(r.isError,undefined,JSON.stringify(r.content));
-   assert.equal(r._meta[SIGNER_META_KEY].sign_page_url,`${ORIGIN}/sign`,String(bad));
+   assert.equal('sign_page_url' in r._meta[SIGNER_META_KEY],false,`${String(bad)}: no unbound page address`);
+   assert.equal(r._meta[SIGNER_META_KEY].script_url,`${ORIGIN}${asset.path}`);
    assert.doesNotMatch(JSON.stringify(r),/card_hint/);
   }finally{await s.close()}
  }
