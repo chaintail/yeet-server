@@ -106,7 +106,9 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   ledgerVerifier=ledgerOverrides?.verifier??createVerifier({rpc:ledgerRpc});
   const byAddress=db.prepare('SELECT account_id FROM wallets WHERE address=? OR lower(address)=lower(?)');
   balances=ledgerBalances(balances,{verifier:ledgerVerifier,catalog,usdcTokenIds:ledgerUsdcIds,
-   isLedgerAddress:address=>ledgerCfg.route==='ledger'||byAddress.all(address,address).some(r=>ledgerCfg.accounts.has(r.account_id)||!!agents?.isAgent(r.account_id))});
+   isLedgerAddress:address=>{if(ledgerCfg.route==='ledger')return true;const rows=byAddress.all(address,address);
+    // an agent's key counts only when no person's wallet has that address (agents.mjs refuses such a key)
+    return rows.some(r=>ledgerCfg.accounts.has(r.account_id))||(!!agents&&rows.length>0&&rows.every(r=>agents.isAgent(r.account_id)))}});
  }
  directory??=walletDirectoryFromEnv({env,fetch,didFor});
  if(agents){const inner=directory;directory={stable:inner.stable,async lookup(accountId){return agents.isAgent(accountId)?agents.walletsOf(accountId):inner.lookup(accountId)}}}

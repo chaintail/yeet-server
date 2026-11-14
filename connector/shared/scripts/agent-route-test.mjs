@@ -23,11 +23,12 @@ test('YEET_AGENT_ROUTE: off unless exactly on; anything unknown stops the servic
 
 test('client classes come from the redirect URIs alone: ChatGPT\'s, an agent\'s, or refused when mixed or not allowed',()=>{
  assert.equal(clientClass([STABLE]),'chatgpt');assert.equal(clientClass(['https://chatgpt.com/connector/oauth/abc_123']),'chatgpt');
- assert.equal(clientClass(['http://127.0.0.1:53682/callback']),'agent');assert.equal(clientClass(['http://localhost:3000/cb','https://agent.example/cb']),'agent');
+ assert.equal(clientClass(['http://127.0.0.1:53682/callback']),'agent');assert.equal(clientClass(['http://localhost:3000/cb','http://[::1]:4000/cb']),'agent');
+ assert.equal(clientClass(['https://agent.example/cb']),null,'https callbacks: any web site could pose as an agent');
  assert.equal(clientClass([STABLE,'http://127.0.0.1:1/cb']),null,'mixed');
- for(const u of ['http://agent.example/cb','myapp://cb','https://u:p@agent.example/cb','https://agent.example/cb#x'])assert.equal(agentRedirect(u),false,u);
+ for(const u of ['https://agent.example/cb','http://agent.example/cb','myapp://cb','https://u:p@agent.example/cb','https://agent.example/cb#x'])assert.equal(agentRedirect(u),false,u);
  // a look-alike of ChatGPT's host is an agent, never chatgpt
- assert.equal(clientClass(['https://chatgpt.com.evil.example/connector_platform_oauth_redirect']),'agent');
+ assert.equal(clientClass(['https://chatgpt.com.evil.example/connector_platform_oauth_redirect']),null);
  assert.equal(classOfRedirects([],chatgptRedirect),null);
 });
 

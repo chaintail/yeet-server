@@ -229,9 +229,18 @@ export function createAgents({db,engine,limits,pageUrl,catalog=engine?.catalog??
   if(budget>limits.maxBudgetRaw)fail('LIMIT_EXCEEDED',`A budget is at most ${usdcText(limits.maxBudgetRaw)} USDC.`,409);
   const wallet=await ownerWallet(owner),ownerAccount=ed25519AccountId(wallet);
   if(account===ownerAccount||account===solver.accountId||address===wallet)fail('AGENT_KEY_INVALID','Use a key made for this agent only, never the key of a YEET wallet.',400);
-  const other=db.prepare("SELECT * FROM agent_key WHERE public_key=? AND state<>'revoked'").get(address);
+  // A key once linked to a connection, revoked or not, stays with it: a revoked row is never handed to another
+  // account (its ledger balance may still be the first owner's). A key that is any YEET account's wallet is refused too.
+  const other=db.prepare("SELECT * FROM agent_key WHERE public_key=?").get(address);
   if(other&&(other.owner!==owner||other.client_id!==clientId))fail('AGENT_KEY_TAKEN','That key is already linked to another YEET connection. Generate a new key for this agent.',409);
+  if(db.prepare("SELECT 1 FROM wallets WHERE (address=? OR lower(address)=lower(?)) AND account_id NOT LIKE 'yeet-agent-%' LIMIT 1").get(address,address))
+   fail('AGENT_KEY_INVALID','Use a key made for this agent only, never the key of a YEET wallet.',400);
   let a=keyOf(owner,clientId);
+  // A new budget link for an agent that already holds a balance: the balance and the new budget together stay within the cap.
+  if(a&&a.public_key===address&&a.state==='active'){
+   const held=(await balanceOf(a)).usdcRaw;
+   if(held+budget>limits.maxBudgetRaw)fail('LIMIT_EXCEEDED',`An agent holds at most ${usdcText(limits.maxBudgetRaw)} USDC; it holds ${usdcText(held)} USDC now.`,409);
+  }
   if(a&&a.public_key!==address){
    if(a.state==='active')fail('AGENT_KEY_LINKED',`This connection already trades with the key ed25519:${a.public_key}. Return its budget first, or connect again as a new agent to use another key.`,409);
    db.prepare("UPDATE agent_key SET state='revoked',updated_at=? WHERE account_id=?").run(now(),a.account_id);

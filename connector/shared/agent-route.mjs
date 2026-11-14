@@ -7,7 +7,7 @@
 //
 // Every OAuth client has a class, decided only by its redirect URIs (never by User-Agent or IP):
 //   chatgpt  every redirect URI is one of ChatGPT's connector redirects (as/security-policy.mjs chatgptRedirect)
-//   agent    none of them is (a loopback or https callback of a local agent)
+//   agent    every one is a loopback http callback of a local agent
 // A client whose list mixes both is refused at registration. Tokens carry the class (`yeet_route`, stamped by the
 // sign-in server) and the resource they were issued for (aud). The ChatGPT endpoint refuses agent tokens and the agent
 // endpoint refuses ChatGPT tokens, at the authorization step and on every call, with WRONG_ROUTE.
@@ -42,13 +42,13 @@ export function wrongRoute(expected,env=process.env){
 }
 
 const LOOPBACK=new Set(['127.0.0.1','localhost','[::1]']);
-/** A redirect URI a local agent may register: https anywhere, or http on a loopback address. No fragment, no
- * credentials. Custom schemes are refused (nothing on this route needs them). */
+/** A redirect URI a local agent may register: http on a loopback address only (RFC 8252 7.3, what Claude Code and
+ * Codex use). No fragment, no credentials. https callbacks and custom schemes are refused: an https callback would let
+ * any web site register as an "agent" and collect a person's authorization code from a link it sends them. */
 export function agentRedirect(uri){
  if(typeof uri!=='string'||uri.length>500)return false;
  let u;try{u=new URL(uri)}catch{return false}
  if(u.hash||u.username||u.password)return false;
- if(u.protocol==='https:')return true;
  return u.protocol==='http:'&&LOOPBACK.has(u.hostname);
 }
 /** The class of a client from its redirect URIs: 'chatgpt', 'agent', or null (empty, mixed, or not allowed). */

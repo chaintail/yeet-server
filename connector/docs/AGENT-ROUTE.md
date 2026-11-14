@@ -57,7 +57,7 @@ Core routes (connector credential and the agent's delegated bearer): `GET /agent
 
 ## Route guards (both directions)
 
-- **Client class.** Each OAuth client has a class, decided by its redirect URIs alone and never by User-Agent or IP. A client is `chatgpt` when every URI is one of ChatGPT's connector redirects (`as/security-policy.mjs chatgptRedirect`). It is `agent` when every URI is https or loopback http. A mixed list is refused at `/reg`, and so are custom schemes and plain http off loopback.
+- **Client class.** Each OAuth client has a class, decided by its redirect URIs alone and never by User-Agent or IP. A client is `chatgpt` when every URI is one of ChatGPT's connector redirects (`as/security-policy.mjs chatgptRedirect`). It is `agent` when every URI is a loopback http callback (127.0.0.1, localhost, [::1]). A mixed list is refused at `/reg`, and so are https callbacks (a web site could pose as an agent and collect a code from a link), custom schemes and plain http off loopback.
 - **OAuth step.** `getResourceServerInfo` refuses an agent client that asks for the ChatGPT resource, and a ChatGPT client that asks for the agent resource. The refusal is `invalid_target` with `error_description` = `WRONG_ROUTE: <sentence with the right URL>`. A client that names no resource gets the resource of its class.
 - **Token.** Every access token carries `yeet_route` (`extraTokenClaims`, returned by introspection) and `aud`, the resource it was issued for.
 - **MCP call.**

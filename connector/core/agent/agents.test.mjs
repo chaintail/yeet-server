@@ -77,11 +77,15 @@ test('register: the budget link, the page request the owner signs (checked like 
  const m=JSON.parse(req.payload.message);
  assert.equal(m.signer_id,accountOf(aliceWallet));
  assert.deepEqual(m.intents,[{intent:'transfer',receiver_id:t.agentLedger,tokens:{[USDC]:'10000000'}}]);
- assert.equal(checkIntent(req),true);
+ assert.equal(checkIntent(req,{tradeId:op}),true);
+ // a transfer passes only on its own budget link page: never on a trade page, never without the page's id
+ assert.throws(()=>checkIntent(req),/outside its budget link/);
+ assert.throws(()=>checkIntent(req,{tradeId:'t_'+'a'.repeat(20)}),/outside its budget link/);
+ assert.throws(()=>checkIntent({...req,trade_id:'a_'+'b'.repeat(20)},{tradeId:op}),/outside its budget link/);
  // the page's own check refuses a request whose message and statement differ
- assert.throws(()=>checkIntent({...req,payload:{...req.payload,transfer:{receiver_id:t.agentLedger,tokens:{[USDC]:'1'}}}}),/not the stated transfer/);
- assert.throws(()=>checkIntent({...req,leg_summaries:[{...req.leg_summaries[0],to:accountOf(bobWallet)}]}),/leg summaries/);
- assert.equal(privyRpcBodies(req).length,1);
+ assert.throws(()=>checkIntent({...req,payload:{...req.payload,transfer:{receiver_id:t.agentLedger,tokens:{[USDC]:'1'}}}},{tradeId:op}),/not the stated transfer/);
+ assert.throws(()=>checkIntent({...req,leg_summaries:[{...req.leg_summaries[0],to:accountOf(bobWallet)}]},{tradeId:op}),/leg summaries/);
+ assert.equal(privyRpcBodies(req,{tradeId:op}).length,1);
  // a signature from another key is refused and nothing moves
  await assert.rejects(t.agents.pageSubmit(ALICE.accountId,op,{attempt_id:req.attempt_id,signed:approve(bobWallet,req)}),e=>e.code==='SIGNATURE_INVALID'&&/does not verify/.test(e.userMessage));
  const out=await t.agents.pageSubmit(ALICE.accountId,op,{attempt_id:req.attempt_id,signed:approve(aliceWallet,req)});
@@ -148,4 +152,20 @@ test('return: the whole USDC balance back to the owner ledger account, signed by
  assert.equal(s.status,'settled');
  assert.equal(t.world.balance(t.agentLedger,USDC),0n);assert.equal(t.world.balance(accountOf(aliceWallet),USDC),30_000_000n);
  await assert.rejects(t.agents.returnBudget(ALICE.accountId,CLIENT),refused('NOTHING_TO_RETURN'));
+});
+
+test('register refuses another person\'s wallet key, a revoked key of another connection, and a top-up past the budget cap',async()=>{
+ const t=setup();
+ await t.p.wallets.require(BOB.accountId);
+ await assert.rejects(t.agents.register(ALICE.accountId,CLIENT,{public_key:bobWallet.address,budget_usdc:'5'}),refused('AGENT_KEY_INVALID',/never the key of a YEET wallet/));
+ // Alice's connection drops key K for K2 (K is revoked); K never moves to Bob's account
+ await t.agents.register(ALICE.accountId,CLIENT,{public_key:t.key.address,budget_usdc:'5'});
+ await t.agents.register(ALICE.accountId,CLIENT,{public_key:localSigner().address,budget_usdc:'5'});
+ await assert.rejects(t.agents.register(BOB.accountId,'bob-client',{public_key:t.key.address,budget_usdc:'5'}),refused('AGENT_KEY_TAKEN'));
+ const row=t.db.prepare('SELECT owner,state FROM agent_key WHERE public_key=?').get(t.key.address);
+ assert.deepEqual({...row},{owner:ALICE.accountId,state:'revoked'});
+ // an active agent holding 10 USDC may ask for at most 90 more
+ const u=setup(),{out}=await link(u,{budget:'10'});assert.equal(out.status,'success');
+ await assert.rejects(u.agents.register(ALICE.accountId,CLIENT,{public_key:u.key.address,budget_usdc:'91'}),refused('LIMIT_EXCEEDED',/holds 10 USDC now/));
+ assert.equal((await u.agents.register(ALICE.accountId,CLIENT,{public_key:u.key.address,budget_usdc:'90'})).state,'active');
 });

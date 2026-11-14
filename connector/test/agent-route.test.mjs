@@ -103,10 +103,10 @@ async function introspect(token){
 }
 
 let chatgpt,agentClient,chatgptToken,agentToken;
-test('registration classes every client by its redirect URIs: ChatGPT\'s, an agent\'s loopback or https callback; a mixed list is refused',async()=>{
+test('registration classes every client by its redirect URIs: ChatGPT\'s, an agent\'s loopback callback; a mixed list is refused',async()=>{
  const c=await register([STABLE]);assert.equal(c.status,201);chatgpt=c.body.client_id;
  const a=await register([LOOPBACK]);assert.equal(a.status,201,JSON.stringify(a.body));agentClient=a.body.client_id;
- assert.equal((await register(['https://agent.example/callback'])).status,201);
+ assert.equal((await register(['https://agent.example/callback'])).status,400,'https callbacks: a web site posing as an agent');
  const mixed=await register([STABLE,LOOPBACK]);
  assert.equal(mixed.status,400);assert.equal(mixed.body.error,'invalid_redirect_uri');
  assert.equal((await register(['http://agent.example/callback'])).status,400,'plain http off loopback');

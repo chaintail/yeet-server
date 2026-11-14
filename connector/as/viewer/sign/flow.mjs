@@ -171,7 +171,7 @@ export function createSignFlow({signer, post, wr, tradeId, hint = '', onChange =
         let signed;
         try {
           const answers = [];
-          for (const b of privyRpcBodies(req)) {
+          for (const b of privyRpcBodies(req, {tradeId})) {
             try { answers.push(await signer.rpc(w.id, b)); }
             catch (e) {
               if (b.method === 'eth_sign7702Authorization' && !/TIMEOUT|FRAME/i.test(String(e?.code ?? e?.message ?? ''))) { signed = UNSUPPORTED_7702; break; }

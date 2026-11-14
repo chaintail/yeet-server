@@ -102,7 +102,7 @@ const utf8Base64=text=>{const b=new TextEncoder().encode(text);let s='';for(cons
 /** Throws (code BATCH_REFUSED) unless a near_intent request's message is exactly the one exchange it states: a single
  * `token_diff` of `gives` (negative) and `receives` (positive) for the wallet's own ledger account on intents.near,
  * ending at `deadline`, with the amounts given equal to the request's leg summaries. */
-export function checkIntent(req){
+export function checkIntent(req,{tradeId}={}){
  if(req?.kind!=='near_intent')throw refuseIntent('not a near_intent request');
  const p=req.payload??{};
  if(p.standard!=='raw_ed25519'||typeof p.message!=='string'||!p.message.length||p.message.length>4000)throw refuseIntent('message');
@@ -115,7 +115,9 @@ export function checkIntent(req){
  const end=Date.parse(m.deadline),ex=Date.parse(req.expires_at);
  if(!Number.isFinite(end)||m.deadline!==p.deadline||!Number.isFinite(ex)||ex>end)throw refuseIntent('deadline');
  const it=Array.isArray(m.intents)&&m.intents.length===1?m.intents[0]:null;
- if(it?.intent==='transfer')return checkTransfer(req,p,it,own);
+ // A transfer is only ever an agent budget link (a_...): the page opened for that link, the request naming it. A trade
+ // page (t_...) never signs one, whatever the server sends.
+ if(it?.intent==='transfer'){if(!/^a_[a-z0-9]{20}$/.test(tradeId??'')||req.trade_id!==tradeId)throw refuseIntent('a transfer outside its budget link');return checkTransfer(req,p,it,own)}
  if(!it||it.intent!=='token_diff'||Object.keys(it).sort().join()!=='diff,intent'||!it.diff||typeof it.diff!=='object')throw refuseIntent('not one token_diff');
  const gives=Array.isArray(p.gives)?p.gives:[],receives=Array.isArray(p.receives)?p.receives:[],want={};
  if(!gives.length||!receives.length)throw refuseIntent('gives or receives');
@@ -148,8 +150,8 @@ function checkTransfer(req,p,it,own){
 }
 
 /** Every Privy wallet RPC body a sign request needs, in order (one, or two for a first evm_7702 basket). */
-export function privyRpcBodies(req){
- if(req?.kind==='near_intent')checkIntent(req);
+export function privyRpcBodies(req,opts={}){
+ if(req?.kind==='near_intent')checkIntent(req,opts);
  if(req?.kind!=='evm_7702')return [privyRpcBody(req)];
  checkBatch(req);
  const a=req.payload.authorization,out=[];

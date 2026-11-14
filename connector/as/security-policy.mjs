@@ -45,14 +45,14 @@ export const CLIENT_AUTH_METHODS = ["none", "private_key_jwt"];
 // registration answer tells the client which method it got.
 // Returns { problem } with the OAuth error answer, or { body } with the registration to store.
 // With the agent route on (shared/agent-route.mjs, `agent: true`) a client whose redirect URIs are all a local agent's
-// (https, or http on a loopback address) registers too, as class agent; a list that mixes ChatGPT's and others is
+// (http on a loopback address) registers too, as class agent; a list that mixes ChatGPT's and others is
 // refused either way.
 export function registrationRequest(body, { agent = false } = {}) {
   const uris = body?.redirect_uris;
   if (!Array.isArray(uris) || uris.length === 0 || uris.length > 10)
     return { problem: { error: "invalid_redirect_uri", error_description: agent ? "redirect_uris must list 1 to 10 redirect URIs" : "redirect_uris must list ChatGPT redirect URIs" } };
   if (agent ? !clientClass(uris) : !uris.every(chatgptRedirect))
-    return { problem: { error: "invalid_redirect_uri", error_description: agent ? "redirect URIs must be all ChatGPT's connector redirects, or all https or loopback http callbacks of an agent" : "only ChatGPT's connector redirect URIs can be registered" } };
+    return { problem: { error: "invalid_redirect_uri", error_description: agent ? "redirect URIs must be all ChatGPT's connector redirects, or all loopback http callbacks of an agent" : "only ChatGPT's connector redirect URIs can be registered" } };
   const method = body.token_endpoint_auth_method ?? "none";
   if (!CLIENT_AUTH_METHODS.includes(method))
     return { problem: { error: "invalid_client_metadata", error_description: "token_endpoint_auth_method must be none or private_key_jwt" } };
