@@ -24,6 +24,8 @@ export const TERMS_NEXT='terms';
 export const TERMS_TITLE='YEET terms';
 /** The id of one terms link token (claim `j`): the core marks it used with the acceptance. */
 export const TOKEN_ID=/^[A-Za-z0-9_-]{16,32}$/;
+/** The footnote under the statements (owner, 2026-11-14: everywhere YEET talks about winning, XP or prizes). */
+export const NO_GUARANTEE='<p class="fine">*winning is not guaranteed.</p>';
 const safeUrl=u=>typeof u==='string'&&/^https:\/\/[^\s"<>]{1,500}$/.test(u)?u:null;
 /** The page body. terms: the contract `terms` object from core. */
 export function termsBody({csrf,terms,error=''}){
@@ -32,7 +34,7 @@ export function termsBody({csrf,terms,error=''}){
   const url=safeUrl(s.url);
   return `<label><input type="checkbox" name="agree_${html(s.id)}" value="yes"${s.required?' required':''}> <span>${html(s.text)}${s.required?'':' (optional)'}${url?` <a href="${html(url)}" target="_blank" rel="noopener">Read</a>`:''}</span></label>`;
  }).join('');
- return `<form method="POST" data-yeet-agreements><input type="hidden" name="csrf" value="${html(csrf)}"><input type="hidden" name="version" value="${html(terms.version)}"><p class="lead">Open each link, then agree.</p><fieldset class="agreements"><legend>Version ${html(terms.version)}</legend>${rows}</fieldset>${error?`<p class="notice" role="alert">${html(error)}</p>`:''}<button type="submit">Accept</button></form><script type="module" src="/account/consent.js"></script>`;
+ return `<form method="POST" data-yeet-agreements><input type="hidden" name="csrf" value="${html(csrf)}"><input type="hidden" name="version" value="${html(terms.version)}"><p class="lead">Open each link, then agree.</p><fieldset class="agreements"><legend>Version ${html(terms.version)}</legend>${rows}</fieldset>${NO_GUARANTEE}${error?`<p class="notice" role="alert">${html(error)}</p>`:''}<button type="submit">Accept</button></form><script type="module" src="/account/consent.js"></script>`;
 }
 /** The page for a valid link token: the REQUIRED statements as plain lines with their links and one Accept button.
  * The optional product-email line is not here: the link is a bearer, so it records only what using YEET needs. That
@@ -43,7 +45,7 @@ export function termsLinkBody({token,terms,error=''}){
   const url=safeUrl(s.url),read=url?` <a href="${html(url)}" target="_blank" rel="noopener noreferrer">Read</a>`:'';
   return `<p class="statement"><span>${html(s.text)}${read}</span></p>`;
  }).join('');
- return `<form method="POST" action="${TERMS_PATH}" data-yeet-terms-link><input type="hidden" name="t" value="${html(token)}"><input type="hidden" name="version" value="${html(terms.version)}"><p class="lead">Accept once to use YEET in ChatGPT.</p><fieldset class="agreements"><legend>By accepting, you confirm each line.</legend>${rows}</fieldset>${error?`<p class="notice" role="alert">${html(error)}</p>`:''}<button type="submit">Accept</button></form>`;
+ return `<form method="POST" action="${TERMS_PATH}" data-yeet-terms-link><input type="hidden" name="t" value="${html(token)}"><input type="hidden" name="version" value="${html(terms.version)}"><p class="lead">Accept once to use YEET in ChatGPT.</p><fieldset class="agreements"><legend>By accepting, you confirm each line.</legend>${rows}</fieldset>${NO_GUARANTEE}${error?`<p class="notice" role="alert">${html(error)}</p>`:''}<button type="submit">Accept</button></form>`;
 }
 /** The end of the link path. Nothing else is on the page: there is no session here to go on with. */
 export const TERMS_DONE='<p class="lead">Done. You accepted the YEET terms.</p><p>Go back to ChatGPT and carry on.</p>';

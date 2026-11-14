@@ -1,10 +1,10 @@
 repo: chaintail/yeet-win
-branch: feat/deposit-3-steps
-commit: c671cc59f542825e7e0704b98995737fb538929f
+branch: feat/terms-xp
+commit: 9a0fd907904b6323a4509e9cc83434ded01a3826
 built: router (tsc 7.0.2), widget (node build.mjs), signer (scripts/build-signer.mjs, esbuild 0.28.2, @privy-io/js-sdk-core 0.79.5, sha256 a4affb0c76ce)
 files:
   contracts/yeet-tools.json
   widget/basket-v1.html coin-v1.html fund-v1.html home-v1.html leaderboard-v1.html lucky-v1.html overview-v1.html portfolio-v1.html receipt-v1.html referral-v1.html templates.json wheel-v1.html yeet-signer.js 
   router/dist/src/**
   router/test/fixtures/*.json
-edited: contracts/yeet-tools.json descriptions neutralised as in yeet-win prep/scrub-chatgpt-text; ours are in connector/mcp/descriptions.private.json, applied at load
+edited: contracts/yeet-tools.json descriptions neutralised to the yeet-win int/submission text (prep/scrub-chatgpt-text 610d4a6, int/submission bdd334b for the tools-8 pointers); ours are in connector/mcp/descriptions.private.json, applied at load

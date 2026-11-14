@@ -3,7 +3,7 @@ import {z} from 'zod';
 import {toolError} from './errors.mjs';
 import {toolSchemas,toolSpecs,zodSchema,registrationInput,META_KEYS} from './tool-contract.mjs';
 import {registerWidgets,toolMeta,CONFIRM_META_KEY} from './widgets.mjs';
-import {instructions} from './instructions.mjs';
+import {instructionsFor} from './instructions.mjs';
 import {guidanceFor} from './guidance.mjs';
 import {SIGNER_META_KEY,signerMetaFromEnv} from '#shared/signing.mjs';
 import {staleness as processStaleness,staleKey,appRefresh,withRefresh,BUILD_META_KEY,TOOLS_VERSIONS,classifyToolsVersion,loggedVersion} from './refresh.mjs';
@@ -56,6 +56,8 @@ const ROUTES={
  // The device step on its own card, on request: the same answer as the overview.
  yeet_profile:()=>['/overview'],
  yeet_terms:()=>['/terms'],
+ // Keys, custody and the key export: the same for every account (core how-it-works.mjs holds the words).
+ yeet_how_it_works:()=>['/how-it-works'],
  // `session`: ChatGPT's anonymized conversation id, recorded with the acceptance (never an argument of the tool).
  yeet_accept_terms:(args,session)=>['/terms/accept',{...args,source:'chat',...(session?{session}:{})}],
  yeet_referral:()=>['/referral'],
@@ -140,10 +142,14 @@ export function minimumText(r,networks){
 export const profileText=r=>`Profile: ${r.username}${r.xp===null?'':`, ${r.xp} XP`} (${r.tier})${r.streak_days===null?'':`, ${r.streak_days}-day streak`}.`;
 export const termsText=r=>r.terms.accepted?`The person accepted the YEET terms.`:`The person has not accepted the YEET terms. For your yeet_accept_terms call only, never shown to the person: version ${r.terms.version} and the id in brackets before each statement. Statements: ${r.terms.statements.map(s=>`[${s.id}${s.required?'':', optional'}] ${s.text} ${s.url}`).join(' | ')}`;
 export const acceptText=r=>`Recorded: the person accepted the YEET terms. They are in.${r.overview?` ${overviewText(r.overview)}`:''}`;
+/** yeet_how_it_works: each section as one line, with its link when it has one. */
+export const howText=r=>`How YEET works. ${r.how_it_works.sections.map(s=>`${s.title}: ${s.text}${s.url?` (${s.url})`:''}`).join(' | ')}`;
 export const referralText=r=>r.status==='applied'?`YEET referralText: ${r.code}.`:r.status==='skipped'?'They skipped the win code. The card is up if they want to type one.':"YEET referralText.";
-const TEXT={yeet_terms:termsText,yeet_accept_terms:acceptText,yeet_referral:referralText,apply_referral:referralText,yeet_overview:overviewText,yeet_profile:profileText,yeet_fund:fundText,yeet_checkin:checkinText,daily_spin:spinText,lucky_wheel:luckyText,lucky_spin:luckyText};
-/** P0 and P1 are always registered; P2 (leaderboard, spin) only with YEET_P2=1. */
-export const registeredTools=(env=process.env)=>Object.values(toolSpecs).filter(t=>t.priority!=='P2'||env.YEET_P2==='1');
+const TEXT={yeet_how_it_works:howText,yeet_terms:termsText,yeet_accept_terms:acceptText,yeet_referral:referralText,apply_referral:referralText,yeet_overview:overviewText,yeet_profile:profileText,yeet_fund:fundText,yeet_checkin:checkinText,daily_spin:spinText,lucky_wheel:luckyText,lucky_spin:luckyText};
+/** Tools registered only when their own switch is 1 (default off: tools/list then lists them nowhere). */
+export const OPT_IN=Object.freeze({yeet_how_it_works:'YEET_HOW_IT_WORKS'});
+/** P0 and P1 are always registered; P2 (leaderboard, spin) only with YEET_P2=1; an OPT_IN tool only with its switch. */
+export const registeredTools=(env=process.env)=>Object.values(toolSpecs).filter(t=>(t.priority!=='P2'||env.YEET_P2==='1')&&(!Object.hasOwn(OPT_IN,t.name)||env[OPT_IN[t.name]]==='1'));
 export const TOOLS=Object.freeze(Object.values(toolSpecs).map(t=>Object.freeze({...t,route:ROUTES[t.name]})));
 for(const t of TOOLS)if(!t.route)throw Error(`No core route for contract tool ${t.name}`);
 
@@ -152,7 +158,7 @@ for(const t of TOOLS)if(!t.route)throw Error(`No core route for contract tool ${
 export const SIGNER_TOOLS=new Set(['yeet_propose','yeet_quote','skeet_propose','execute_trade','submit_trade_signature','trade_status']);
 /** toolsVersions: {current, past} (refresh.mjs TOOLS_VERSIONS, the contract's); log: one JSON line per event. */
 export function createMcpServer({token,callCore,env=process.env,staleness=processStaleness,toolsVersions=TOOLS_VERSIONS,log=line=>console.error(line)}) {
- const server=new McpServer({name:'yeet',version:'0.2.0'},{instructions});
+ const server=new McpServer({name:'yeet',version:'0.2.0'},{instructions:instructionsFor(env)});
  // Signing set up here (https RESOURCE, PRIVY_APP_ID, vendored signer): the signing cards declare the signing domains
  // and the trade results tell the card where the signer and the signing page are. Otherwise both stay off.
  const signer=signerMetaFromEnv(env);

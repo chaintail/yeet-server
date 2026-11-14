@@ -14,18 +14,19 @@ const {z}=await import('zod');
 const A='yeet-privy-terms-a',B='yeet-privy-terms-b';
 
 test('the statements: each has its own link to the exact document or section; all but the product emails are required',()=>{
- assert.equal(TERMS_VERSION,'2026-11-13');
+ assert.equal(TERMS_VERSION,'2026-11-14');
  assert.deepEqual(STATEMENTS.map(s=>[s.id,s.text,s.url,s.required]),[
+  ['risk','You understand meme coin trading is extremely risky, meme coins can go to zero, and you will never trade more than you are willing to lose.','https://yeet.win/terms#section-7',true],
   ['age','You are at least 18 and allowed to use YEET where you live.','https://yeet.win/terms#section-2',true],
   ['wallet','You agree to a YEET wallet created and secured by Privy, which only you control.','https://privy.io/user-terms-of-service',true],
   ['near_intents','You understand your trades are routed through NEAR Intents.','https://yeet.win/terms#section-9',true],
-  ['risk','You understand meme coins can go to zero and you can lose everything you put in.','https://yeet.win/terms#section-7',true],
   ['no_advice','You understand nothing in YEET or from ChatGPT is financial advice.','https://yeet.win/terms#section-4',true],
+  ['xp','I understand XP has no monetary value.','https://yeet.win/terms#section-10a',true],
   ['terms','You agree to the YEET Terms and Conditions.','https://yeet.win/terms',true],
   ['privacy','You agree to the YEET Privacy Policy.','https://yeet.win/privacy',true],
   ['product_email','Send me YEET product emails.','https://yeet.win/privacy#section-3',false],
  ]);
- assert.deepEqual([...REQUIRED_IDS],['age','wallet','near_intents','risk','no_advice','terms','privacy']);
+ assert.deepEqual([...REQUIRED_IDS],['risk','age','wallet','near_intents','no_advice','xp','terms','privacy']);
  // Owner wording rules: no tapping, nothing about the wallet's act.
  for(const s of STATEMENTS)assert.doesNotMatch(s.text,/\btap|\bsign(ing|ature)?\b|only when/i,s.id);
  const schema=zodSchema(z,contract.$defs.terms);
@@ -33,10 +34,14 @@ test('the statements: each has its own link to the exact document or section; al
  assert.equal(termsObject(null).terms_url,TERMS_URL);assert.equal(termsObject(null).privacy_url,PRIVACY_URL);
 });
 
+// YEET_WIN_DIR names the yeet-win checkout to check against (default: the sibling yeet-win-wt-int). Its terms page says
+// which terms version it is for (data-terms-version); a checkout at another version is skipped, not failed.
 test('the anchors the statements link to exist in the landing pages (when the yeet-win checkout is next to this repo)',t=>{
- const page=name=>{try{return readFileSync(new URL(`../../../yeet-win-wt-int/apps/landing/${name}/index.html`,import.meta.url),'utf8')}catch{return null}};
+ const root=process.env.YEET_WIN_DIR?new URL(`file://${path.resolve(process.env.YEET_WIN_DIR)}/`):new URL('../../../yeet-win-wt-int/',import.meta.url);
+ const page=name=>{try{return readFileSync(new URL(`apps/landing/${name}/index.html`,root),'utf8')}catch{return null}};
  const terms=page('terms'),privacy=page('privacy');
  if(!terms||!privacy)return t.skip('no yeet-win checkout here');
+ if(!terms.includes(`data-terms-version="${TERMS_VERSION}"`))return t.skip(`the yeet-win checkout's terms are not version ${TERMS_VERSION}`);
  for(const s of STATEMENTS){
   const u=new URL(s.url);if(u.host!=='yeet.win'||!u.hash)continue;
   assert.ok((u.pathname.startsWith('/terms')?terms:privacy).includes(`id="${u.hash.slice(1)}"`),`${s.id}: ${s.url}`);
@@ -83,13 +88,13 @@ test('a new version asks everyone again: an acceptance of another version does n
  assert.equal(acceptanceOf(A,'2027-01-01'),null,'and an account that accepted today is asked again under a later version');
 });
 
-test('without an acceptance only the overview, the terms and the eligibility check answer; every other connector route is gated',()=>{
- for(const [m,p] of [['GET','/overview'],['GET','/terms'],['POST','/terms/accept'],['GET','/eligibility']])assert.equal(termsOpen(m,p),true,`${m} ${p}`);
+test('without an acceptance only the overview, the terms, how YEET works and the eligibility check answer; every other connector route is gated',()=>{
+ for(const [m,p] of [['GET','/overview'],['GET','/terms'],['POST','/terms/accept'],['GET','/how-it-works'],['GET','/eligibility']])assert.equal(termsOpen(m,p),true,`${m} ${p}`);
  for(const [m,p] of [['GET','/home'],['GET','/coins'],['GET','/coins/WIF'],['POST','/proposals'],['POST','/proposals/skeet'],['POST','/proposals/p_abcdefghij0123456789/quote'],['POST','/trades'],
   ['POST','/trades/t_abcdefghij0123456789/signature'],['GET','/trades/t_abcdefghij0123456789'],['GET','/portfolio'],['GET','/fund'],['GET','/leaderboard/xp'],['GET','/checkin'],['POST','/spin'],
-  ['GET','/lucky'],['POST','/lucky/spin'],['POST','/username'],['GET','/referral'],['POST','/referral'],['POST','/overview'],['GET','/terms/accept']])assert.equal(termsOpen(m,p),false,`${m} ${p}`);
+  ['GET','/lucky'],['POST','/lucky/spin'],['POST','/username'],['GET','/referral'],['POST','/referral'],['POST','/overview'],['GET','/terms/accept'],['POST','/how-it-works']])assert.equal(termsOpen(m,p),false,`${m} ${p}`);
  // Every tool but the overview and the terms tools lists the refusal in the contract.
- for(const [name,t] of Object.entries(contract.tools))assert.equal(t.errors.includes('TERMS_REQUIRED'),!['yeet_overview','yeet_terms'].includes(name),name);
+ for(const [name,t] of Object.entries(contract.tools))assert.equal(t.errors.includes('TERMS_REQUIRED'),!['yeet_overview','yeet_terms','yeet_how_it_works'].includes(name),name);
 });
 
 test('the win code: WIN to start with; applied once and it stands; a skip can still become a code; the old screen’s rule for codes',()=>{

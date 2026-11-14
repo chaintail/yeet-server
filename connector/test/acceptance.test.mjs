@@ -506,6 +506,25 @@ test('terms in the chat, end to end: gated until accepted, the overview answers,
  assert.equal(b.error,'TERMS_REQUIRED');
 });
 
+test('yeet_how_it_works end to end: off by default; with YEET_HOW_IT_WORKS=1 it answers before the terms are accepted, from core',async()=>{
+ const tok=await signIn({identity:'DEV:did:privy:acceptance-how',terms:false});
+ const call=async(name,args={})=>(await (await rpc({jsonrpc:'2.0',id:41,method:'tools/call',params:{name,arguments:args}},tok.access_token)).json());
+ const list=async()=>(await (await rpc({jsonrpc:'2.0',id:42,method:'tools/list',params:{}},tok.access_token)).json()).result.tools.map(t=>t.name);
+ assert.equal((await list()).includes('yeet_how_it_works'),false,'off by default');
+ const off=await call('yeet_how_it_works');assert.ok(off.error||off.result?.isError,'not callable while off');
+ process.env.YEET_HOW_IT_WORKS='1';
+ try{
+  assert.equal((await list()).includes('yeet_how_it_works'),true);
+  const r=(await call('yeet_how_it_works')).result;
+  assert.notEqual(r.isError,true,JSON.stringify(r).slice(0,200));
+  const h=r.structuredContent.how_it_works;
+  assert.equal(h.export_url,'https://home.privy.io/');assert.equal(h.custody,'non_custodial');
+  assert.ok(h.sections.some(s=>s.id==='export_warning'&&/controls your funds/.test(s.text)));
+  // The terms are still not accepted: everything else stays gated.
+  assert.equal(JSON.parse((await call('yeet_home')).result.content[0].text).error,'TERMS_REQUIRED');
+ }finally{delete process.env.YEET_HOW_IT_WORKS}
+});
+
 test('the account\'s terms link, end to end: the core signs it, the page accepts with no sign-in, and only for that account',async()=>{
  const {TERMS_VERSION,REQUIRED_IDS}=await import('../core/terms.mjs');
  const {acceptanceOf}=await import('../core/terms-store.mjs');

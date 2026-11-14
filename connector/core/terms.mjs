@@ -12,17 +12,21 @@
 import {AS} from '#shared/common.mjs';
 import {mintLinkToken,withLinkToken,TERMS_LINK_TTL_S} from '#shared/link-token.mjs';
 import {randomBytes} from 'node:crypto';
-export const TERMS_VERSION='2026-11-13';
+export const TERMS_VERSION='2026-11-14';
 export const TERMS_URL='https://yeet.win/terms';
 export const PRIVACY_URL='https://yeet.win/privacy';
 
 /** In order. `required: false` is a choice, not a condition. Every url is the exact document or section. */
 export const STATEMENTS=Object.freeze([
+ // First, as at the top of the terms (owner, 2026-11-14): the risk.
+ {id:'risk',text:'You understand meme coin trading is extremely risky, meme coins can go to zero, and you will never trade more than you are willing to lose.',url:`${TERMS_URL}#section-7`,required:true},
  {id:'age',text:'You are at least 18 and allowed to use YEET where you live.',url:`${TERMS_URL}#section-2`,required:true},
  {id:'wallet',text:'You agree to a YEET wallet created and secured by Privy, which only you control.',url:'https://privy.io/user-terms-of-service',required:true},
  {id:'near_intents',text:'You understand your trades are routed through NEAR Intents.',url:`${TERMS_URL}#section-9`,required:true},
- {id:'risk',text:'You understand meme coins can go to zero and you can lose everything you put in.',url:`${TERMS_URL}#section-7`,required:true},
  {id:'no_advice',text:'You understand nothing in YEET or from ChatGPT is financial advice.',url:`${TERMS_URL}#section-4`,required:true},
+ // The owner's own words (2026-11-14). Terms 10A: XP has no current value, it only tracks long-term experience, and
+ // limits rise with it to protect new users.
+ {id:'xp',text:'I understand XP has no monetary value.',url:`${TERMS_URL}#section-10a`,required:true},
  {id:'terms',text:'You agree to the YEET Terms and Conditions.',url:TERMS_URL,required:true},
  {id:'privacy',text:'You agree to the YEET Privacy Policy.',url:PRIVACY_URL,required:true},
  {id:'product_email',text:'Send me YEET product emails.',url:`${PRIVACY_URL}#section-3`,required:false},
@@ -62,9 +66,9 @@ export function termsObject(record,{mode=termsMode(),pageUrl=termsPageUrl()}={})
   mode:mode==='page'&&pageUrl?'page':'chat',...(pageUrl?{page_url:pageUrl}:{}),
  };
 }
-/** Connector routes that answer without an acceptance: the overview (it carries the terms), the terms themselves and
- * the eligibility check. Every other connector route is refused with TERMS_REQUIRED (core.mjs). */
-export const TERMS_OPEN=Object.freeze([['GET',/^\/overview$/],['GET',/^\/terms$/],['POST',/^\/terms\/accept$/],['GET',/^\/eligibility$/]]);
+/** Connector routes that answer without an acceptance: the overview (it carries the terms), the terms themselves, how
+ * YEET works (keys and custody) and the eligibility check. Every other connector route is refused with TERMS_REQUIRED (core.mjs). */
+export const TERMS_OPEN=Object.freeze([['GET',/^\/overview$/],['GET',/^\/terms$/],['POST',/^\/terms\/accept$/],['GET',/^\/how-it-works$/],['GET',/^\/eligibility$/]]);
 export const termsOpen=(method,path)=>TERMS_OPEN.some(([m,p])=>m===method&&p.test(path));
 /** Checks one acceptance. Returns {ok:true, confirmed} (known ids only, in list order) or {ok:false, reason, missing}. */
 export function checkAcceptance({version,confirmed}){

@@ -116,6 +116,10 @@
   "/tools/yeet_terms/description": {
    "neutral": "Returns the current YEET terms statements with their links and whether the person accepted this version.",
    "original": "Returns the current YEET terms statements with their links and whether the person accepted this version."
+  },
+  "/tools/yeet_how_it_works/description": {
+   "neutral": "Returns the security and wallet facts: who holds the keys, what YEET's server can and cannot do, and how the person exports their private key.",
+   "original": "Returns the security and wallet facts: who holds the keys, what YEET's server can and cannot do, and how the person exports their private key."
   }
  },
  "card_reports": [

@@ -52,12 +52,12 @@ const ARGS={yeet_coin:{symbol:'WIF'},yeet_accept_terms:{version:TERMS_VERSION,co
  submit_trade_signature:{trade_id:'t_abcdefghij0123456789',leg:0,attempt_id:'a'.repeat(64),signed:'AQID'},
  lucky_spin:{lucky_id:'l_abcdefghij0123456789'},yeet_set_username:{username:'kat_king'}};
 test('a TERMS_REQUIRED result of every tool passes an MCP client’s output schema rules: an error, the text, no structuredContent',async()=>{
- const server=createMcpServer({token:{scope:allScopes.join(' '),sub:'yeet-privy-a'},callCore:async()=>refuse(),env:{YEET_P2:'1'}});
+ const server=createMcpServer({token:{scope:allScopes.join(' '),sub:'yeet-privy-a'},callCore:async()=>refuse(),env:{YEET_P2:'1',YEET_HOW_IT_WORKS:'1'}});
  const client=new Client({name:'schema-rules',version:'1'});const [a,b]=InMemoryTransport.createLinkedPair();await server.connect(a);await client.connect(b);
  try{
   const {tools}=await client.listTools();   // the client now holds every tool's output schema and checks results against it
   const gated=Object.entries(contract.tools).filter(([,t])=>t.errors.includes('TERMS_REQUIRED')).map(([n])=>n);
-  assert.deepEqual(gated.sort(),Object.keys(contract.tools).filter(n=>n!=='yeet_overview'&&n!=='yeet_terms').sort());
+  assert.deepEqual(gated.sort(),Object.keys(contract.tools).filter(n=>n!=='yeet_overview'&&n!=='yeet_terms'&&n!=='yeet_how_it_works').sort());
   assert.deepEqual(tools.map(t=>t.name).sort(),Object.keys(contract.tools).sort());
   for(const name of gated){
    const listed=tools.find(t=>t.name===name);assert.equal(listed.outputSchema.type,'object',name);

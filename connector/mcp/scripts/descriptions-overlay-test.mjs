@@ -3,6 +3,9 @@
 // served before the public text was scrubbed (2026-11-14). The hashes below cover every byte of tools/list (names,
 // titles, descriptions, schemas, annotations, _meta), unlike tools-list.lock.json, which leaves wording out.
 // A deliberate change of our wording records new values here in the same commit.
+// Recorded deliberately at tools-8 (int/submit, terms 2026-11-14): each value equals the full tools/list hash the
+// unscrubbed feat/terms-xp tree serves; against tools-7 (int/ledger) the only difference with the switches off is
+// yeet_overview's app_version enum (tools-7 -> tools-8). how_it_works: YEET_P2=1 and YEET_HOW_IT_WORKS=1 (24 tools).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -14,7 +17,7 @@ import {contract,applyDescriptions,DESCRIPTIONS_URL} from '../tool-contract.mjs'
 import {CONTRACT_URL} from '#contracts/errors';
 import {allScopes} from '#scope-catalog';
 
-const FULL={p2:'62665eac506c8d708057e85151da96a5e27f716b952e58df9a351e22dd6b69fc',default:'ba61b5b82f1826a38445f4be177022deca1653fdddc7aca36f34945e81ebebdd'};
+const FULL={p2:'7326ae29fc69e525f5cb61b59c4bf8dd1e3af47eece1ef46532d71df88e15f54',default:'53719439451153478246e767c0ef274095c4da2b9689c96258277b34c89c28b3',how_it_works:'982724fcfc72dee66b327e420e05cad5d3350a5f66efd9cc2abfb820259d0c3f'};
 const overlay=JSON.parse(readFileSync(DESCRIPTIONS_URL,'utf8')).contract;
 const vendored=()=>JSON.parse(readFileSync(CONTRACT_URL,'utf8'));
 const at=(o,pointer)=>pointer.split('/').slice(1).map(k=>k.replace(/~1/g,'/').replace(/~0/g,'~')).reduce((x,k)=>x?.[k],o);
@@ -26,8 +29,8 @@ async function listed(env){
  try{return (await client.listTools()).tools}finally{await client.close();await server.close()}
 }
 
-test('tools/list is byte-identical to the list before the public scrub, with and without P2',async()=>{
- for(const [name,env] of [['p2',{YEET_P2:'1'}],['default',{}]]){
+test('tools/list is byte-identical to the list our unscrubbed texts give, with and without P2 and how-it-works',async()=>{
+ for(const [name,env] of [['p2',{YEET_P2:'1'}],['default',{}],['how_it_works',{YEET_P2:'1',YEET_HOW_IT_WORKS:'1'}]]){
   const tools=await listed(env);
   assert.equal(createHash('sha256').update(JSON.stringify(tools)).digest('hex'),FULL[name],name);
  }

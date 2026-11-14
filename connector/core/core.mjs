@@ -21,6 +21,7 @@ import {overview,totalUsdc,welcomeSuggestions} from './overview.mjs';
 import {winnerOf} from './trade/pnl.mjs';
 import {boardAnswer} from './xp/boards.mjs';
 import {TERMS_VERSION,REQUIRED_IDS,termsObject,checkAcceptance,termsOpen,termsLinkFor} from './terms.mjs';
+import {howItWorks} from './how-it-works.mjs';
 import {requireLinkKey,withLinkToken} from '#shared/link-token.mjs';
 import {acceptanceOf,recordAcceptance,acceptViaLink,referralOf,decideReferral,referralCode} from './terms-store.mjs';
 import {createAccountLogin,withCardAccount,hintFor} from './account-login.mjs';
@@ -159,6 +160,7 @@ export const ROUTE_SCOPES=Object.freeze([
  ['POST',/^\/trades$/,'yeet:prepare'],
  ['POST',/^\/trades\/t_[a-z0-9]{20}\/signature$/,'yeet:prepare'],
  ['GET',/^\/terms$/,'yeet:read'],
+ ['GET',/^\/how-it-works$/,'yeet:read'],
  ['POST',/^\/terms\/accept$/,'yeet:write'],
  ['GET',/^\/referral$/,'yeet:read'],
  ['POST',/^\/referral$/,'yeet:write'],
@@ -215,6 +217,9 @@ app.use((q,r,next)=>{
  r.status(403).json({...failure('TERMS_REQUIRED'),terms});
 });
 app.get('/terms',(q,r)=>{if(q.role!=='mcp'&&q.role!=='as')return r.sendStatus(403);r.json({terms:termsOf(q.subject)})});
+// yeet_how_it_works (how-it-works.mjs): who holds the keys, what this server can and cannot do, the key export. The same
+// for every account, and open before the terms are accepted (a person may ask before they agree to anything).
+app.get('/how-it-works',(q,r)=>{if(q.role!=='mcp')return r.sendStatus(403);r.json({how_it_works:howItWorks()})});
 // yeet_accept_terms (source chat, with ChatGPT's conversation id when it sent one) and the /account/terms page (source
 // page). Refused unless the version is the current one and every required statement is among `confirmed`.
 // `via: "link"` (sign-in server only): accepted on the page through the account's signed link, with no sign-in
