@@ -75,7 +75,8 @@ const ROUTES={
  skeet_propose:args=>['/proposals/skeet',args],
  yeet_leaderboard:({board='xp',window})=>[`/leaderboard/${board}${window?`/${window}`:''}`],
  yeet_checkin:()=>['/checkin'],
- daily_spin:()=>['/spin',{}],
+ // The fair wheel's seed and spin id, when the card sends them (the contract lists them from the fair-wheel tools version).
+ daily_spin:({client_seed,spin_id}={})=>['/spin',{...(client_seed!==undefined?{client_seed}:{}),...(spin_id!==undefined?{spin_id}:{})}],
  lucky_wheel:()=>['/lucky'],
  lucky_spin:({lucky_id})=>['/lucky/spin',{lucky_id}],
  // Registered once the pinned contract lists the tool.

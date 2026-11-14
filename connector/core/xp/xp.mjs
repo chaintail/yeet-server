@@ -5,6 +5,7 @@
 // awards, and each award's dedupe key is the trade id. The tracker's onSettled hook is the normal path; trade_status
 // settles too when it sees a final trade with no row yet (an event lost to a crash between the tracker's write and
 // the hook), and either path repeated adds nothing.
+import {fairWheelOn} from './fair.mjs';
 import path from 'node:path';
 import {openLedger,dayOf,DEFAULT_RULES} from './ledger.mjs';
 import {streakDays} from './streak.mjs';
@@ -28,13 +29,13 @@ export const serverSpinTable=()=>({base_xp:DEFAULT_RULES.find(r=>r.rule_id==='da
 /** Throws unless the server table matches the contract's x-yeet-spin (values, order, weights summing to 100). */
 export const checkSpinTable=(spec,table=serverSpinTable())=>assertSpinTable(table,spec);
 
-export function openXp({file=':memory:',secret,now=Date.now,coins,luckyCoins}={}){
+export function openXp({file=':memory:',secret,now=Date.now,coins,luckyCoins,fair=false}={}){
  const ledger=openLedger(file,{now});
  const db=ledger.db;
  db.exec(`CREATE TABLE IF NOT EXISTS xp_trade(
    trade_id TEXT PRIMARY KEY, account_id TEXT NOT NULL, direction TEXT NOT NULL, status TEXT NOT NULL,
    points INTEGER NOT NULL, settled_at TEXT NOT NULL);`);
- const spin=createSpin({ledger,secret,coins});
+ const spin=createSpin({ledger,secret,coins,fair});
  const lucky=createLucky({ledger,secret,spin,...(luckyCoins?{coins:luckyCoins}:{})});
  const tradeRow=id=>db.prepare('SELECT * FROM xp_trade WHERE trade_id=?').get(id);
 
@@ -83,7 +84,9 @@ export function openXp({file=':memory:',secret,now=Date.now,coins,luckyCoins}={}
    const at=ledger.iso();
    return {total:ledger.total(who),streak_days:streakDays(db,who,dayOf(at)),spin_available:spin.available(who,at),
     next_streak_milestone:spin.nextMilestone(who,at),...spin.left(who,at),stamps:spin.stamps.list(who),
-    sets_completed:spin.stamps.setsCompleted(who),...(wheel=>wheel?{wheel}:{})(spin.nextWheel(who,at))};
+    sets_completed:spin.stamps.setsCompleted(who),...(wheel=>wheel?{wheel}:{})(spin.nextWheel(who,at)),
+    // Fair wheel (YEET_FAIR_WHEEL=on): the commitment of the next spin, published before the card sends its seed.
+    ...(f=>f===undefined?{}:{fair_next:f})(spin.fairNext(who,at))};
   },
   /** The lucky wheel (lucky.mjs): wheel(who, available), spin(who, id), check, link, linked, settle. */
   lucky,
@@ -92,7 +95,8 @@ export function openXp({file=':memory:',secret,now=Date.now,coins,luckyCoins}={}
   recentWins:()=>[],
   /** The account's XP total (trade caps by tier, trade/limits.mjs). */
   total:who=>ledger.total(who),
-  doSpin:who=>spin.spin(who),
+  /** One spin; `args` may carry the fair wheel's {client_seed, spin_id} (spin.mjs spin). */
+  doSpin:(who,args={})=>spin.spin(who,undefined,args),
   /** Internal: one extra spin for `who` on `day` (spin.mjs grantSpin). The lucky wheel's claim calls spin.grantSpin. */
   grantSpin:(who,day,reason,uniqueRef)=>spin.grantSpin(who,day,reason,uniqueRef),
   /** names(accountId): the name a row shows; the default name when left out. */
@@ -103,5 +107,5 @@ export function openXp({file=':memory:',secret,now=Date.now,coins,luckyCoins}={}
 let instance;
 /** The core process's XP, opened on first use from the environment. */
 export function xpRuntime(env=process.env){
- return instance??=openXp({file:path.join(env.STATE_DIR||'/state','xp.sqlite'),secret:env.YEET_XP_SECRET});
+ return instance??=openXp({file:path.join(env.STATE_DIR||'/state','xp.sqlite'),secret:env.YEET_XP_SECRET,fair:fairWheelOn(env)});
 }

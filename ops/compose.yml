@@ -169,6 +169,8 @@ services:
       YEET_BALANCE_TOLERANCE_BPS: ${YEET_BALANCE_TOLERANCE_BPS:-}
       YEET_STUCK_AFTER_MINUTES: ${YEET_STUCK_AFTER_MINUTES:-}
       YEET_P2: ${YEET_P2:-}
+      # Fair wheel: commit-reveal daily spin (docs/WHEEL-STAMPS.md); `on` turns it on, default off.
+      YEET_FAIR_WHEEL: ${YEET_FAIR_WHEEL:-}
       # Where the YEET terms are accepted: chat (default) or page (the /account/terms page). connector/core/terms.mjs.
       YEET_TERMS_MODE: ${YEET_TERMS_MODE:-}
       STATE_DIR: /state

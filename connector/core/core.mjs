@@ -431,7 +431,8 @@ app.get('/leaderboard/:board{/:window}',xpRoute('yeet_leaderboard',async(x,who,a
 }));
 // yeet_checkin: the daily wheel on its own card (a check-in). The same XP summary yeet_home carries in `xp`.
 app.get('/checkin',xpRoute('yeet_checkin',(x,who)=>({checkin:homeXp(x.summary(who),HOME_XP_KEYS)})));
-app.post('/spin',xpRoute('daily_spin',(x,who)=>x.doSpin(who)));
+// The fair wheel's {client_seed, spin_id} pass through once the contract lists them (xp/spin.mjs; off unless YEET_FAIR_WHEEL=on).
+app.post('/spin',xpRoute('daily_spin',(x,who,a)=>x.doSpin(who,{...(a?.client_seed!==undefined?{client_seed:a.client_seed}:{}),...(a?.spin_id!==undefined?{spin_id:a.spin_id}:{})})));
 // Lucky wheel (xp/lucky.mjs): today's five coins, picked at random per day (only coins 1Click quotes now), then the server's slice.
 app.get('/lucky',xpRoute('lucky_wheel',async(x,who)=>x.lucky.wheel(who,luckyAvailable(await tradeEngine()))));
 app.post('/lucky/spin',xpRoute('lucky_spin',(x,who,a)=>x.lucky.spin(who,a.lucky_id)));

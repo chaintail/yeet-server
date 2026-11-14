@@ -137,6 +137,32 @@ One sentence, no other text:
 - `You won 10 XP and a BOME stamp (7 of 7), completing a BOME set for 30 bonus XP.`
 - `You won 30 XP and a WIF stamp (1 of 7), and you have 1 more spin today.`
 
+## Fair wheel (YEET_FAIR_WHEEL=on)
+
+Off by default: with the switch unset the draw is the keyed HMAC above, no table is created and no field changes.
+With `YEET_FAIR_WHEEL=on` (core) the daily and extra spins are commit-reveal; the public description and the
+one-command check are yeet-win `docs/FAIR-WHEEL.md` and `packages/fair` (`core/xp/fair-vectors.json` is a copy of its
+test vectors, and `core/xp/fair.test.mjs` holds this server to them).
+
+- **Commit** (`core/xp/spin.mjs` `commitIn`, table `xp_fair_spin`, one row per account and spin key): the first time
+  the next spin is shown (`yeet_home.xp` / `yeet_checkin`: `fair_next = {spin_id, commitment}`, and the `wheel` is the
+  committed layout `fairLayout`), the server stores a random 32-byte `server_seed`, `commitment = SHA-256(server_seed)`,
+  the coin list and the layout. `daily_spin` answers carry `fair_next` for the spin after them (an extra spin).
+- **Seed**: `daily_spin {spin_id, client_seed}`. A seed for a spin with no stored commitment, or another spin_id, is
+  `INVALID_ARGUMENT` and writes nothing; a commitment takes one seed (`UPDATE ... WHERE client_seed IS NULL`). With no
+  seed (an older card) the server commits first, picks the client seed itself and says `client_seed_by: server`.
+- **Draw** (`core/xp/fair.mjs`): HMAC-SHA256(server_seed, client_seed:spin_id) words, rejection sampled: bonus XP by
+  `BONUS_TABLE` weights, the coin uniform over the committed coins, the streak draw by the weights. The landed wheel is
+  the committed layout with the drawn XP moved onto the drawn coin (`landedWheel`, at most two slices change).
+- **Reveal**: `daily_spin.fair = {version, spin_id, commitment, server_seed, client_seed, client_seed_by, coins,
+  draw_xp, streak_draw_xp}`; a repeat recomputes it from the stored row.
+- The lucky wheel's own draw is unchanged (keyed HMAC).
+
+To expose it in ChatGPT: vendor yeet-win at a commit that has `tools-8` (yeet-win branch `feat/fair-wheel`, merged
+onto the vendored line), add the `tools-8` line to `connector/mcp/tools-list.lock.json`, then set the switch. Until
+then the pinned contract drops `fair`, `fair_next` and the card's seed, so a switched-on server draws from its own
+client seed and nothing new is visible.
+
 ## Contract status
 
 The pinned contract (`connector/vendor/yeet-win/contracts/yeet-tools.json`) has closed output schemas. Until
