@@ -15,7 +15,7 @@ import {createSignFlow, summariesOf, summaryFor, maskEmail} from '/sign/flow.mjs
 const root = document.getElementById('yeet-sign');
 const body = document.getElementById('sign-body');
 const SIGN_IN_BUNDLE = '/account/privy-login/sign.js';
-const TRADE_ID = /^t_[a-z0-9]{20}$/;
+const TRADE_ID = /^[ta]_[a-z0-9]{20}$/;
 const RETURN_KEY = 'yeet-trade-return', FRESH_KEY = 'yeet-trade-fresh', RETURN_FOR_MS = 30 * 60_000;
 const STATE = {
   awaiting_signature: ['Waiting to send', ''], signing_now: ['Sending…', 'run'], signing: ['Sending', 'run'],
@@ -98,7 +98,8 @@ function tradeRows(s) {
   const side = trade.direction === 'skeet' ? 'skeet' : 'yeet';
   const all = reqs.flatMap(summariesOf), usdc = all.filter((x) => x.asset === 'USDC');
   const total = el('div', 'total');
-  total.append(el('span', `side ${side}`, side === 'skeet' ? 'SKEET' : 'YEET'),
+  // An agent budget (direction fund): the amount the person gives their agent.
+  total.append(el('span', `side ${side}`, trade.direction === 'fund' ? 'AGENT BUDGET' : side === 'skeet' ? 'SKEET' : 'YEET'),
     el('span', 'amt', usdc.length === all.length && all.length ? `${units(usdc.reduce((a, x) => a + BigInt(x.amount_raw), 0n), usdc[0].decimals, 2)} USDC` : `${trade.legs.length} coin${trade.legs.length === 1 ? '' : 's'}`));
   const ul = el('ul', 'rows');
   for (const l of trade.legs) {
@@ -234,12 +235,13 @@ function draw(s) {
   }
   if (s.view === 'nothing') return show(...tradeRows(s), line(s.message, s.kind), linkedLine(s));
   if (s.view === 'ready' || s.view === 'sending') {
-    const side = s.trade.direction === 'skeet' ? 'skeet' : 'yeet', word = side === 'skeet' ? 'SKEET' : 'YEET';
+    const fund = s.trade.direction === 'fund';
+    const side = s.trade.direction === 'skeet' ? 'skeet' : 'yeet', word = fund ? 'APPROVE' : side === 'skeet' ? 'SKEET' : 'YEET';
     const btn = el('button', side, s.view === 'sending' ? 'Sending…' : word); btn.id = 'sign-go';
     btn.disabled = s.view === 'sending' || !s.canRetry;
     const hint = holdable(btn, () => flow.approve(), word);
     return show(...tradeRows(s), btn, s.view === 'sending' || !s.canRetry ? null : hint, s.message ? line(s.message, s.kind) : null,
-      el('p', 'fine', 'It goes out from your own wallet. YEET never holds your keys and only adds the network fee.'));
+      el('p', 'fine', fund ? 'It goes from your own YEET balance to your agent’s own account. Your agent can trade only with this budget and can send it back only to you.' : 'It goes out from your own wallet. YEET never holds your keys and only adds the network fee.'));
   }
   if (s.view === 'done') {
     const end = line(s.message, s.kind); end.classList.add('end'); end.id = 'sign-done';

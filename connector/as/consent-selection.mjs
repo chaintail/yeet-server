@@ -37,9 +37,11 @@ export function connectedFor(seconds){
  return `<p class="hint">ChatGPT stays connected for up to ${n}, then asks you to connect again.</p>`;
 }
 /** The connect page exactly as as.mjs sends it (inside authDocument, title "Connect YEET to ChatGPT"). */
-export function consentForm({csrf,name,connectedSeconds=0}){
+/** The connect page's sentence for a client of class agent (shared/agent-route.mjs). */
+export const AGENT_CONNECT_LEAD='Your agent will be able to see the YEET budget you give it and trade with that budget by itself, with its own key. It can never reach your own wallet, and it can only send its budget back to you.';
+export function consentForm({csrf,name,connectedSeconds=0,lead=CONNECT_LEAD}){
  const who=typeof name==='string'&&name?`<p class="lead">You are connecting as <strong>${html(name)}</strong>.</p>`:'';
- return `<form method="POST" data-yeet-connect><input type="hidden" name="csrf" value="${html(csrf)}">${who}<p>${CONNECT_LEAD}</p>${connectedFor(connectedSeconds)}${legalLine()}<input type="hidden" name="consent" value="yes"><button type="submit" name="decision" value="connect">Connect</button><button type="submit" name="decision" value="cancel" class="secondary">Cancel</button></form>`;
+ return `<form method="POST" data-yeet-connect><input type="hidden" name="csrf" value="${html(csrf)}">${who}<p>${lead}</p>${connectedFor(connectedSeconds)}${legalLine()}<input type="hidden" name="consent" value="yes"><button type="submit" name="decision" value="connect">Connect</button><button type="submit" name="decision" value="cancel" class="secondary">Cancel</button></form>`;
 }
 export function ignoreRefreshScope(body){
  if(body?.grant_type==='refresh_token')delete body.scope;

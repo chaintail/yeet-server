@@ -256,7 +256,7 @@ test('a 2-leg Base evm_7702 request (one batch): reaches the page intact; one 26
   assert.deepEqual(out.legs.map((l) => l.send_status), ['signing', 'signing'], 'both rows advance together');
   assert.deepEqual(calls.map((c) => c.body), [{leg: 0, attempt_id: req.attempt_id, signed}]);
   const js = await (await fetch(BASE + '/sign/flow.mjs')).text();
-  assert.match(js, /for \(const b of privyRpcBodies\(req\)\)/);
+  assert.match(js, /for \(const b of privyRpcBodies\(req, \{tradeId\}\)\)/);
   assert.match(js, /signedFromWallets\(req, answers\)/);
   assert.match(js, /UNSUPPORTED_7702/);
 });

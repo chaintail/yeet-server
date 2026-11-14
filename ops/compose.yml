@@ -26,6 +26,9 @@ services:
     environment:
       ISSUER: ${ISSUER:-}
       RESOURCE: ${RESOURCE:-}
+      # The agent route (connector/docs/AGENT-ROUTE.md): off unless YEET_AGENT_ROUTE=on.
+      YEET_AGENT_ROUTE: ${YEET_AGENT_ROUTE:-}
+      AGENT_RESOURCE: ${AGENT_RESOURCE:-}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
       PUBLIC_MODE: ${PUBLIC_MODE:-}
       COOKIE_SECURE: ${COOKIE_SECURE:-}
@@ -63,6 +66,9 @@ services:
     environment:
       ISSUER: ${ISSUER:-}
       RESOURCE: ${RESOURCE:-}
+      # The agent route (connector/docs/AGENT-ROUTE.md): off unless YEET_AGENT_ROUTE=on.
+      YEET_AGENT_ROUTE: ${YEET_AGENT_ROUTE:-}
+      AGENT_RESOURCE: ${AGENT_RESOURCE:-}
       PUBLIC_MODE: ${PUBLIC_MODE:-}
       PRIVY_LOGIN: ${PRIVY_LOGIN:-}
       # Public Privy app id: trade results tell the card which Privy app signs (_meta['yeet/signer']).
@@ -85,6 +91,12 @@ services:
     environment:
       ISSUER: ${ISSUER:-}
       RESOURCE: ${RESOURCE:-}
+      # The agent route (connector/docs/AGENT-ROUTE.md): off unless YEET_AGENT_ROUTE=on.
+      YEET_AGENT_ROUTE: ${YEET_AGENT_ROUTE:-}
+      AGENT_RESOURCE: ${AGENT_RESOURCE:-}
+      YEET_AGENT_MAX_TRADE_USDC: ${YEET_AGENT_MAX_TRADE_USDC:-}
+      YEET_AGENT_MAX_DAY_USDC: ${YEET_AGENT_MAX_DAY_USDC:-}
+      YEET_AGENT_MAX_BUDGET_USDC: ${YEET_AGENT_MAX_BUDGET_USDC:-}
       PRIVY_LOGIN: ${PRIVY_LOGIN:-}
       PRIVY_APP_ID: ${PRIVY_APP_ID:-}
       PRIVY_JWKS_URL: ${PRIVY_JWKS_URL:-}

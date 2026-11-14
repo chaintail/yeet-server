@@ -199,7 +199,7 @@ export function ledgerPipeline({env={},userUsdc=20_000_000n,float=30_000_000n,xp
 }
 /** What the card does with a near_intent request: its own check of the message, the wallet call, the `signed` value. */
 export function approve(wallet,req){
- const [body]=privyRpcBodies(req);
+ const [body]=privyRpcBodies(req,{tradeId:req.trade_id});
  return signedFromWallets(req,[{data:{signature:Buffer.from(wallet.signMessage(Buffer.from(body.params.message,'base64'))).toString('base64')}}]);
 }
 /** propose -> execute for Alice: the proposal and the execute_trade answer. */

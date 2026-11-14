@@ -1,3 +1,4 @@
+import { classOfRedirects } from "#shared/agent-route.mjs";
 // Provider hooks retain native issuance/rotation; application checks fail closed.
 export function allowedAccount(
   policy,
@@ -31,6 +32,8 @@ const CHATGPT_CALLBACK_REDIRECT = /^https:\/\/chatgpt\.com\/connector\/oauth\/[A
 export function chatgptRedirect(uri) {
   return typeof uri === "string" && (uri === CHATGPT_REDIRECT_URI || CHATGPT_CALLBACK_REDIRECT.test(uri));
 }
+/** The client's class from its redirect URIs alone (shared/agent-route.mjs): 'chatgpt', 'agent' or null. */
+export const clientClass = (uris) => classOfRedirects(uris, chatgptRedirect);
 // Token endpoint authentication a registered client may ask for: what ChatGPT's metadata lists (none for PKCE
 // public clients, private_key_jwt for signed assertions). Shared-secret methods are kept for the two internal
 // introspection clients only and are never handed to a registered client.
@@ -41,12 +44,15 @@ export const CLIENT_AUTH_METHODS = ["none", "private_key_jwt"];
 // registered as a public client ("none"): the RFC 7591 default (client_secret_basic) is not offered, and the
 // registration answer tells the client which method it got.
 // Returns { problem } with the OAuth error answer, or { body } with the registration to store.
-export function registrationRequest(body) {
+// With the agent route on (shared/agent-route.mjs, `agent: true`) a client whose redirect URIs are all a local agent's
+// (http on a loopback address) registers too, as class agent; a list that mixes ChatGPT's and others is
+// refused either way.
+export function registrationRequest(body, { agent = false } = {}) {
   const uris = body?.redirect_uris;
   if (!Array.isArray(uris) || uris.length === 0 || uris.length > 10)
-    return { problem: { error: "invalid_redirect_uri", error_description: "redirect_uris must list ChatGPT redirect URIs" } };
-  if (!uris.every(chatgptRedirect))
-    return { problem: { error: "invalid_redirect_uri", error_description: "only ChatGPT's connector redirect URIs can be registered" } };
+    return { problem: { error: "invalid_redirect_uri", error_description: agent ? "redirect_uris must list 1 to 10 redirect URIs" : "redirect_uris must list ChatGPT redirect URIs" } };
+  if (agent ? !clientClass(uris) : !uris.every(chatgptRedirect))
+    return { problem: { error: "invalid_redirect_uri", error_description: agent ? "redirect URIs must be all ChatGPT's connector redirects, or all loopback http callbacks of an agent" : "only ChatGPT's connector redirect URIs can be registered" } };
   const method = body.token_endpoint_auth_method ?? "none";
   if (!CLIENT_AUTH_METHODS.includes(method))
     return { problem: { error: "invalid_client_metadata", error_description: "token_endpoint_auth_method must be none or private_key_jwt" } };

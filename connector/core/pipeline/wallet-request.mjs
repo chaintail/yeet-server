@@ -102,7 +102,7 @@ const utf8Base64=text=>{const b=new TextEncoder().encode(text);let s='';for(cons
 /** Throws (code BATCH_REFUSED) unless a near_intent request's message is exactly the one exchange it states: a single
  * `token_diff` of `gives` (negative) and `receives` (positive) for the wallet's own ledger account on intents.near,
  * ending at `deadline`, with the amounts given equal to the request's leg summaries. */
-export function checkIntent(req){
+export function checkIntent(req,{tradeId}={}){
  if(req?.kind!=='near_intent')throw refuseIntent('not a near_intent request');
  const p=req.payload??{};
  if(p.standard!=='raw_ed25519'||typeof p.message!=='string'||!p.message.length||p.message.length>4000)throw refuseIntent('message');
@@ -115,6 +115,9 @@ export function checkIntent(req){
  const end=Date.parse(m.deadline),ex=Date.parse(req.expires_at);
  if(!Number.isFinite(end)||m.deadline!==p.deadline||!Number.isFinite(ex)||ex>end)throw refuseIntent('deadline');
  const it=Array.isArray(m.intents)&&m.intents.length===1?m.intents[0]:null;
+ // A transfer is only ever an agent budget link (a_...): the page opened for that link, the request naming it. A trade
+ // page (t_...) never signs one, whatever the server sends.
+ if(it?.intent==='transfer'){if(!/^a_[a-z0-9]{20}$/.test(tradeId??'')||req.trade_id!==tradeId)throw refuseIntent('a transfer outside its budget link');return checkTransfer(req,p,it,own)}
  if(!it||it.intent!=='token_diff'||Object.keys(it).sort().join()!=='diff,intent'||!it.diff||typeof it.diff!=='object')throw refuseIntent('not one token_diff');
  const gives=Array.isArray(p.gives)?p.gives:[],receives=Array.isArray(p.receives)?p.receives:[],want={};
  if(!gives.length||!receives.length)throw refuseIntent('gives or receives');
@@ -133,9 +136,22 @@ export function checkIntent(req){
  return true;
 }
 
+/** The agent route's budget transfer (core/agent/agents.mjs, side `fund`): ONE `transfer` of ONE token from the wallet's
+ * own ledger account to the receiver the request states, the amount equal to its one leg summary. Nothing else passes. */
+function checkTransfer(req,p,it,own){
+ if(Object.keys(it).sort().join()!=='intent,receiver_id,tokens'||typeof it.receiver_id!=='string'||!/^[0-9a-f]{64}$/.test(it.receiver_id)||!it.tokens||typeof it.tokens!=='object')throw refuseIntent('not one transfer');
+ if(it.receiver_id===own)throw refuseIntent('a transfer to the own account');
+ const ids=Object.keys(it.tokens),t=p.transfer??{},amount=String(it.tokens[ids[0]]??'');
+ if(ids.length!==1||!UINT.test(amount)||BigInt(amount)===0n)throw refuseIntent('one token, a positive amount');
+ if(t.receiver_id!==it.receiver_id||!t.tokens||typeof t.tokens!=='object'||Object.keys(t.tokens).length!==1||String(t.tokens[ids[0]])!==amount)throw refuseIntent('the message is not the stated transfer');
+ const sums=Array.isArray(req.leg_summaries)?req.leg_summaries:[];
+ if(sums.length!==1||!Array.isArray(req.legs)||req.legs.length!==1||sums[0]?.leg!==req.legs[0]||sums[0].side!=='fund'||sums[0].to!==it.receiver_id||String(sums[0].amount_raw)!==amount)throw refuseIntent('leg summaries');
+ return true;
+}
+
 /** Every Privy wallet RPC body a sign request needs, in order (one, or two for a first evm_7702 basket). */
-export function privyRpcBodies(req){
- if(req?.kind==='near_intent')checkIntent(req);
+export function privyRpcBodies(req,opts={}){
+ if(req?.kind==='near_intent')checkIntent(req,opts);
  if(req?.kind!=='evm_7702')return [privyRpcBody(req)];
  checkBatch(req);
  const a=req.payload.authorization,out=[];
