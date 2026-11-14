@@ -122,7 +122,7 @@ export function createMcpServer({token,callCore,env=process.env,staleness=proces
    annotations:tool.annotations,_meta:{...meta(scope),...toolMeta(name)}},async(input,extra)=>{
    const granted=token.scope?.split(' ')??[];
    // An old scope name counts as its current one (yeet:trade is yeet:prepare).
-   if(!hasScope(granted,scope))return toolError({error:'REAUTH_REQUIRED'},ctx);
+   if(!hasScope(granted,scope))return toolError({error:'REAUTH_REQUIRED'},ctx,{tool:name});
    // card_build (refresh.mjs): which card build made this call. Never sent on to core. A call without it on a tool the
    // model can see is the model's own call: its result is where the model is told about a stale app, once.
    const {card_build:cardBuild,...args}=input??{};
@@ -147,14 +147,14 @@ export function createMcpServer({token,callCore,env=process.env,staleness=proces
     const guidance=tellRefresh&&isObject?withRefresh(refreshGuidance(),own):own;
     const refresh=tellRefresh&&name==='yeet_overview'&&isObject?{app_refresh:appRefresh()}:{};
     const parsed=output.safeParse(guidance?{...data,...refresh,guidance}:data);
-    if(!parsed.success)return toolError({error:'TEMPORARILY_UNAVAILABLE'},ctx);
+    if(!parsed.success)return toolError({error:'TEMPORARILY_UNAVAILABLE'},ctx,{tool:name});
     const text=TEXT[name]?TEXT[name](result):JSON.stringify(parsed.data);
     // Card only: the server's card build, so a card built from another commit can tell it is stale.
     const cardMeta={[BUILD_META_KEY]:staleness.build,...(confirm?{[CONFIRM_META_KEY]:confirm}:{}),...(account?{[ACCOUNT_META_KEY]:account}:{}),...(signer&&SIGNER_TOOLS.has(name)?{[SIGNER_META_KEY]:boundSigner(signer,hint)}:{})};
     // The one-sentence tools (spin, lucky wheel) carry the guidance as a second text block; JSON text already has it.
     const content=[{type:'text',text},...(TEXT[name]&&parsed.data.guidance?[{type:'text',text:parsed.data.guidance}]:[])];
     return {structuredContent:parsed.data,...(Object.keys(cardMeta).length?{_meta:cardMeta}:{}),content};
-   }catch(e){return toolError(e,ctx)}
+   }catch(e){return toolError(e,ctx,{tool:name})}
   });
  }
  return server;

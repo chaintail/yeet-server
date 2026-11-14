@@ -32,8 +32,21 @@ test('tools/list: P0 and P1 tools with the contract annotations, scopes, cards a
   assert.deepEqual(Object.fromEntries(LISTED.map(n=>[n,scope(n).scopes[0]])),{apply_referral:'yeet:write',execute_trade:'yeet:prepare',skeet_propose:'yeet:write',submit_trade_signature:'yeet:prepare',trade_status:'yeet:read',yeet_accept_terms:'yeet:write',yeet_referral:'yeet:read',yeet_terms:'yeet:read',yeet_profile:'yeet:read',yeet_set_username:'yeet:write',yeet_coins:'yeet:read',yeet_fund:'yeet:read',yeet_home:'yeet:read',yeet_overview:'yeet:read',yeet_portfolio:'yeet:read',yeet_propose:'yeet:write',yeet_quote:'yeet:write'});
   for(const n of LISTED)assert.equal(scope(n).type,'oauth2');
   const readOnly={readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false};
-  for(const n of ['yeet_fund','yeet_overview','yeet_home','yeet_coins','trade_status','yeet_portfolio'])assert.deepEqual(by[n].annotations,readOnly,n);
-  for(const n of ['yeet_propose','yeet_quote','skeet_propose'])assert.deepEqual(by[n].annotations,{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},n);
+  for(const n of ['yeet_fund','yeet_overview','yeet_home','yeet_coins','yeet_portfolio'])assert.deepEqual(by[n].annotations,readOnly,n);
+  // The status call may credit XP and bonus spins: a write that repeats without a further effect.
+  assert.deepEqual(by.trade_status.annotations,{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false});
+  // Each proposal or quote saves a new revision: a write, and not the same thing twice.
+  for(const n of ['yeet_propose','yeet_quote','skeet_propose'])assert.deepEqual(by[n].annotations,{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},n);
+  // A rename overwrites the name they had.
+  assert.deepEqual(by.yeet_set_username.annotations,{readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:false});
+  // The status lines ChatGPT shows for the tools the model calls (contract tools.<name>.invocation); none on card-only tools.
+  for(const t of tools){
+   const [ing,ed]=[t._meta['openai/toolInvocation/invoking'],t._meta['openai/toolInvocation/invoked']];
+   if(contract.tools[t.name].visible){assert.equal(ing,contract.tools[t.name].invocation.invoking,t.name);assert.equal(ed,contract.tools[t.name].invocation.invoked,t.name);assert.ok(ing.length<=64&&ed.length<=64,t.name)}
+   else{assert.equal(ing,undefined,t.name);assert.equal(ed,undefined,t.name)}
+  }
+  assert.equal(by.yeet_overview._meta['openai/toolInvocation/invoking'],'Getting your YEET ready…');assert.equal(by.yeet_overview._meta['openai/toolInvocation/invoked'],'Here you go');
+  assert.doesNotMatch(by.yeet_propose.description,/default/i);assert.doesNotMatch(by.yeet_coins.description,/with prices/i);
   assert.deepEqual(by.execute_trade.annotations,{readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:true});
   const template=Object.fromEntries(tools.map(t=>[t.name,t._meta?.['openai/outputTemplate']]));
   // The overview shows the welcome card; no tool shows a device step; the terms and profile tools have no card.
@@ -50,7 +63,7 @@ test('tools/list: P0 and P1 tools with the contract annotations, scopes, cards a
   // apply_referral is card-only too: the win code is applied from its card.
   assert.equal(by.apply_referral._meta['openai/visibility'],'private');assert.deepEqual(by.apply_referral._meta.ui.visibility,['app']);
   // yeet_accept_terms is the model's own call and no card may make it.
-  assert.equal(by.yeet_accept_terms._meta['openai/widgetAccessible'],false);assert.deepEqual(by.yeet_accept_terms.annotations,{readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:false});
+  assert.equal(by.yeet_accept_terms._meta['openai/widgetAccessible'],false);assert.deepEqual(by.yeet_accept_terms.annotations,{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false});
   for(const n of LISTED.filter(n=>n!=='execute_trade'&&n!=='submit_trade_signature'&&n!=='apply_referral')){assert.equal(by[n]._meta['openai/visibility'],undefined,n);assert.deepEqual(by[n]._meta.ui.visibility,['model','app'],n)}
   assert.deepEqual(TOOLS.map(t=>t.name).sort(),[...LISTED,...P2].sort());
  }finally{await close()}
@@ -106,7 +119,12 @@ test('yeet_coins returns the core catalogue; core failures return a typed TEMPOR
   for(const [name,args] of Object.entries(calls)){
    const r=await client.callTool({name,arguments:args});
    assert.equal(r.isError,true,name);
-   assert.deepEqual(JSON.parse(r.content[0].text),{error:'TEMPORARILY_UNAVAILABLE',message:"YEET message.",retryable:true,guidance:COPY.errors.TEMPORARILY_UNAVAILABLE},name);
+   // Around a trade that may be going out the result is unknown; a tool that can never send one may say nothing was traded.
+   const unknown=name==='execute_trade'||name==='trade_status';
+   assert.deepEqual(JSON.parse(r.content[0].text),{error:'TEMPORARILY_UNAVAILABLE',message:'YEET could not confirm the result. If you started a trade, check its status before trying again.',retryable:true,
+    guidance:unknown?COPY.errors.TEMPORARILY_UNAVAILABLE:COPY.errors.TEMPORARILY_UNAVAILABLE_no_send},name);
+   assert.equal(/nothing was traded/i.test(r.content[0].text.replace("YEET text.",'').replace("YEET text.",'')),!unknown,name);
+   assert.equal(Object.hasOwn(r,'structuredContent'),false,name);
   }
   assert.deepEqual(routes.map(([r])=>r),['/coins','/home','/proposals',`/proposals/${proposal.proposal_id}/quote`,'/trades','/trades/t_abcdefghij0123456789','/portfolio','/proposals/skeet']);
   assert.deepEqual(routes[3][1],{});assert.equal(routes[1][1],undefined);assert.equal(routes[5][1],undefined);

@@ -232,7 +232,11 @@ test('refusals: LIMIT_EXCEEDED names the tier from the core sentence and what un
  for(const tier of ['Noob','Winner','VIP'])rules(tier,refusalGuidance('LIMIT_EXCEEDED',`as a ${tier} (1 XP)`));
  assert.equal(refusalGuidance('TRADING_PAUSED',null,ALL_P2),COPY.errors.TRADING_PAUSED);assert.match(COPY.errors.TRADING_PAUSED,/still work/);
  assert.equal(refusalGuidance('TRADING_PAUSED',null,P01),COPY.errors.TRADING_PAUSED_no_wheel);
- assert.match(refusalGuidance('TEMPORARILY_UNAVAILABLE'),/could not get a price/,'no route or no liquidity comes back as TEMPORARILY_UNAVAILABLE');
+ // An outage: the result is unknown unless the tool is one that can never send a trade (review 2026-11-14, item 3).
+ assert.equal(refusalGuidance('TEMPORARILY_UNAVAILABLE'),'YEET errors.TEMPORARILY_UNAVAILABLE.');
+ for(const tool of ['execute_trade','submit_trade_signature','trade_status',undefined])assert.equal(refusalGuidance('TEMPORARILY_UNAVAILABLE',null,ALL_P2,{tool}),COPY.errors.TEMPORARILY_UNAVAILABLE,String(tool));
+ for(const tool of Object.keys(contract.tools).filter(n=>!['execute_trade','submit_trade_signature','trade_status'].includes(n)))assert.match(refusalGuidance('TEMPORARILY_UNAVAILABLE',null,ALL_P2,{tool}),/could not get a price.*nothing was traded/,tool);
+ assert.equal(toolError({error:'TEMPORARILY_UNAVAILABLE'}).content[0].text.includes('YEET could not confirm the result. If you started a trade, check its status before trying again.'),true);
  assert.match(refusalGuidance('CONFIRMATION_REQUIRED'),/expired and nothing was traded/);
 });
 

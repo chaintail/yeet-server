@@ -158,7 +158,10 @@ export const COPY=Object.freeze({
   BALANCE_LOW:"YEET errors.BALANCE_LOW.",
 
   BALANCE_LOW_usdc:"YEET errors.BALANCE_LOW_usdc.",
-  TEMPORARILY_UNAVAILABLE:"YEET errors.TEMPORARILY_UNAVAILABLE_no_send.",
+
+  TEMPORARILY_UNAVAILABLE:"YEET errors.TEMPORARILY_UNAVAILABLE.",
+
+  TEMPORARILY_UNAVAILABLE_no_send:"YEET errors.TEMPORARILY_UNAVAILABLE_no_send.",
   COST_TOO_HIGH:"YEET errors.COST_TOO_HIGH.",
   AMOUNT_TOO_SMALL:"YEET errors.AMOUNT_TOO_SMALL.",
   CONFIRMATION_REQUIRED:"YEET errors.CONFIRMATION_REQUIRED.",
@@ -322,8 +325,11 @@ export function guidanceFor(name,result,ctx){
  try{return f(result,ctx)}catch{return undefined}
 }
 
-export function refusalGuidance(code,message,ctx,{terms,reason,now=Date.now}={}){
+export const MAY_SEND=new Set(['execute_trade','submit_trade_signature','trade_status']);
+
+export function refusalGuidance(code,message,ctx,{terms,reason,tool,now=Date.now}={}){
  const e=COPY.errors;
+ if(code==='TEMPORARILY_UNAVAILABLE')return typeof tool==='string'&&!MAY_SEND.has(tool)?e.TEMPORARILY_UNAVAILABLE_no_send:e.TEMPORARILY_UNAVAILABLE;
  if(code==='TERMS_REQUIRED')return termsGuidance(terms,reason);
  if(code==='LIMIT_EXCEEDED'){
   const tier=typeof message==='string'?message.match(/\bas a (Noob|Winner|VIP)\b/)?.[1]:undefined;

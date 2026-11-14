@@ -37,7 +37,7 @@ export function zodSchema(z,schema){
 }
 /** Every contract tool, P0 to P2: {input, output} with all references resolved. */
 export const toolSchemas=Object.fromEntries(Object.entries(contract.tools).map(([name,t])=>[name,{input:resolveSchema(t.inputSchema),output:resolveSchema(t.outputSchema)}]));
-/** The contract's per-tool metadata (priority, title, description, annotations, scope, card, visible, widgetAccessible, resultMeta). */
-export const toolSpecs=Object.freeze(Object.fromEntries(Object.entries(contract.tools).map(([name,t])=>[name,Object.freeze({name,priority:t.priority,title:t.title,description:t.description,annotations:t.annotations,scope:t.scope,card:t.card,visible:t.visible,widgetAccessible:t.widgetAccessible,confirm:!!t.resultMeta?.[contract['x-yeet-meta'].confirm],errors:t.errors})])));
+/** The contract's per-tool metadata (priority, title, description, invocation status lines, annotations, scope, card, visible, widgetAccessible, resultMeta). */
+export const toolSpecs=Object.freeze(Object.fromEntries(Object.entries(contract.tools).map(([name,t])=>[name,Object.freeze({name,priority:t.priority,title:t.title,description:t.description,invocation:t.invocation,annotations:t.annotations,scope:t.scope,card:t.card,visible:t.visible,widgetAccessible:t.widgetAccessible,confirm:!!t.resultMeta?.[contract['x-yeet-meta'].confirm],errors:t.errors})])));
 export const CARDS=Object.freeze(contract['x-yeet-cards']);
 export const META_KEYS=Object.freeze(contract['x-yeet-meta']);

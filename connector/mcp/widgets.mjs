@@ -60,6 +60,8 @@ export function toolMeta(name) {
     ...(uri ? {'openai/outputTemplate': uri} : {}),
     ui: {...(uri ? {resourceUri: uri} : {}), visibility: t.visible ? ['model', 'app'] : ['app']},
     'openai/widgetAccessible': t.widgetAccessible,
+    // The short status lines ChatGPT shows while a tool the model called runs, and after (contract tools.<name>.invocation).
+    ...(t.visible && t.invocation ? {'openai/toolInvocation/invoking': t.invocation.invoking, 'openai/toolInvocation/invoked': t.invocation.invoked} : {}),
     ...(t.visible ? {} : {'openai/visibility': 'private'}),
   };
 }

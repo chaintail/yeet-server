@@ -1681,6 +1681,10 @@
       "priority": "P0",
       "title": "YEET overview",
       "description": "Shows the welcome card with the person's USDC, XP, tier, streak, daily check-in state and next actions.",
+      "invocation": {
+        "invoking": "Getting your YEET ready…",
+        "invoked": "Here you go"
+      },
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1715,6 +1719,10 @@
       "priority": "P0",
       "title": "YEET terms",
       "description": "Returns the current YEET terms statements with their links and whether the person accepted this version.",
+      "invocation": {
+        "invoking": "Getting the YEET terms…",
+        "invoked": "Here are the terms"
+      },
       "inputSchema": {
         "type": "object",
         "properties": {},
@@ -1755,6 +1763,10 @@
       "priority": "P0",
       "title": "Accept the YEET terms",
       "description": "Records the person's acceptance of the current YEET terms version.",
+      "invocation": {
+        "invoking": "Saving your answer…",
+        "invoked": "Terms checked"
+      },
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1810,7 +1822,7 @@
       },
       "annotations": {
         "readOnlyHint": false,
-        "destructiveHint": true,
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
       },
@@ -1829,6 +1841,10 @@
       "priority": "P1",
       "title": "Win code",
       "description": "Shows the win code card: one input that starts with WIN, Apply and Skip.",
+      "invocation": {
+        "invoking": "Getting the win code card…",
+        "invoked": "Win code card is up"
+      },
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1907,6 +1923,10 @@
       "priority": "P0",
       "title": "YEET home",
       "description": "Shows whether the person's YEET account is ready to trade, their USDC and their XP.",
+      "invocation": {
+        "invoking": "Checking your YEET…",
+        "invoked": "Here’s your YEET"
+      },
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2053,6 +2073,10 @@
       "priority": "P0",
       "title": "YEET coins",
       "description": "Lists every tradable coin with its USD price, its percent change over 1, 6 and 24 hours, and the trade limits.",
+      "invocation": {
+        "invoking": "Checking the coins…",
+        "invoked": "Coins checked"
+      },
       "inputSchema": {
         "$ref": "#/$defs/empty"
       },
@@ -2157,6 +2181,10 @@
       "priority": "P0",
       "title": "Quote a YEET basket",
       "description": "Quotes a YEET (buy) basket that spends USDC on 1-5 coins split by whole-number parts and shows the basket card; it buys nothing.",
+      "invocation": {
+        "invoking": "Lining up your YEET…",
+        "invoked": "YEET quote checked"
+      },
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2206,7 +2234,7 @@
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
-        "idempotentHint": true,
+        "idempotentHint": false,
         "openWorldHint": false
       },
       "scope": "yeet:write",
@@ -2232,6 +2260,10 @@
       "priority": "P0",
       "title": "Refresh a YEET quote",
       "description": "Refreshes an existing YEET or SKEET quote by proposal_id and saves it as a new revision; it trades nothing.",
+      "invocation": {
+        "invoking": "Refreshing your quote…",
+        "invoked": "Quote checked"
+      },
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2269,7 +2301,7 @@
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
-        "idempotentHint": true,
+        "idempotentHint": false,
         "openWorldHint": false
       },
       "scope": "yeet:write",
@@ -2580,6 +2612,10 @@
       "priority": "P0",
       "title": "Trade status",
       "description": "Returns the live status of a trade and what was received.",
+      "invocation": {
+        "invoking": "Checking your trade…",
+        "invoked": "Trade checked"
+      },
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2759,7 +2795,7 @@
         "additionalProperties": false
       },
       "annotations": {
-        "readOnlyHint": true,
+        "readOnlyHint": false,
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
@@ -2779,6 +2815,10 @@
       "priority": "P1",
       "title": "YEET portfolio",
       "description": "Shows the coins and USDC the person holds on YEET, with values.",
+      "invocation": {
+        "invoking": "Counting your coins…",
+        "invoked": "Here’s what you hold"
+      },
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2906,6 +2946,10 @@
       "priority": "P0",
       "title": "Fund your YEET account",
       "description": "Shows the Add funds card, on the crypto or card view when method is given, otherwise with both choices.",
+      "invocation": {
+        "invoking": "Getting the funding card…",
+        "invoked": "Funding card is up"
+      },
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2976,6 +3020,10 @@
       "priority": "P1",
       "title": "Quote a SKEET",
       "description": "Quotes a SKEET (sell) of a percent of 1-5 held coins back to USDC and shows the SKEET card; it sells nothing.",
+      "invocation": {
+        "invoking": "Lining up your SKEET…",
+        "invoked": "SKEET quote checked"
+      },
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3026,7 +3074,7 @@
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
-        "idempotentHint": true,
+        "idempotentHint": false,
         "openWorldHint": false
       },
       "scope": "yeet:write",
@@ -3050,6 +3098,10 @@
       "priority": "P2",
       "title": "YEET leaderboard",
       "description": "Shows a YEET leaderboard (xp, winners, best_trade, losers or coins) for a time window, with the person's place.",
+      "invocation": {
+        "invoking": "Checking the leaderboard…",
+        "invoked": "Here’s the board"
+      },
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3230,6 +3282,10 @@
       "priority": "P2",
       "title": "Daily check-in",
       "description": "Shows the daily check-in card: the wheel, the streak and the stamps.",
+      "invocation": {
+        "invoking": "Getting your daily check-in…",
+        "invoked": "Check-in is up"
+      },
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3435,7 +3491,7 @@
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
-        "idempotentHint": true,
+        "idempotentHint": false,
         "openWorldHint": false
       },
       "scope": "yeet:write",
@@ -3453,6 +3509,10 @@
       "priority": "P1",
       "title": "YEET profile",
       "description": "Returns the person's YEET display name, XP, tier and streak.",
+      "invocation": {
+        "invoking": "Getting your profile…",
+        "invoked": "Here’s your profile"
+      },
       "inputSchema": {
         "type": "object",
         "properties": {},
@@ -3521,6 +3581,10 @@
       "priority": "P1",
       "title": "Set YEET username",
       "description": "Replaces the person's YEET display name.",
+      "invocation": {
+        "invoking": "Saving your name…",
+        "invoked": "Name checked"
+      },
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3555,7 +3619,7 @@
       },
       "annotations": {
         "readOnlyHint": false,
-        "destructiveHint": false,
+        "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": false
       },
@@ -3576,6 +3640,10 @@
       "priority": "P2",
       "title": "Lucky wheel",
       "description": "Shows today's lucky wheel card: up to five randomly picked coins and the YEET offer for the coin it lands on.",
+      "invocation": {
+        "invoking": "Getting the lucky wheel…",
+        "invoked": "Lucky wheel is up"
+      },
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3602,7 +3670,7 @@
         "additionalProperties": false
       },
       "annotations": {
-        "readOnlyHint": true,
+        "readOnlyHint": false,
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
@@ -3726,7 +3794,8 @@
     "confirm": "yeet/confirm",
     "card": "yeet/card",
     "build": "yeet/build",
-    "account": "yeet/account"
+    "account": "yeet/account",
+    "failure": "yeet/failure"
   },
   "x-yeet-app": {
     "manage_url": "https://chatgpt.com/plugins",
@@ -3823,7 +3892,7 @@
     },
     "TEMPORARILY_UNAVAILABLE": {
       "title": "Try again in a minute",
-      "message": "YEET couldn’t reach a service it needs and nothing was traded.",
+      "message": "YEET could not confirm the result. If you started a trade, check its status before trying again.",
       "retryable": true
     },
     "USERNAME_TAKEN": {

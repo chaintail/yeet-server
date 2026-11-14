@@ -16,7 +16,7 @@ for(const [code,entry] of Object.entries(catalog)){
  if(typeof entry.retryable!=='boolean')invalid(`${code}: retryable required`);
  for(const k of ['title','message'])if(typeof entry[k]!=='string'||!entry[k])invalid(`${code}: ${k} required`);
 }
-/** Anything that is not a catalogue code becomes this one (an outage: nothing was traded). */
+/** Anything that is not a catalogue code becomes this one (an outage: the result is not known). */
 export const UNKNOWN='TEMPORARILY_UNAVAILABLE';
 if(!codes.includes(UNKNOWN))invalid(`${UNKNOWN} missing`);
 

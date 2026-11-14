@@ -1,8 +1,10 @@
 import {advertisedScopes} from '#scope-catalog';
 import {normalize,toolMessage,isRetryable} from '#contracts/errors';
 import {refusalGuidance} from './guidance.mjs';
-/** ctx: as in guidance.mjs (the registered tool names); without it the guidance assumes every tool is there. */
-export function toolError(value,ctx){
+import {META_KEYS} from './tool-contract.mjs';
+/** ctx: as in guidance.mjs (the registered tool names); without it the guidance assumes every tool is there.
+ * tool: the tool that failed, when known (an outage of a tool that can never send a trade may say nothing was traded). */
+export function toolError(value,ctx,{tool}={}){
  const code=normalize(value?.error);
  // LIMIT_EXCEEDED: the core's sentence with the person's tier, limits and amount left today (trade/limits.mjs).
  // BALANCE_LOW: the core's sentence with the person's USDC on Base and on Solana (pipeline/funding.mjs).
@@ -15,10 +17,14 @@ export function toolError(value,ctx){
  // required statements that were not confirmed.
  const terms=code==='TERMS_REQUIRED'&&value?.terms&&typeof value.terms==='object'?value.terms:null;
  if(terms){data.terms=terms;if(Array.isArray(value.missing)&&value.missing.length)data.missing=value.missing.filter(x=>typeof x==='string').slice(0,12)}
- const guidance=refusalGuidance(code,data.message,ctx,{terms,reason:value?.reason});
+ const guidance=refusalGuidance(code,data.message,ctx,{terms,reason:value?.reason,tool});
  if(guidance)data.guidance=guidance;
- // Protocol key, read by the host to start a step-up authorization; never shown to the person.
- // TERMS_REQUIRED also rides in structuredContent: a card that only reads window.openai.toolOutput then sees it and
- // shows its one line (an error result's structuredContent is not checked against the tool's output schema).
- return {isError:true,...(terms?{structuredContent:data}:{}),content:[{type:'text',text:JSON.stringify(data)}],...(code==='REAUTH_REQUIRED'?{_meta:{'mcp/www_authenticate':[`Bearer error="insufficient_scope", scope="${advertisedScopes().join(' ')}"`]}}:{})};
+ // An error result never carries structuredContent: every tool's output schema describes its success only, and a
+ // protocol client checks any structuredContent against it (a TERMS_REQUIRED object there was rejected with -32602). The model
+ // and the card read the JSON text. Card only (_meta, contract x-yeet-meta.failure): what a card draws of the refusal,
+ // for the bridge that hands it no text (window.openai.toolOutput is empty on an error).
+ const card={error:code,message:data.message,...(data.fund_url?{fund_url:data.fund_url}:{}),...(terms?{terms:{mode:terms.mode==='page'?'page':'chat',...(typeof terms.page_url==='string'?{page_url:terms.page_url}:{})}}:{})};
+ // 'mcp/www_authenticate': protocol key, read by the host to start a step-up authorization; never shown to the person.
+ const meta={...(META_KEYS.failure?{[META_KEYS.failure]:card}:{}),...(code==='REAUTH_REQUIRED'?{'mcp/www_authenticate':[`Bearer error="insufficient_scope", scope="${advertisedScopes().join(' ')}"`]}:{})};
+ return {isError:true,content:[{type:'text',text:JSON.stringify(data)}],...(Object.keys(meta).length?{_meta:meta}:{})};
 }
