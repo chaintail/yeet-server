@@ -10,7 +10,7 @@ import {unavailable,failure,withUserMessage} from './failure.mjs';
 import {tradeEngine,onTradeSettled,agentService} from './trade/runtime.mjs';
 import {agentRouteOn} from '#shared/agent-route.mjs';
 import {AGENT_ROUTE_SCOPES,routeGuard,mountAgentRoutes,mountAgentPageRoutes} from './agent/http.mjs';
-import {AGENT_PREFIX,agentLimitsFromEnv} from './agent/agents.mjs';
+import {AGENT_PREFIX,agentLimitsFromEnv,agentOwnerAccountOn} from './agent/agents.mjs';
 import {ledgerConfig} from './ledger-route/config.mjs';
 import {loadSolverKey} from './ledger-route/solver.mjs';
 import {xpRuntime,p2On,homeXp,homeXpKeys,checkSpinTable} from './xp/xp.mjs';
@@ -40,6 +40,8 @@ if(process.env.PRIVY_LOGIN!=='1'&&!devStub)throw Error('No identity verifier con
 // checked here. Off (the default): nothing below is mounted and every route answers as before.
 const AGENT_ON=agentRouteOn();
 if(AGENT_ON){if(!ledgerConfig(process.env).enabled)throw Error('The agent route needs the ledger route (YEET_ROUTE=ledger or YEET_LEDGER_ACCOUNTS)');agentLimitsFromEnv()}
+// Owner account mode (YEET_AGENT_OWNER_ACCOUNT=on, needs the agent route): an agent trades the person's own ledger account.
+const AGENT_OWNER_ON=agentOwnerAccountOn(process.env,AGENT_ON);
 initializeIdentityStore({app:process.env.PRIVY_LOGIN==='1'?process.env.PRIVY_APP_ID:DEV_APP_ID});
 const user=id=>account(id);
 // XP (lane E, YEET_P2=1): trade settlement pays through the tracker's onSettled hook; read per event so the flag is live.
@@ -376,7 +378,9 @@ app.post('/proposals/skeet',trade('skeet_propose',basketCard((e,ctx,a)=>e.skeet(
 app.post('/proposals/:id/quote',trade(null,basketCard((e,ctx,_a,q)=>{const a=inputs.yeet_quote.safeParse({...q.body,proposal_id:q.params.id});if(!a.success)throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});return e.quote(ctx,a.data)})));
 app.post('/trades',trade('execute_trade',hintOnly((e,ctx,a)=>e.execute(ctx,a))));
 // submit_trade_signature: bytes the person's own wallet signed for one leg (pipeline.submit checks and sponsors them).
-app.post('/trades/:id/signature',trade(null,hintOnly((e,ctx,_a,q)=>{const a=inputs.submit_trade_signature.safeParse({...q.body,trade_id:q.params.id});if(!a.success)throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});return e.submit(ctx,a.data)})));
+// A trade an agent prepared for the person (owner account mode) takes its signature on the agent route only.
+const agentOwnTrade=async id=>AGENT_OWNER_ON&&(await agentService()).isOwnerTrade(id);
+app.post('/trades/:id/signature',trade(null,hintOnly(async(e,ctx,_a,q)=>{if(await agentOwnTrade(q.params.id))throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT',detail:'agent owner-mode trade'});const a=inputs.submit_trade_signature.safeParse({...q.body,trade_id:q.params.id});if(!a.success)throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});return e.submit(ctx,a.data)})));
 // trade_status carries the card-only account facts as well, but only the ones already known (it never waits for
 // Privy): a card that follows a trade finished on the YEET page then sees the email the person confirmed there.
 const statusCard=withCardAccount({lookup:logins,didOf:ctx=>didFor(ctx.accountId),wait:false,hint:signHint});

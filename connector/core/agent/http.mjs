@@ -9,6 +9,8 @@ export const AGENT_ROUTE_SCOPES=Object.freeze([
  ['GET',/^\/agent\/overview$/,'yeet:read'],
  ['GET',/^\/agent\/balance$/,'yeet:read'],
  ['GET',/^\/agent\/positions$/,'yeet:read'],
+ ['POST',/^\/agent\/balance$/,'yeet:read'],
+ ['POST',/^\/agent\/positions$/,'yeet:read'],
  ['POST',/^\/agent\/status$/,'yeet:read'],
  ['POST',/^\/agent\/register$/,'yeet:write'],
  ['POST',/^\/agent\/quote$/,'yeet:write'],
@@ -53,14 +55,19 @@ export function mountAgentRoutes(app,{agents,terms,log=line=>console.error(line)
   }
  };
  app.get('/agent/overview',handler((a,s,c)=>a.overview(s,c),{needsTerms:false}));
+ // `account` ('agent' by default, or 'owner' with YEET_AGENT_OWNER_ACCOUNT=on) is the only selector: the account itself
+ // is always the token's subject (or its agent key), never named by the caller.
+ const acct=b=>b.account===undefined?{}:{account:b.account};
  app.get('/agent/balance',handler((a,s,c)=>a.balance(s,c)));
  app.get('/agent/positions',handler((a,s,c)=>a.positions(s,c)));
- app.post('/agent/status',handler((a,s,c,b)=>{if(typeof b.trade_id!=='string'||!/^t_[a-z0-9]{20}$/.test(b.trade_id))throw new AgentError('INVALID_ARGUMENT','trade_id is a t_ id from prepare or submit.',400);return a.status(s,c,{trade_id:b.trade_id})}));
+ app.post('/agent/balance',handler((a,s,c,b)=>a.balance(s,c,acct(b))));
+ app.post('/agent/positions',handler((a,s,c,b)=>a.positions(s,c,acct(b))));
+ app.post('/agent/status',handler((a,s,c,b)=>{if(typeof b.trade_id!=='string'||!/^t_[a-z0-9]{20}$/.test(b.trade_id))throw new AgentError('INVALID_ARGUMENT','trade_id is a t_ id from prepare or submit.',400);return a.status(s,c,{trade_id:b.trade_id,...acct(b)})}));
  app.post('/agent/register',handler((a,s,c,b)=>a.register(s,c,{public_key:b.public_key,budget_usdc:b.budget_usdc})));
- app.post('/agent/quote',handler((a,s,c,b)=>a.quote(s,c,{side:b.side,coins:b.coins,amount_usdc:b.amount_usdc,percent:b.percent})));
- app.post('/agent/prepare',handler((a,s,c,b)=>a.prepare(s,c,{quote_id:b.quote_id,revision:b.revision})));
- app.post('/agent/submit',handler((a,s,c,b)=>a.submit(s,c,{request_id:b.request_id,signature:b.signature})));
- app.post('/agent/return',handler((a,s,c)=>a.returnBudget(s,c)));
+ app.post('/agent/quote',handler((a,s,c,b)=>a.quote(s,c,{side:b.side,coins:b.coins,amount_usdc:b.amount_usdc,percent:b.percent,...acct(b)})));
+ app.post('/agent/prepare',handler((a,s,c,b)=>a.prepare(s,c,{quote_id:b.quote_id,revision:b.revision,...acct(b)})));
+ app.post('/agent/submit',handler((a,s,c,b)=>a.submit(s,c,{request_id:b.request_id,signature:b.signature,...acct(b)})));
+ app.post('/agent/return',handler((a,s,c,b)=>a.returnBudget(s,c,acct(b))));
 }
 
 /** The signing page's two calls for a budget link (`a_...`): the owner's page session, never the agent's token. */

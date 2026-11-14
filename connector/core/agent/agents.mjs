@@ -12,6 +12,14 @@
 // On top of the pipeline's own caps, each agent trade is capped (YEET_AGENT_MAX_TRADE_USDC, YEET_AGENT_MAX_DAY_USDC)
 // and may name only the coins YEET lists on the ledger. Budget transfers and returns are relayed by the ledger route's
 // solver (it pays the NEAR gas); it cannot change them: they are the signer's own message.
+//
+// Owner account mode (YEET_AGENT_OWNER_ACCOUNT=on, `account: "owner"` on the trade and read tools): the agent trades the
+// PERSON's own ledger account instead of its own. The person approved the agent once with Privy; the agent obtains the
+// signature from the person's Privy Solana wallet itself (signMessage), outside this server. Here it is the ChatGPT card's
+// own path: the pipeline's proposal, confirm code, execute and submit under the person's account id (so the person's
+// caps, XP and portfolio apply as for a card trade), the ledger route's token_diff, raw_ed25519 against the person's
+// wallet key, simulate then settle, plus the agent caps per trade and per day. Trades only: no transfer is ever built
+// or relayed for the person's account here.
 import {createHash,randomBytes} from 'node:crypto';
 import {ed25519AccountId,rawEd25519Payload,intentHash} from '../intents/sign.mjs';
 import {transferIntent} from '../intents/jit.mjs';
@@ -20,7 +28,7 @@ import {buildNonce} from '../intents/nonce.mjs';
 import {USDC_SOL_TOKEN_ID,VERIFIER} from '../intents/constants.mjs';
 import {settledOk} from '../ledger-route/solver.mjs';
 import {CATALOG,parseUnits,formatUnits,base58Encode,base58Decode} from '../trade/router.mjs';
-import {TradeError,newId,iso} from '../trade/util.mjs';
+import {TradeError,newId,iso,utcDay} from '../trade/util.mjs';
 import {spentToday} from '../trade/limits.mjs';
 
 export const AGENT_PREFIX='yeet-agent-';
@@ -29,6 +37,18 @@ const TOKEN_ID=/^nep141:[a-z0-9._-]{2,64}$/;
 const USDC_RE=/^\d{1,7}(\.\d{1,6})?$/;
 /** A budget link stays open this long; each message it issues is valid OP_DEADLINE_MS. */
 export const FUND_WINDOW_MS=24*3600_000,OP_DEADLINE_MS=5*60_000,OP_MIN_LEFT_MS=20_000;
+/** The route class of the pipeline context of an owner-mode call: confirm codes are bound to it (proposals.mint). */
+export const OWNER_CLIENT_PREFIX='agent-owner:';
+
+/** Whether owner account mode is on (YEET_AGENT_OWNER_ACCOUNT). Throws on a value it does not know, and on `on` without
+ * YEET_AGENT_ROUTE=on (the service does not start). */
+export function agentOwnerAccountOn(env=process.env,routeOn){
+ const v=(env.YEET_AGENT_OWNER_ACCOUNT??'').trim().toLowerCase();
+ if(v===''||v==='off')return false;
+ if(v!=='on')throw Error('Invalid YEET_AGENT_OWNER_ACCOUNT (on or off)');
+ if(!routeOn)throw Error('YEET_AGENT_OWNER_ACCOUNT=on needs YEET_AGENT_ROUTE=on');
+ return true;
+}
 
 /** A refusal of the agent route: a code, a sentence a model can relay, and the HTTP status. */
 export class AgentError extends Error{
@@ -80,6 +100,18 @@ CREATE INDEX IF NOT EXISTS agent_op_account ON agent_op(account_id,created_at);
 CREATE TABLE IF NOT EXISTS agent_quote(
  proposal_id TEXT NOT NULL, revision INTEGER NOT NULL, account_id TEXT NOT NULL, confirm TEXT NOT NULL, created_at INTEGER NOT NULL,
  PRIMARY KEY(proposal_id,revision));`;
+// Owner account mode only (created only when it is on). Every row is bound to the person (owner) AND the agent
+// connection (client_id): a quote, a trade or a request of one connection is unknown to every other one, and the
+// ChatGPT route's own trades are unknown to all of them.
+const OWNER_SCHEMA=`
+CREATE TABLE IF NOT EXISTS agent_owner_quote(
+ proposal_id TEXT NOT NULL, revision INTEGER NOT NULL, owner TEXT NOT NULL, client_id TEXT NOT NULL, confirm TEXT NOT NULL, created_at INTEGER NOT NULL,
+ PRIMARY KEY(proposal_id,revision));
+CREATE TABLE IF NOT EXISTS agent_owner_trade(
+ trade_id TEXT PRIMARY KEY, owner TEXT NOT NULL, client_id TEXT NOT NULL, proposal_id TEXT NOT NULL, created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS agent_owner_trade_client ON agent_owner_trade(owner,client_id,created_at);
+CREATE TABLE IF NOT EXISTS agent_owner_request(
+ request_id TEXT PRIMARY KEY, trade_id TEXT NOT NULL, owner TEXT NOT NULL, client_id TEXT NOT NULL, created_at INTEGER NOT NULL);`;
 
 /** What the pipeline needs to know about agent accounts (pipeline.mjs `agents`). Creates the tables. */
 export function agentAccounts(db){
@@ -99,8 +131,9 @@ export const agentCoins=(catalog=CATALOG)=>catalog.filter(e=>e.chain==='solana'&
  * engine: the pipeline (pipeline.mjs, created with agents=agentAccounts(db)); limits: agentLimitsFromEnv;
  * pageUrl(opId): the signing page address of a budget link.
  */
-export function createAgents({db,engine,limits,pageUrl,catalog=engine?.catalog??CATALOG,now=Date.now,log=()=>{}}){
+export function createAgents({db,engine,limits,pageUrl,catalog=engine?.catalog??CATALOG,now=Date.now,log=()=>{},ownerAccount=false}){
  db.exec(SCHEMA);
+ if(ownerAccount)db.exec(OWNER_SCHEMA);
  const route=engine?.ledgerRoute;
  if(!route?.solver||!route?.verifier)throw Error('The agent route needs the ledger route');
  const {solver,verifier}=route;
@@ -357,6 +390,153 @@ export function createAgents({db,engine,limits,pageUrl,catalog=engine?.catalog??
    how:'Sign the UTF-8 bytes of message with your ed25519 key and pass the base64 signature to the submit tool with request_id. If remaining_tokens is above 0, call this tool again after it settles.'};
  }
 
+
+ // ---- owner account mode: the person's own ledger account, trades only (YEET_AGENT_OWNER_ACCOUNT=on) ----
+ /** 'agent' (the default, the route as before) or 'owner'. Anything else, and 'owner' while the mode is off, is refused. */
+ function modeOf(account){
+  if(account===undefined||account===null||account==='agent')return 'agent';
+  if(account!=='owner')fail('INVALID_ARGUMENT','account is "owner" (the person\'s own YEET account) or "agent" (your own key\'s account, the default).',400);
+  if(!ownerAccount)fail('OWNER_ACCOUNT_OFF','Trading the person\'s own YEET account from an agent is switched off on this server. Use account "agent" (your own key and budget).',403);
+  return 'owner';
+ }
+ // The pipeline context of an owner-mode call: the person's own account (the token's subject, never a parameter) and a
+ // client id of the agent route's class, so a confirm code minted here is never valid on the ChatGPT route and back.
+ const ownerCtx=(owner,clientId)=>({accountId:owner,clientId:`${OWNER_CLIENT_PREFIX}${clientId}`.slice(0,2048)});
+ /** The person's wallet and ledger account; refused unless the person's account trades on the ledger route. */
+ async function requireOwner(owner){
+  if(typeof owner!=='string'||owner.startsWith(AGENT_PREFIX))fail('INVALID_ARGUMENT','Unknown YEET account.',400);
+  const wallet=await ownerWallet(owner);
+  if(!route.handles(owner))fail('OWNER_NOT_ON_LEDGER','The person\'s YEET account does not trade on the YEET ledger yet, so an agent cannot trade it. Use account "agent" with your own key and budget.',409);
+  return {wallet,ledgerAccount:ed25519AccountId(wallet)};
+ }
+ /** What this connection bought for the person today (UTC): buy legs of its owner-mode trades that were not given back
+  * as not sent (the pipeline's own release of an unsent buy). */
+ function ownerSpentToday(owner,clientId){
+  const day=utcDay(now()),from=Date.parse(`${day}T00:00:00.000Z`);
+  const rows=db.prepare(`SELECT l.amount_in_raw AS raw FROM agent_owner_trade o JOIN trades t ON t.id=o.trade_id JOIN trade_legs l ON l.trade_id=t.id
+   WHERE o.owner=? AND o.client_id=? AND t.account_id=? AND t.direction='yeet' AND t.created_at>=? AND l.send_status<>'not_sent'`).all(owner,clientId,owner,from);
+  return rows.reduce((x,r)=>x+BigInt(r.raw??0),0n);
+ }
+ /** The agent's per-day spend: its own key's account (when this connection has one) and what it bought for the person. */
+ function connectionSpentToday(owner,clientId){
+  const a=keyOf(owner,clientId);
+  return (a?spentToday(db,a.account_id,now()):0n)+ownerSpentToday(owner,clientId);
+ }
+ function ownerLimitsView(owner,clientId){
+  const spent=connectionSpentToday(owner,clientId),left=spent>=limits.maxDayRaw?0n:limits.maxDayRaw-spent;
+  return {max_trade_usdc:usdcText(limits.maxTradeRaw),max_day_usdc:usdcText(limits.maxDayRaw),spent_today_usdc:usdcText(spent),left_today_usdc:usdcText(left),coins:coins.map(c=>c.symbol)};
+ }
+ // One prepare at a time per connection: the per-day check and the trade it admits are not split by another prepare.
+ const locks=new Map();
+ async function serial(key,fn){
+  const prev=locks.get(key)??Promise.resolve();let release;const mine=new Promise(r=>release=r);locks.set(key,prev.then(()=>mine));
+  await prev.catch(()=>{});
+  try{return await fn()}finally{release();if(locks.get(key)===mine||locks.size>1000)locks.delete(key)}
+ }
+ /** A ledger request is accepted for the person only when it is exactly one token_diff signed by the person's own
+  * ledger account: never a transfer, a withdrawal or anything else that could move funds to another account. */
+ function tradeOnly(payload,ledgerAccount){
+  let m=null;try{m=JSON.parse(payload)}catch{}
+  const ok=m&&m.signer_id===ledgerAccount&&Array.isArray(m.intents)&&m.intents.length===1&&m.intents[0]?.intent==='token_diff'&&m.intents[0].diff&&typeof m.intents[0].diff==='object'
+   &&Object.keys(m.intents[0]).every(k=>['intent','diff'].includes(k));
+  if(!ok)fail('OWNER_TRADES_ONLY','Only trades can be signed for the person\'s own account through this route.',403);
+ }
+ async function ownerQuote(owner,clientId,{side,coins:symbols,amount_usdc,percent=100}){
+  await requireOwner(owner);
+  if(!['buy','sell'].includes(side))fail('INVALID_ARGUMENT','side is buy or sell.',400);
+  if(!Array.isArray(symbols)||!symbols.length||symbols.length>5||new Set(symbols).size!==symbols.length)fail('INVALID_ARGUMENT','coins lists 1 to 5 different coin symbols.',400);
+  const list=symbols.map(s=>String(s).trim().replace(/^\$/,'').toUpperCase());
+  checkCoins(list);
+  const ctx=ownerCtx(owner,clientId),request_id=`agent-owner-${randomBytes(9).toString('hex')}`;
+  let p;
+  if(side==='buy'){
+   if(!USDC_RE.test(String(amount_usdc??''))||!(Number(amount_usdc)>0))fail('INVALID_ARGUMENT','amount_usdc is the USDC to spend, like "5".',400);
+   if(parseUnits(String(amount_usdc),6)>limits.maxTradeRaw)fail('LIMIT_EXCEEDED',`An agent trade is at most ${usdcText(limits.maxTradeRaw)} USDC.`,409,{limits:ownerLimitsView(owner,clientId)});
+   p=await engine.propose(ctx,{request_id,amount_usdc:String(amount_usdc),legs:list.map(symbol=>({symbol,parts:1}))});
+  }else{
+   if(!Number.isInteger(percent)||percent<1||percent>100)fail('INVALID_ARGUMENT','percent is a whole number from 1 to 100.',400);
+   p=await engine.skeet(ctx,{request_id,legs:list.map(symbol=>({symbol,percent}))});
+  }
+  if(!p?.confirm?.code)fail('TEMPORARILY_UNAVAILABLE','The quote could not be made just now. Try again in a minute.',503);
+  db.prepare('INSERT OR REPLACE INTO agent_owner_quote(proposal_id,revision,owner,client_id,confirm,created_at) VALUES(?,?,?,?,?,?)').run(p.proposal_id,p.revision,owner,clientId,p.confirm.code,now());
+  return {account:'owner',quote_id:p.proposal_id,revision:p.revision,side,amount_usdc:p.amount_usdc,legs:p.legs.map(l=>({symbol:l.symbol,amount_in:l.amount_in,est_out:l.est_out,min_out:l.min_out,est_out_usd:l.est_out_usd})),
+   cost_pct:p.totals?.cost_pct??null,quoted_at:p.quoted_at,warnings:p.warnings??[],next:'Call the prepare tool with quote_id and account "owner" to get the message the person\'s wallet signs.'};
+ }
+ async function ownerPrepare(owner,clientId,{quote_id,revision}){
+  const {wallet,ledgerAccount}=await requireOwner(owner);
+  const q=db.prepare('SELECT * FROM agent_owner_quote WHERE proposal_id=? AND owner=? AND client_id=? ORDER BY revision DESC LIMIT 1').get(String(quote_id??''),owner,clientId);
+  if(!q||(revision!==undefined&&revision!==q.revision))fail('QUOTE_NOT_FOUND','Unknown quote_id for this connection and account "owner". Call the quote tool with account "owner" first.',404);
+  return serial(`${owner}\n${clientId}`,async()=>{
+   const prop=db.prepare('SELECT direction,amount_in_raw FROM proposals WHERE id=?').get(q.proposal_id);
+   if(prop?.direction==='yeet'){
+    const total=BigInt(prop.amount_in_raw),spent=connectionSpentToday(owner,clientId);
+    if(total>limits.maxTradeRaw)fail('LIMIT_EXCEEDED',`An agent trade is at most ${usdcText(limits.maxTradeRaw)} USDC.`,409,{limits:ownerLimitsView(owner,clientId)});
+    if(spent+total>limits.maxDayRaw)fail('LIMIT_EXCEEDED',`This agent can spend ${usdcText(spent>=limits.maxDayRaw?0n:limits.maxDayRaw-spent)} USDC more today (at most ${usdcText(limits.maxDayRaw)} USDC per UTC day).`,409,{limits:ownerLimitsView(owner,clientId)});
+   }
+   const x=await engine.execute(ownerCtx(owner,clientId),{proposal_id:q.proposal_id,revision:q.revision,confirm:q.confirm});
+   if(x?.status==='requote_required'||x?.proposal)fail('REQUOTE_REQUIRED','Prices moved past the quote. Call the quote tool again.',409);
+   if(x?.trade_id)db.prepare('INSERT OR IGNORE INTO agent_owner_trade(trade_id,owner,client_id,proposal_id,created_at) VALUES(?,?,?,?,?)').run(x.trade_id,owner,clientId,q.proposal_id,now());
+   const req=(x?.sign_requests??[]).find(r=>r.kind==='near_intent');
+   if(!req)return {account:'owner',trade_id:x?.trade_id??null,status:x?.status??'unknown',request:null};
+   if(req.wallet!==wallet)fail('TEMPORARILY_UNAVAILABLE','The trade could not be prepared for the person\'s wallet. Nothing moved.',503);
+   tradeOnly(req.payload.message,ledgerAccount);
+   return {account:'owner',trade_id:x.trade_id,status:x.status,request:{...agentRequest(req),
+    how:'Have the person\'s Privy Solana wallet sign the UTF-8 bytes of message exactly (Solana signMessage, no prefix); pass the 64-byte signature as base64 to the submit tool with request_id and account "owner".'}};
+  });
+ }
+ /** The person's wallet signature for an owner-mode trade request of this connection. Single use. */
+ async function ownerSubmit(owner,clientId,{request_id,signature}){
+  const {wallet,ledgerAccount}=await requireOwner(owner);
+  const id=String(request_id??'');
+  if(/^a_[a-z0-9]{20}\./.test(id))fail('OWNER_TRADES_ONLY','Only trades can be signed for the person\'s own account through this route.',403);
+  const m=/^(t_[a-z0-9]{20})\.([0-9a-f]{64})$/.exec(id);
+  if(!m)fail('INVALID_ARGUMENT','request_id is the one the prepare tool gave.',400);
+  const [,tradeId,attemptId]=m;
+  const o=db.prepare('SELECT * FROM agent_owner_trade WHERE trade_id=?').get(tradeId),t=db.prepare('SELECT account_id FROM trades WHERE id=?').get(tradeId);
+  if(!o||o.owner!==owner||o.client_id!==clientId||t?.account_id!==owner)fail('INVALID_ARGUMENT','Unknown request_id for this connection and account "owner".',404);
+  const a=route.attempt(attemptId);
+  if(!a||a.trade_id!==tradeId||a.account_id!==owner)fail('INVALID_ARGUMENT','Unknown request_id for this connection and account "owner".',404);
+  if(db.prepare('SELECT 1 FROM agent_owner_request WHERE request_id=?').get(id)||a.status==='accepted')fail('REQUEST_USED','This request was already signed and submitted. Check the trade with the status tool; for a new trade, quote again.',409);
+  if(a.status!=='pending')fail('REQUEST_EXPIRED','That message can no longer be used. Call the prepare tool again for a new one.',409);
+  // the key that must have signed: the person's own wallet, read now, never the agent's word
+  if(a.wallet!==wallet)fail('SIGNATURE_INVALID','The request is not for the person\'s current wallet. Call the prepare tool again.',409);
+  tradeOnly(a.payload,ledgerAccount);
+  const sig=signatureBytes(signature);
+  try{rawEd25519Payload(a.payload,wallet,sig)}
+  catch{fail('SIGNATURE_INVALID','The signature does not verify over the exact message bytes with the person\'s own wallet key. Have the person\'s Privy Solana wallet sign message (UTF-8 bytes, no prefix).',400)}
+  // single use: the first submission claims the request id; a replay, concurrent or later, is refused
+  if(db.prepare('INSERT OR IGNORE INTO agent_owner_request(request_id,trade_id,owner,client_id,created_at) VALUES(?,?,?,?,?)').run(id,tradeId,owner,clientId,now()).changes!==1)
+   fail('REQUEST_USED','This request was already signed and submitted. Check the trade with the status tool; for a new trade, quote again.',409);
+  const legIdx=db.prepare('SELECT MIN(idx) AS i FROM trade_legs WHERE trade_id=?').get(tradeId)?.i??0;
+  let s;
+  try{s=await engine.submit(ownerCtx(owner,clientId),{trade_id:tradeId,leg:legIdx,attempt_id:attemptId,signed:Buffer.from(sig).toString('base64')})}
+  catch(e){
+   // nothing was accepted (the attempt still waits): the claim is given back, so a corrected submission can go through
+   if(route.attempt(attemptId)?.status==='pending')db.prepare('DELETE FROM agent_owner_request WHERE request_id=?').run(id);
+   throw e;
+  }
+  event({event:'agent_owner_submitted',trade:tradeId,owner,state:s?.status??null});
+  const st=await ownerStatus(owner,clientId,{trade_id:tradeId}).catch(()=>null);
+  return {account:'owner',request_id:id,kind:'trade',trade_id:tradeId,status:st?.status??s?.status??'pending',...(st?{trade:st}:{}),...(s?.sign_requests?.length?{renewed:true}:{})};
+ }
+ async function ownerStatus(owner,clientId,{trade_id}){
+  await requireOwner(owner);
+  const v=engine.status(ownerCtx(owner,clientId),trade_id);
+  return {account:'owner',trade_id,status:v.status,direction:v.direction,received:v.received??[],legs:(v.legs??[]).map(l=>({symbol:l.symbol,status:l.status,amount_in:l.amount_in,amount_out:l.amount_out,tx:l.origin_tx??null})),updated_at:v.updated_at};
+ }
+ async function ownerBalance(owner){
+  const {ledgerAccount}=await requireOwner(owner);
+  return {account:'owner',ledger_account:ledgerAccount,...(await balanceOf({ledger_account:ledgerAccount})).view};
+ }
+ async function ownerPositions(owner,clientId){
+  const {ledgerAccount}=await requireOwner(owner);
+  const ctx=ownerCtx(owner,clientId);
+  const [bal,pf]=await Promise.all([balanceOf({ledger_account:ledgerAccount}),engine.portfolio(ctx).catch(()=>null)]);
+  const recent=db.prepare('SELECT id FROM trades WHERE account_id=? ORDER BY created_at DESC LIMIT 5').all(owner);
+  const trades=[];for(const r of recent){try{trades.push({...(await ownerStatus(owner,clientId,{trade_id:r.id})),via_agent:!!db.prepare('SELECT 1 FROM agent_owner_trade WHERE trade_id=? AND owner=? AND client_id=?').get(r.id,owner,clientId)})}catch{}}
+  return {account:'owner',ledger_account:ledgerAccount,usdc:bal.view.usdc,holdings:pf?.solana?.holdings?.filter(h=>h.symbol!=='USDC')??bal.view.coins.map(c=>({...c,usd:null})),total_usd:pf?.total_usd??null,recent_trades:trades,limits:ownerLimitsView(owner,clientId)};
+ }
+
  // ---- the signing page (as/sign-page.mjs): the owner approves a budget link ----
  async function pageRequests(owner,opId){
   let op=opRow(opId);
@@ -377,7 +557,22 @@ export function createAgents({db,engine,limits,pageUrl,catalog=engine?.catalog??
   return {trade_id:r.trade_id,status:r.status,legs:r.legs,sign_requests:r.sign_requests};
  }
 
- return {overview,register,balance,quote,prepare,submit,status,positions,returnBudget,pageRequests,pageSubmit,limits,coins:()=>coins.map(c=>c.symbol)};
+ // The tools take `account` ('agent' by default: the route exactly as before; 'owner': the person's own account).
+ const by=(agentFn,ownerFn)=>async(owner,clientId,args={})=>{const {account,...rest}=args??{};return modeOf(account)==='owner'?ownerFn(owner,clientId,rest):agentFn(owner,clientId,rest)};
+ const tradesOnly=async()=>fail('OWNER_TRADES_ONLY','Only trades are possible on the person\'s own account through this route: nothing can be sent from it to another account.',403);
+ const isOwnerTrade=tradeId=>ownerAccount&&!!db.prepare('SELECT 1 FROM agent_owner_trade WHERE trade_id=?').get(String(tradeId??''));
+ async function overviewAll(owner,clientId){
+  const o=await overview(owner,clientId);
+  if(!ownerAccount)return o;
+  let onLedger=false,ledgerAccount=null;
+  try{const w=await requireOwner(owner);onLedger=true;ledgerAccount=w.ledgerAccount}catch{}
+  return {...o,owner_account:{available:onLedger,ledger_account:ledgerAccount,limits:ownerLimitsView(owner,clientId),
+   how:'Pass account "owner" to the quote, prepare, submit, status, balance and positions tools to trade the person\'s own YEET account; the person\'s Privy Solana wallet signs each message.'}};
+ }
+ return {overview:overviewAll,register,
+  balance:by(balance,ownerBalance),quote:by(quote,ownerQuote),prepare:by(prepare,ownerPrepare),submit:by(submit,ownerSubmit),status:by(status,ownerStatus),positions:by(positions,ownerPositions),
+  returnBudget:by(returnBudget,tradesOnly),isOwnerTrade,ownerAccount:!!ownerAccount,
+  pageRequests,pageSubmit,limits,coins:()=>coins.map(c=>c.symbol)};
 }
 
 /** base64 (or hex) of a 64-byte ed25519 signature. */
