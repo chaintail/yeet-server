@@ -1450,6 +1450,9 @@
         "sets_completed": {
           "type": "integer",
           "minimum": 0
+        },
+        "fair_next": {
+          "$ref": "#/$defs/fair_next"
         }
       },
       "required": [
@@ -2002,6 +2005,101 @@
         "custody",
         "sections",
         "export_url"
+      ],
+      "additionalProperties": false
+    },
+    "fair_spin_id": {
+      "type": "string",
+      "pattern": "^s_[0-9a-f]{24}$",
+      "description": "One spin of the fair wheel (docs/FAIR-WHEEL.md)."
+    },
+    "fair_client_seed": {
+      "type": "string",
+      "pattern": "^[0-9A-Za-z_-]{8,64}$",
+      "description": "Set by the card only: its own random seed for the fair wheel."
+    },
+    "fair_next": {
+      "description": "The fair wheel: the next spin and the SHA-256 commitment of its server seed, published before the card sends its seed; null when no spin is left.",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "spin_id": {
+              "$ref": "#/$defs/fair_spin_id"
+            },
+            "commitment": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "spin_id",
+            "commitment"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "fair_reveal": {
+      "type": "object",
+      "description": "The fair wheel, after the spin: the commitment, the seed behind it, the client seed and the draw they give (docs/FAIR-WHEEL.md).",
+      "properties": {
+        "version": {
+          "const": "yeet-fair-1"
+        },
+        "spin_id": {
+          "$ref": "#/$defs/fair_spin_id"
+        },
+        "commitment": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "server_seed": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "client_seed": {
+          "type": "string",
+          "pattern": "^[0-9A-Za-z_-]{8,64}$"
+        },
+        "client_seed_by": {
+          "enum": [
+            "card",
+            "server"
+          ]
+        },
+        "coins": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/symbol"
+          },
+          "minItems": 1,
+          "maxItems": 26
+        },
+        "draw_xp": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "streak_draw_xp": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        }
+      },
+      "required": [
+        "version",
+        "spin_id",
+        "commitment",
+        "server_seed",
+        "client_seed",
+        "client_seed_by",
+        "coins",
+        "draw_xp",
+        "streak_draw_xp"
       ],
       "additionalProperties": false
     }
@@ -4022,6 +4120,12 @@
         "properties": {
           "card_build": {
             "$ref": "#/$defs/card_build"
+          },
+          "spin_id": {
+            "$ref": "#/$defs/fair_spin_id"
+          },
+          "client_seed": {
+            "$ref": "#/$defs/fair_client_seed"
           }
         },
         "required": [],
@@ -4161,6 +4265,12 @@
           },
           "guidance": {
             "$ref": "#/$defs/guidance"
+          },
+          "fair": {
+            "$ref": "#/$defs/fair_reveal"
+          },
+          "fair_next": {
+            "$ref": "#/$defs/fair_next"
           }
         },
         "required": [
@@ -4501,7 +4611,7 @@
       "tools-6",
       "tools-7"
     ],
-    "tools_hash": "f6e97652ac0d32347173812612d7717774c633ec37e44f1f35ef85c621418a53"
+    "tools_hash": "a80599b6695e4fd2649b90af5f8bdac75171aaacdd954e65da504691c22c9a18"
   },
   "x-yeet-spin": {
     "base_xp": 5,
@@ -4520,7 +4630,21 @@
       24,
       31,
       40
-    ]
+    ],
+    "bonus_weights": [
+      23,
+      21,
+      15,
+      10,
+      8,
+      6,
+      5,
+      4,
+      2,
+      2,
+      4
+    ],
+    "fair_version": "yeet-fair-1"
   },
   "x-yeet-scopes": {
     "yeet:read": "See your YEET balance, coins, trades and XP.",

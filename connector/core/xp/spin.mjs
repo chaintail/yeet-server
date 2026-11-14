@@ -6,10 +6,13 @@
 //
 // Every wheel slice is one catalog meme coin (stamps.mjs stampCoins; never SOL or USDC). The coin won is a second keyed draw (`account|day|coin`), stored with the stamp
 // (stamps.mjs) in the same transaction as the XP row, so a repeat returns the same coin even if the catalog changed.
+// With YEET_FAIR_WHEEL=on (createSpin `fair`) both draws come from a commit-reveal seed instead (fair.mjs, docs/WHEEL-STAMPS.md
+// "Fair wheel"): the commitment is stored before the card's seed is taken, and the result reveals the seed.
 import {createHmac,createHash} from 'node:crypto';
 import {dayOf} from './ledger.mjs';
 import {streakDays,runEndingOn,addDays} from './streak.mjs';
 import {createStamps,spinStamp} from './stamps.mjs';
+import {FAIR_VERSION,SPIN_ID,CLIENT_SEED,commitmentOf,newServerSeed,newSpinId,serverClientSeed,fairOutcome,landedWheel} from './fair.mjs';
 
 /** Weighted draw table: 11 values from 0 to 40 XP, weights sum to 100, mean 7.52. */
 export const BONUS_TABLE=Object.freeze([
@@ -63,6 +66,23 @@ export function wheelFor(secret,who,day,coins,coin,draw_xp,table=BONUS_TABLE){
  return {wheel:list.map((c,i)=>({coin:c,xp:i===slice?draw_xp:others[k++%others.length]})),slice};
 }
 
+/**
+ * The committed wheel of a fair spin (YEET_FAIR_WHEEL=on): one slice per coin, the bonus values in an order keyed on
+ * `account|day|fair|value`, cycled. It is fixed before the card sends its seed, so it cannot depend on the draw; the
+ * drawn XP moves onto the drawn coin's slice when the spin lands (fair.mjs landedWheel).
+ */
+export function fairLayout(secret,who,seedDay,coins,table=BONUS_TABLE){
+ const vals=[...new Set(table.map(r=>r.xp))].map(v=>[u32(secret,`${who}|${seedDay}|fair|${v}`),v]).sort((a,b)=>a[0]-b[0]).map(([,v])=>v);
+ return coins.map((coin,i)=>({coin,xp:vals[i%vals.length]}));
+}
+/** One commitment per (account, spin key): created when the next spin is shown, used by exactly one spin. */
+const FAIR_SCHEMA=`CREATE TABLE IF NOT EXISTS xp_fair_spin(
+  spin_id TEXT PRIMARY KEY, identity_id TEXT NOT NULL, spin_key TEXT NOT NULL, day TEXT NOT NULL,
+  server_seed TEXT NOT NULL, commitment TEXT NOT NULL, coins TEXT NOT NULL, layout TEXT NOT NULL,
+  committed_at TEXT NOT NULL, client_seed TEXT, client_seed_by TEXT, used_at TEXT,
+  UNIQUE(identity_id,spin_key));`;
+const invalid=msg=>Object.assign(Error(msg),{name:'TradeError',code:'INVALID_ARGUMENT'});
+
 export const nextSpinAt=day=>`${addDays(day,1)}T00:00:00.000Z`;
 
 /** Why an extra spin was granted. trade_bonus: the lucky wheel's claim (lucky.mjs; unique_ref = the lucky_id). */
@@ -75,14 +95,60 @@ const GRANT_SCHEMA=`CREATE TABLE IF NOT EXISTS xp_spin_grant(
  CREATE INDEX IF NOT EXISTS xp_spin_grant_day ON xp_spin_grant(identity_id,day,used_at);`;
 const unavailable=msg=>Object.assign(Error(msg),{name:'TradeError',code:'TEMPORARILY_UNAVAILABLE'});
 
-export function createSpin({ledger,secret,coins}){
+export function createSpin({ledger,secret,coins,fair=false}){
  const db=ledger.db;
  db.exec(GRANT_SCHEMA);
+ // The fair wheel's table exists only with the switch on, so an off server writes nothing new.
+ if(fair)db.exec(FAIR_SCHEMA);
  const stamps=createStamps({ledger,...(coins?{coins}:{})});
  const todays=(who,day)=>db.prepare("SELECT points FROM xp_event WHERE identity_id=? AND event='daily_spin' AND substr(ts,1,10)=? ORDER BY ts LIMIT 1").get(who,day);
  const ready=()=>typeof secret==='string'&&secret.length>=16&&!!ledger.rule('daily_spin')?.enabled&&stamps.coins.length>0;
  /** Unused grants for `day` only: a grant is good for the UTC day it names, so unused extra spins never carry over. */
  const openGrants=(who,day)=>db.prepare('SELECT id,reason FROM xp_spin_grant WHERE identity_id=? AND day=? AND used_at IS NULL ORDER BY created_at,id').all(who,day);
+ // ---- fair wheel (YEET_FAIR_WHEEL=on, docs/WHEEL-STAMPS.md "Fair wheel") ----
+ const fairOn=()=>fair&&ready();
+ // A server switched back off still reads the fair spins it stored, so a repeat shows the stored draw and wheel (no fair fields).
+ const fairTable=fair||!!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='xp_fair_spin'").get();
+ const fairRow=(who,key)=>fairTable?db.prepare('SELECT * FROM xp_fair_spin WHERE identity_id=? AND spin_key=?').get(who,key):undefined;
+ const usedRow=(who,key)=>{const r=fairRow(who,key);return r&&r.client_seed!==null?r:null};
+ const outcomeOf=r=>fairOutcome({serverSeed:r.server_seed,clientSeed:r.client_seed,spinId:r.spin_id,coins:JSON.parse(r.coins),weights:BONUS_TABLE});
+ const reveal=(r,o)=>({version:FAIR_VERSION,spin_id:r.spin_id,commitment:r.commitment,server_seed:r.server_seed,client_seed:r.client_seed,
+  client_seed_by:r.client_seed_by,coins:JSON.parse(r.coins),draw_xp:o.draw_xp,streak_draw_xp:o.streak_draw_xp});
+ /** Inside a transaction: the commitment for (who, key), stored now when there is none. The seed never leaves before its spin. */
+ function commitIn(who,day,key,at=ledger.iso()){
+  const have=fairRow(who,key);if(have)return have;
+  const seedDay=key===day?day:`${day}|${key}`,server_seed=newServerSeed();
+  db.prepare('INSERT OR IGNORE INTO xp_fair_spin(spin_id,identity_id,spin_key,day,server_seed,commitment,coins,layout,committed_at) VALUES(?,?,?,?,?,?,?,?,?)')
+   .run(newSpinId(),who,key,day,server_seed,commitmentOf(server_seed),JSON.stringify(stamps.coins),JSON.stringify(fairLayout(secret,who,seedDay,stamps.coins)),at);
+  return fairRow(who,key);
+ }
+ /** The key of the spin the next daily_spin call makes (the day, or the oldest open grant), or null when it makes none. */
+ function nextKey(who,day){
+  if(!todays(who,day))return day;
+  if(!stamps.forSpin(who,day))return null;
+  return openGrants(who,day)[0]?.id??null;
+ }
+ /** {spin_id, commitment} of the next spin, committed now if new; null when no spin is left (or the switch is off). */
+ function fairNextIn(who,day,at){
+  if(!fairOn())return null;
+  const key=nextKey(who,day);if(!key)return null;
+  const r=commitIn(who,day,key,at);return {spin_id:r.spin_id,commitment:r.commitment};
+ }
+ /**
+  * Inside the spin's transaction: takes the client seed for the spin `key` and returns its draw (null with the switch
+  * off). A card seed needs the commitment it was shown (same spin_id); with no card seed (an older card) the server
+  * commits, then picks the client seed itself, and the reveal says so. A commitment takes one seed, once.
+  */
+ function seedIn(who,day,key,at,args){
+  if(!fairOn())return null;
+  const card=typeof args?.client_seed==='string';
+  const r=card?fairRow(who,key):commitIn(who,day,key,at);
+  if(!r||(card&&r.spin_id!==args.spin_id))throw invalid('no commitment for this spin');
+  const ok=db.prepare('UPDATE xp_fair_spin SET client_seed=?,client_seed_by=?,used_at=? WHERE spin_id=? AND client_seed IS NULL')
+   .run(card?args.client_seed:serverClientSeed(),card?'card':'server',at,r.spin_id);
+  if(Number(ok.changes)!==1)throw invalid('this commitment is already used');
+  return outcomeOf(fairRow(who,key));
+ }
  /** Inside the caller's transaction: one grant per (account, reason, unique_ref), ever. Returns {id, granted}. */
  function grantSpinIn(who,day,reason,ref,at=ledger.iso()){
   if(!SPIN_GRANT_REASONS.includes(reason))throw Error(`Unknown spin grant reason ${reason}`);
@@ -100,18 +166,21 @@ export function createSpin({ledger,secret,coins}){
  const base=()=>Number(ledger.rule('daily_spin').points);
  /** The full result of one stored spin (`key`: the day for the daily spin, the grant id for an extra one). */
  function result(who,day,key,stamp,parts){
-  const seedDay=key===day?day:`${day}|${key}`;
+  const seedDay=key===day?day:`${day}|${key}`,fr=usedRow(who,key);
   return {...parts,total:ledger.total(who),streak_days:streakDays(db,who,day),next_spin_at:nextSpinAt(day),
-   ...wheelFor(secret,who,seedDay,stamps.coins,stamp.coin,parts.draw_xp),stamp:spinStamp(stamp),set_bonus_xp:Number(stamp.set_bonus_xp),
-   stamps:stamps.list(who),sets_completed:stamps.setsCompleted(who),...left(who,day)};
+   ...(fr?landedWheel(JSON.parse(fr.layout),stamp.coin,parts.draw_xp):wheelFor(secret,who,seedDay,stamps.coins,stamp.coin,parts.draw_xp)),
+   stamp:spinStamp(stamp),set_bonus_xp:Number(stamp.set_bonus_xp),
+   stamps:stamps.list(who),sets_completed:stamps.setsCompleted(who),...left(who,day),
+   ...(fr&&fair?{fair:reveal(fr,outcomeOf(fr))}:{}),...(fair?{fair_next:fairNextIn(who,day,ledger.iso())}:{})};
  }
  /** A stored spin's XP parts: the draws are deterministic, so they are recomputed; the XP is the stored row. */
  function parts(who,day,key,reason){
   if(key===day){
-   const draw_xp=roll(secret,`${who}|${day}`),won=Number(todays(who,day).points);
+   const fr=usedRow(who,key),draw_xp=fr?outcomeOf(fr).draw_xp:roll(secret,`${who}|${day}`),won=Number(todays(who,day).points);
    return {spin_kind:'daily',spin_reason:null,xp_won:won,draw_xp,streak_xp:Math.max(0,won-base()-draw_xp)};
   }
-  return {spin_kind:'extra',spin_reason:reason,xp_won:ledger.pointsFor(who,'extra_spin',key),draw_xp:roll(secret,`${who}|${day}|${key}`),streak_xp:0};
+  const fr=usedRow(who,key);
+  return {spin_kind:'extra',spin_reason:reason,xp_won:ledger.pointsFor(who,'extra_spin',key),draw_xp:fr?outcomeOf(fr).draw_xp:roll(secret,`${who}|${day}|${key}`),streak_xp:0};
  }
  return {
   ready,stamps,
@@ -138,6 +207,13 @@ export function createSpin({ledger,secret,coins}){
   nextWheel(who,at=ledger.iso()){
    if(!ready())return null;
    const day=dayOf(at);
+   if(fairOn()){
+    // Fair: the committed wheel of the next spin, or the latest fair spin as it landed.
+    const key=nextKey(who,day);
+    if(key)return JSON.parse(ledger.tx(()=>commitIn(who,day,key,at)).layout);
+    const last=stamps.lastOn(who,day),fr=last&&usedRow(who,last.spin_key);
+    if(fr)return landedWheel(JSON.parse(fr.layout),last.coin,outcomeOf(fr).draw_xp).wheel;
+   }
    const of=(key,coin)=>{
     const seedDay=key===day?day:`${day}|${key}`;
     const draw=roll(secret,key===day?`${who}|${day}`:`${who}|${day}|${key}`);
@@ -151,6 +227,8 @@ export function createSpin({ledger,secret,coins}){
    const last=stamps.lastOn(who,day)??daily;
    return of(last.spin_key,last.coin);
   },
+  /** Fair wheel: {spin_id, commitment} the next daily_spin uses (committed now if new), or null. Undefined with the switch off. */
+  fairNext(who,at=ledger.iso()){return fair?ledger.tx(()=>fairNextIn(who,dayOf(at),at)):undefined},
   /** Whether `who` can still spin today (the daily spin or an extra one). */
   available(who,at=ledger.iso()){return left(who,dayOf(at)).spins_available>0},
   /**
@@ -158,8 +236,12 @@ export function createSpin({ledger,secret,coins}){
    * repeat of today's latest spin, adding nothing. Each spin pays its XP and one stamp in one transaction.
    * Throws when no secret is configured.
    */
-  spin(who,at=ledger.iso()){
+  spin(who,at=ledger.iso(),args={}){
    if(!ready())throw unavailable('spin not configured');
+   // Fair wheel: a card seed comes with the spin_id it was shown; both well formed or the call is refused.
+   if(fairOn()&&(args?.client_seed!==undefined||args?.spin_id!==undefined)
+    &&(typeof args.client_seed!=='string'||!CLIENT_SEED.test(args.client_seed)||typeof args.spin_id!=='string'||!SPIN_ID.test(args.spin_id)))
+    throw invalid('client_seed and spin_id must both be given');
    const day=dayOf(at);
    // Everything below is one transaction: the XP row, the stamp, a streak grant and the grant's use stand or fall together.
    return ledger.tx(()=>{
@@ -175,23 +257,25 @@ export function createSpin({ledger,secret,coins}){
      }
      // An extra spin: its own draws, keyed on the grant id; base + draw, no streak part (the daily spin carries that).
      const seedDay=`${day}|${grant.id}`;
-     const draw_xp=roll(secret,`${who}|${day}|${grant.id}`);
+     const fd=seedIn(who,day,grant.id,at,args);
+     const draw_xp=fd?fd.draw_xp:roll(secret,`${who}|${day}|${grant.id}`);
      const xp_won=ledger.awardIn(who,'extra_spin',grant.id,{at,points:base()+draw_xp});
      if(!xp_won)throw unavailable('extra spin rule did not pay');
      if(Number(db.prepare('UPDATE xp_spin_grant SET used_at=? WHERE id=? AND used_at IS NULL').run(at,grant.id).changes)!==1)throw unavailable('grant already used');
-     const stamp=stamps.grantIn(who,grant.id,day,rollCoin(secret,who,seedDay,stamps.coins),at);
+     const stamp=stamps.grantIn(who,grant.id,day,fd?fd.coin:rollCoin(secret,who,seedDay,stamps.coins),at);
      return result(who,day,grant.id,stamp,{spin_kind:'extra',spin_reason:grant.reason,xp_won,draw_xp,streak_xp:0});
     }
     // The spin itself is today's event, so the streak it completes is yesterday's streak plus today.
     // Other XP earned earlier today (a sign-in, a trade) already makes today active; it counts once either way.
     const days=runEndingOn(db,who,addDays(day,-1))+1;
-    const draw_xp=roll(secret,`${who}|${day}`);
+    const fd=seedIn(who,day,day,at,args);
+    const draw_xp=fd?fd.draw_xp:roll(secret,`${who}|${day}`);
     const milestones=streakMilestones(days);
-    const streak=milestones.reduce((sum,r)=>sum+r.xp,0)+(milestones.some(r=>r.roll)?roll(secret,`${who}|${day}|streak`):0);
+    const streak=milestones.reduce((sum,r)=>sum+r.xp,0)+(milestones.some(r=>r.roll)?(fd?fd.streak_draw_xp:roll(secret,`${who}|${day}|streak`)):0);
     const xp_won=ledger.awardIn(who,'daily_spin',day,{at,points:base()+draw_xp+streak});
     // No XP row (the rule is not live yet, or capped): no stamp either; the spin is refused and nothing is written.
     if(!xp_won)throw unavailable('spin rule did not pay');
-    const stamp=stamps.grantIn(who,day,day,rollCoin(secret,who,day,stamps.coins),at);
+    const stamp=stamps.grantIn(who,day,day,fd?fd.coin:rollCoin(secret,who,day,stamps.coins),at);
     // A streak milestone also grants one extra spin for today.
     if(milestones.length)grantSpinIn(who,day,'streak_milestone',day,at);
     // draw_xp: the landing slice's value (xp_won = base + draw_xp + streak_xp); streak_xp: the milestone bonus including

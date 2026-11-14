@@ -1,0 +1,140 @@
+[
+ {
+  "server_seed": "e07afa72441a688ccfda7bd6b7f036db3b16ccee62c029fccce3e867ed1353a3",
+  "commitment": "267dc0d8cd5d6a9acc4449f586800d04441557744cd26a2f09bc13478a0c3fff",
+  "client_seed": "a5618ffd4c50b10ab59f2b2a9b6bf9f9",
+  "spin_id": "s_ef788717313a154435df5389",
+  "coins": [
+   "WIF",
+   "BOME",
+   "TRUMP",
+   "PENGU",
+   "MELANIA",
+   "SPX",
+   "TURBO",
+   "LOUD",
+   "NEARKAT"
+  ],
+  "expect": {
+   "draw_xp": 5,
+   "coin": "NEARKAT",
+   "coin_index": 8,
+   "streak_draw_xp": 5
+  }
+ },
+ {
+  "server_seed": "b806b9932bb162a798d1c4c011a595a7b24bed25bb5904552c1d4a3531843e92",
+  "commitment": "8ae3e470ed3c671958b6f6dba4d4bfc36829aef7f52dbd23585eae1d2fa62cdc",
+  "client_seed": "b0ec8c73970a87aa054b2e2163af2dfe",
+  "spin_id": "s_919c3c484d13042228ee835a",
+  "coins": [
+   "WIF",
+   "BOME",
+   "TRUMP",
+   "PENGU",
+   "MELANIA",
+   "SPX",
+   "TURBO",
+   "LOUD",
+   "NEARKAT"
+  ],
+  "expect": {
+   "draw_xp": 2,
+   "coin": "TURBO",
+   "coin_index": 6,
+   "streak_draw_xp": 19
+  }
+ },
+ {
+  "server_seed": "8afe25ad5f5a8d79ddcb08ddf989891b5a934bdcf8f0bc1637eb02339d42f3b0",
+  "commitment": "66533a71b275c93db82d1718267dc175220f680981829de0735dad4c3eca3353",
+  "client_seed": "367c406dac9aa31965360b2cebbb87ed",
+  "spin_id": "s_002825d74d6430f51a6ae25c",
+  "coins": [
+   "WIF",
+   "BOME",
+   "TRUMP",
+   "PENGU",
+   "MELANIA",
+   "SPX",
+   "TURBO",
+   "LOUD",
+   "NEARKAT"
+  ],
+  "expect": {
+   "draw_xp": 15,
+   "coin": "TRUMP",
+   "coin_index": 2,
+   "streak_draw_xp": 0
+  }
+ },
+ {
+  "server_seed": "e26b9413b1417865e7d515cff467a5378dca3f758e99324be60b90cd33d78300",
+  "commitment": "2b5ef113703a501165ea656597d59b70016eee56ba78887d1ca4bcd82e8db6e2",
+  "client_seed": "f61db04c10d33764dec930ba8bc8b016",
+  "spin_id": "s_c6d21b5f0173f86a5903c1a0",
+  "coins": [
+   "WIF",
+   "BOME",
+   "TRUMP",
+   "PENGU",
+   "MELANIA",
+   "SPX",
+   "TURBO",
+   "LOUD",
+   "NEARKAT"
+  ],
+  "expect": {
+   "draw_xp": 7,
+   "coin": "BOME",
+   "coin_index": 1,
+   "streak_draw_xp": 12
+  }
+ },
+ {
+  "server_seed": "fb5c21e4c45dc8ac2a6b5470a7ecf83b07e25ce01e6aae68d1d73ba6d9144367",
+  "commitment": "12f04f0243b1b7d20833ca2d861e2cf2e155cceb9f066b3dbc2696049b15b0ec",
+  "client_seed": "ef87e25d9f93930bc7a05ccf4534cb7e",
+  "spin_id": "s_3bb176717365c89897d4df9f",
+  "coins": [
+   "WIF",
+   "BOME",
+   "TRUMP",
+   "PENGU",
+   "MELANIA",
+   "SPX",
+   "TURBO",
+   "LOUD",
+   "NEARKAT"
+  ],
+  "expect": {
+   "draw_xp": 2,
+   "coin": "NEARKAT",
+   "coin_index": 8,
+   "streak_draw_xp": 9
+  }
+ },
+ {
+  "server_seed": "78ce601724867d9804a64981a8d95c42a8917d007bba0b22b7e42df85a7caba7",
+  "commitment": "2ccb64b6f191c9be419e68530a9efc2a30167a4d0ebcd9c3c81b94e6e5033787",
+  "client_seed": "41c00e725e6e9dd7f9e83f989b170581",
+  "spin_id": "s_abab4843753337210c3ae391",
+  "coins": [
+   "WIF",
+   "BOME",
+   "TRUMP",
+   "PENGU",
+   "MELANIA",
+   "SPX",
+   "TURBO",
+   "LOUD",
+   "NEARKAT"
+  ],
+  "expect": {
+   "draw_xp": 0,
+   "coin": "BOME",
+   "coin_index": 1,
+   "streak_draw_xp": 7
+  }
+ }
+]

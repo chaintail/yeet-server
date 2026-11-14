@@ -1,10 +1,10 @@
 repo: chaintail/yeet-win
-branch: feat/terms-xp
-commit: 9a0fd907904b6323a4509e9cc83434ded01a3826
+branch: vendor/terms-fair (local merge, not in chaintail/yeet-win: feat/fair-wheel d601ea5 merged into feat/terms-xp 9a0fd90 as 71fd2c3, then e2225ad keeps the wheel card code to the wheel views; recipe in connector/docs/SUBMIT-BUILD.md)
+commit: e2225ad2bbdc3318f10ee81a99755df452df4f46
 built: router (tsc 7.0.2), widget (node build.mjs), signer (scripts/build-signer.mjs, esbuild 0.28.2, @privy-io/js-sdk-core 0.79.5, sha256 a4affb0c76ce)
 files:
   contracts/yeet-tools.json
   widget/basket-v1.html coin-v1.html fund-v1.html home-v1.html leaderboard-v1.html lucky-v1.html overview-v1.html portfolio-v1.html receipt-v1.html referral-v1.html templates.json wheel-v1.html yeet-signer.js 
   router/dist/src/**
   router/test/fixtures/*.json
-edited: contracts/yeet-tools.json descriptions neutralised to the yeet-win int/submission text (prep/scrub-chatgpt-text 610d4a6, int/submission bdd334b for the tools-8 pointers); ours are in connector/mcp/descriptions.private.json, applied at load
+edited: contracts/yeet-tools.json descriptions neutralised to the yeet-win int/submission text (byte-identical to its contracts/yeet-tools.json at bdd334b); ours are in connector/mcp/descriptions.private.json, applied at load

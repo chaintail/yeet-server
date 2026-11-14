@@ -273,7 +273,9 @@ test('next_streak_milestone: today’s spin still counts until it happens; homeX
  // block carries the whole summary unchanged and parses.
  const summary=xp.summary('a');
  const HOME_XP_KEYS=homeXpKeys(toolSchemas.yeet_home.output);
- assert.deepEqual(HOME_XP_KEYS,['total','streak_days','spin_available','next_streak_milestone','wheel','spins_available','extra_spin_reason','stamps','sets_completed']);
+ // tools-8 adds fair_next (the fair wheel); the summary carries it only with YEET_FAIR_WHEEL=on, so off nothing changes.
+ assert.deepEqual(HOME_XP_KEYS,['total','streak_days','spin_available','next_streak_milestone','wheel','spins_available','extra_spin_reason','stamps','sets_completed','fair_next']);
+ assert.ok(!('fair_next' in summary),'fair wheel off: no fair_next in the summary');
  const block=homeXp(summary,HOME_XP_KEYS);
  assert.ok(Array.isArray(block.wheel)&&block.wheel.length>0,'xp.wheel passes the contract cut');
  assert.ok(Array.isArray(block.stamps)&&block.stamps.length>0,'xp.stamps passes the contract cut');

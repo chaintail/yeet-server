@@ -3,7 +3,7 @@
 #
 #   scripts/vendor-yeet-win.sh <path-to-yeet-win> [ref, default main]
 #
-# 1. `git archive <ref>` of contracts/, packages/router/, packages/widget/, brand/, apps/landing/type-data.js (the
+# 1. `git archive <ref>` of contracts/, packages/router/, packages/widget/, packages/fair/ (when the ref has it), brand/, apps/landing/type-data.js (the
 #    card build inlines the brand tokens, logo, mark and heading glyphs) and the workspace manifests is unpacked
 #    into .build/yeet-win-<sha>/ (ignored by git; reused when it already exists).
 # 2. The router is built there with its own pinned toolchain (npm ci of the router workspace, then tsc), and the
@@ -27,7 +27,9 @@ dest="$root/connector/vendor/yeet-win"
 mkdir -p "$root/.build"
 if [ ! -f "$build/.unpacked" ]; then
   mkdir -p "$build"
-  git -C "$src" archive --format=tar "$sha" contracts packages/router packages/widget brand apps/landing/type-data.js package.json package-lock.json | tar -x -C "$build"
+  # packages/fair (the fair wheel's check, inlined by the widget build into the daily views) from the commits that have it.
+  fair=""; if git -C "$src" cat-file -e "$sha:packages/fair" 2>/dev/null; then fair="packages/fair"; fi
+  git -C "$src" archive --format=tar "$sha" contracts packages/router packages/widget $fair brand apps/landing/type-data.js package.json package-lock.json | tar -x -C "$build"
   touch "$build/.unpacked"
 fi
 

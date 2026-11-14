@@ -3,9 +3,10 @@
 // served before the public text was scrubbed (2026-11-14). The hashes below cover every byte of tools/list (names,
 // titles, descriptions, schemas, annotations, _meta), unlike tools-list.lock.json, which leaves wording out.
 // A deliberate change of our wording records new values here in the same commit.
-// Recorded deliberately at tools-8 (int/submit, terms 2026-11-14): each value equals the full tools/list hash the
-// unscrubbed feat/terms-xp tree serves; against tools-7 (int/ledger) the only difference with the switches off is
-// yeet_overview's app_version enum (tools-7 -> tools-8). how_it_works: YEET_P2=1 and YEET_HOW_IT_WORKS=1 (24 tools).
+// Recorded deliberately at tools-8 (int/submit: terms 2026-11-14 and the fair wheel, cards at the local yeet-win merge
+// e2225ad): each value equals the full tools/list hash of the same tree with the unscrubbed e2225ad contract and an
+// empty overlay. Against tools-7 (int/ledger), with every switch off: yeet_overview's app_version enum (tools-7 ->
+// tools-8) and yeet_home's optional xp.fair_next in its output schema. how_it_works: YEET_P2=1 and YEET_HOW_IT_WORKS=1.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -17,7 +18,7 @@ import {contract,applyDescriptions,DESCRIPTIONS_URL} from '../tool-contract.mjs'
 import {CONTRACT_URL} from '#contracts/errors';
 import {allScopes} from '#scope-catalog';
 
-const FULL={p2:'7326ae29fc69e525f5cb61b59c4bf8dd1e3af47eece1ef46532d71df88e15f54',default:'53719439451153478246e767c0ef274095c4da2b9689c96258277b34c89c28b3',how_it_works:'982724fcfc72dee66b327e420e05cad5d3350a5f66efd9cc2abfb820259d0c3f'};
+const FULL={p2:'87305e6815ef1d4b2d2b622b231de4739c0af53e93b8b6b0edbb18d40c010268',default:'b5c1e3c7570b426406b086f3d80de2de9b54dabb0faddd2a0e53a73ba3987325',how_it_works:'741e5f1b3188e6b99492eb476cca8ffd9e65897e1fc5b2814752c92fdc56694c'};
 const overlay=JSON.parse(readFileSync(DESCRIPTIONS_URL,'utf8')).contract;
 const vendored=()=>JSON.parse(readFileSync(CONTRACT_URL,'utf8'));
 const at=(o,pointer)=>pointer.split('/').slice(1).map(k=>k.replace(/~1/g,'/').replace(/~0/g,'~')).reduce((x,k)=>x?.[k],o);
