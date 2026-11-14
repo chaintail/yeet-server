@@ -1456,7 +1456,7 @@ function signedFromWallet(req,answer){
 
 return {privyRpcBody,privyRpcBodies,checkBatch,checkIntent,reactSdkArgs,signedFromWallet,signedFromWallets};})());   // src/trade-signing.js over src/vendor/wallet-request.mjs
 const signerCfg={"app_id":null,"script":null,"page":null};  // {app_id,script,page}: build-time; a result's _meta['yeet/signer'] overrides
-const BUILD="fd6c656404c274fe36a6cf0699a28c6929e49edd";     // the yeet-win commit this template was built from; null for a local build
+const BUILD="a179e4becfbec6bff8b648d97701c6f208aae085";     // the yeet-win commit this template was built from; null for a local build
 const APP={"manage_url":"https://chatgpt.com/plugins","refresh_label":"Refresh YEET in ChatGPT","refresh_steps":"open YEET there, select Refresh, then start a new chat"};         // {manage_url,refresh_label,refresh_steps}: where the person refreshes the app in ChatGPT
 const CONFIRM_KEY='yeet/confirm',SIGNER_KEY='yeet/signer',BUILD_KEY='yeet/build',FAILURE_KEY='yeet/failure';
 const POLL_MS=5000,POLL_MAX=360,SKEW_MS=2000,MAX_PARTS=99,AMOUNT_MAX=25,MORE_USDC='5';
@@ -1633,7 +1633,7 @@ function kindOf(d){
  if(VIEW==='overview'&&typeof d.username==='string'&&Array.isArray(d.suggestions))return 'overview';
  if(typeof d.proposal_id==='string'&&Array.isArray(d.legs)&&d.totals)return 'basket';
  if(typeof d.trade_id==='string'&&Array.isArray(d.legs))return 'receipt';
- if(d.wallets&&typeof d.ready==='string')return 'home';
+ if(typeof d.ready==='string'&&has(d,'recent_wins'))return 'home';
  if(d.solana&&d.base&&has(d,'priced_at'))return 'portfolio';
  if(Array.isArray(d.rows)&&d.me)return 'leaderboard';
  if(VIEW==='fund'&&Array.isArray(d.presets)&&has(d,'usdc'))return 'fund';
@@ -1698,7 +1698,7 @@ function show(data,meta){
 function receive(structured,meta,isError,raw){
  if(structured===undefined&&!isError)return;
  const data=isError?(errorEnvelope(raw)||{error:'TEMPORARILY_UNAVAILABLE'}):structured;
- takeSigner(meta);takeAccount(meta);takeBuild(meta);
+ takeSigner(meta);takeAccount(meta);takeBuild(meta);if(VIEW==='fund')takeDeposit(meta);
  const c=meta?.[CONFIRM_KEY];
  const key=JSON.stringify([data,typeof c?.expires_at==='string'?c.expires_at:null,!!isError]);
  if(key===lastKey)return;lastKey=key;

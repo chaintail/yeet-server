@@ -6,6 +6,7 @@ import {fakeEngine,fakeOneClick,fakeSigner,fakeBalances,fakeClock,BASE_WALLET,SO
 import {ReceiptSchema,CATALOG} from './router.mjs';
 import {toolSchemas,zodSchema} from '../../mcp/tool-contract.mjs';
 import {limitsFromEnv} from './limits.mjs';
+import {homeAnswer,portfolioAnswer} from '../fund-link.mjs';
 
 const alice={accountId:'yeet-privy-alice',clientId:'https://chatgpt.com/oauth/client.json'};
 const bob={accountId:'yeet-privy-bob',clientId:alice.clientId};
@@ -275,7 +276,7 @@ test('B-1 wallet checks at the tap: BALANCE_LOW and WALLET_NOT_READY; yeet_home 
  signer.signerState='granted';
  await code(exec(engine,alice,p),'BALANCE_LOW');
  balances.usdcRaw=1_000_000n;
- const home=await engine.home(alice);out('yeet_home').parse(home);
+ const home=await engine.home(alice);out('yeet_home').parse(homeAnswer(home));assert.equal(homeAnswer(home).usdc,'1');
  assert.equal(home.ready,'needs_funds');assert.equal(home.wallets.base.usdc,'1');assert.equal(home.xp,null);
  balances.usdcRaw=100_000_000n;
  assert.equal((await engine.home(alice)).ready,'ready');
@@ -330,7 +331,7 @@ test('SKEET: percent of holdings, sold to USDC on Base through the same tap; por
  const wif=CATALOG.find(c=>c.symbol==='WIF');
  const balances=fakeBalances({holdings:[{mint:wif.address,raw:8_000_000n,decimals:6,tokenAccount:'GfBdV2GY25Q5MAfyj9wxX7SiJh8yeJP55sA7WA2jM4fw',tokenProgram:'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'}]});
  const {engine,signer}=await fakeEngine({balances});
- const port=await engine.portfolio(alice);out('yeet_portfolio').parse(port);
+ const port=await engine.portfolio(alice);out('yeet_portfolio').parse(portfolioAnswer(port));assert.doesNotMatch(JSON.stringify(portfolioAnswer(port)),/address/);
  assert.deepEqual(port.solana.holdings.map(h=>[h.symbol,h.amount]),[['WIF','8']]);
  const p=await engine.skeet(alice,{request_id:'s1',legs:[{symbol:'WIF',percent:50}]});
  out('skeet_propose').parse(strip(p));

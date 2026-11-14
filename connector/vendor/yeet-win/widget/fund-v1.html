@@ -469,6 +469,20 @@ h1{margin:0}
 
 .yc.terms .msg{margin:0}.yc.terms .tx{display:inline-block;margin-top:8px}
 .yc.fund .amts{margin-bottom:14px}.yc.fund .btn.cta{text-decoration:none}.yc.fund .note{margin-top:12px}
+/* Add funds: the two choices, then the deposit address (QR, the address in full, Copy, the one network line). */
+.fund-pick{display:grid;gap:10px}.fund-pick.in .btn{animation:popin .5s var(--spring,ease-out) both}.fund-pick.in .btn+.btn{animation-delay:.09s}
+.yc.fund .tabs{margin-bottom:10px}
+.dep{display:flex;gap:12px;align-items:center;padding:12px;margin-bottom:12px;border-radius:18px;background:var(--yc-raise);box-shadow:inset 0 0 0 1px var(--yc-line)}
+.dep.in{animation:arrive .7s both}.dep.in .dep-qr{animation:popin .5s .18s var(--spring,ease-out) both}
+.dep-qr{flex:none;width:112px;height:112px;border-radius:12px;background:#fff}
+.dep-side{min-width:0;display:grid;gap:6px}
+.dep-l{font:600 11.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--yc-mute)}
+.dep-a{font:700 14.5px/1.4 var(--mono);color:var(--yc-fg);overflow-wrap:anywhere;word-break:break-all;-webkit-user-select:all;user-select:all}
+.dep-only{margin:12px 2px 0;font-size:13.5px;line-height:1.45;color:var(--yc-mute)}.dep-only strong{color:var(--yc-fg);font-weight:800}
+.yc.fund .note::before{content:"";display:inline-block;width:7px;height:7px;margin-right:7px;border-radius:50%;background:var(--yc-accent);animation:breathe 1.6s ease-in-out infinite}
+.yc.fund .note[data-role=arrived]::before{background:var(--mint);animation:none}
+.dep-swap{display:block;margin:14px auto 0;padding:4px 6px;border:0;background:none;cursor:pointer}
+@media (prefers-reduced-motion:reduce){.fund-pick.in .btn,.dep.in,.dep.in .dep-qr,.yc.fund .note::before{animation:none}}
 .fine.refresh{flex-wrap:wrap}.fine.refresh .tx{color:var(--yc-accent);font-weight:700}
 .signin{display:grid;gap:8px;margin:0 0 12px;padding:14px;border-radius:18px;background:var(--yc-raise);box-shadow:inset 0 0 0 1px var(--yc-line)}
 .signin strong{font:700 15px var(--disp);color:var(--yc-fg)}.signin .next{text-align:left}.signin .reason{color:var(--rose);font:600 12.5px var(--mono)}
@@ -512,7 +526,7 @@ const BRAND={"logo":{"box":"-40 180 4256 820","d":"M84 990Q45 990,16 984Q-12 979
 const WheelCard=(()=>({logic:{normalizeSpin:()=>null,normalizeLucky:()=>null}}))(window); // src/wheel-card.js: the daily wheel (views home and wheel) and the lucky wheel (view lucky)
 const SIGNING=(()=>null)(null);   // src/trade-signing.js over src/vendor/wallet-request.mjs
 const signerCfg={"app_id":null,"script":null,"page":null};  // {app_id,script,page}: build-time; a result's _meta['yeet/signer'] overrides
-const BUILD="fd6c656404c274fe36a6cf0699a28c6929e49edd";     // the yeet-win commit this template was built from; null for a local build
+const BUILD="a179e4becfbec6bff8b648d97701c6f208aae085";     // the yeet-win commit this template was built from; null for a local build
 const APP={"manage_url":"https://chatgpt.com/plugins","refresh_label":"Refresh YEET in ChatGPT","refresh_steps":"open YEET there, select Refresh, then start a new chat"};         // {manage_url,refresh_label,refresh_steps}: where the person refreshes the app in ChatGPT
 const CONFIRM_KEY='yeet/confirm',SIGNER_KEY='yeet/signer',BUILD_KEY='yeet/build',FAILURE_KEY='yeet/failure';
 const POLL_MS=5000,POLL_MAX=360,SKEW_MS=2000,MAX_PARTS=99,AMOUNT_MAX=25,MORE_USDC='5';
@@ -689,7 +703,7 @@ function kindOf(d){
  if(VIEW==='overview'&&typeof d.username==='string'&&Array.isArray(d.suggestions))return 'overview';
  if(typeof d.proposal_id==='string'&&Array.isArray(d.legs)&&d.totals)return 'basket';
  if(typeof d.trade_id==='string'&&Array.isArray(d.legs))return 'receipt';
- if(d.wallets&&typeof d.ready==='string')return 'home';
+ if(typeof d.ready==='string'&&has(d,'recent_wins'))return 'home';
  if(d.solana&&d.base&&has(d,'priced_at'))return 'portfolio';
  if(Array.isArray(d.rows)&&d.me)return 'leaderboard';
  if(VIEW==='fund'&&Array.isArray(d.presets)&&has(d,'usdc'))return 'fund';
@@ -754,7 +768,7 @@ function show(data,meta){
 function receive(structured,meta,isError,raw){
  if(structured===undefined&&!isError)return;
  const data=isError?(errorEnvelope(raw)||{error:'TEMPORARILY_UNAVAILABLE'}):structured;
- takeSigner(meta);takeAccount(meta);takeBuild(meta);
+ takeSigner(meta);takeAccount(meta);takeBuild(meta);if(VIEW==='fund')takeDeposit(meta);
  const c=meta?.[CONFIRM_KEY];
  const key=JSON.stringify([data,typeof c?.expires_at==='string'?c.expires_at:null,!!isError]);
  if(key===lastKey)return;lastKey=key;
@@ -1557,14 +1571,309 @@ function renderReceipt(t){
  const when=clock(t.updated_at);if(when&&t.status!=='success')c.append(el('p','fine',`Updated ${when}`));
  return c;
 }
-const FUND_POLL_MS=10000,FUND_POLLS=30;
+const QR=(()=>{
+const LEVEL_M = [
+  null,
+  [10, [1, 16]],
+  [16, [1, 28]],
+  [26, [1, 44]],
+  [18, [2, 32]],
+  [24, [2, 43]],
+  [16, [4, 27]],
+  [18, [4, 31]],
+  [22, [2, 38], [2, 39]],
+  [22, [3, 36], [2, 37]],
+  [26, [4, 43], [1, 44]],
+];
+const ALIGN = [null, [], [6, 18], [6, 22], [6, 26], [6, 30], [6, 34], [6, 22, 38], [6, 24, 42], [6, 26, 46], [6, 28, 50]];
+const FORMAT_M = 0; // error correction level M in the format bits
+const QR_MAX_VERSION = 10;
+
+const dataCapacity = (v) => LEVEL_M[v].slice(1).reduce((n, [blocks, size]) => n + blocks * size, 0);
+
+const EXP = new Uint8Array(512);
+const LOG = new Uint8Array(256);
+for (let i = 0, x = 1; i < 255; i++) {
+  EXP[i] = x;
+  LOG[x] = i;
+  x <<= 1;
+  if (x & 0x100) x ^= 0x11d;
+}
+for (let i = 255; i < 512; i++) EXP[i] = EXP[i - 255];
+const mul = (a, b) => (a && b ? EXP[LOG[a] + LOG[b]] : 0);
+
+/** Reed-Solomon error correction codewords for `data` (degree = count). */
+function reedSolomon(data, count) {
+  let gen = [1];
+  for (let i = 0; i < count; i++) {
+    const next = new Array(gen.length + 1).fill(0);
+    for (let j = 0; j < gen.length; j++) {
+      next[j] ^= gen[j];
+      next[j + 1] ^= mul(gen[j], EXP[i]);
+    }
+    gen = next;
+  }
+  const rem = new Array(count).fill(0);
+  for (const byte of data) {
+    const factor = byte ^ rem.shift();
+    rem.push(0);
+    for (let j = 0; j < count; j++) rem[j] ^= mul(gen[j + 1], factor);
+  }
+  return rem;
+}
+
+/** Data codewords for `bytes` in byte mode at version v: mode, count, data, terminator, pad bytes. */
+function codewords(bytes, v) {
+  const bits = [];
+  const put = (value, length) => {
+    for (let i = length - 1; i >= 0; i--) bits.push((value >>> i) & 1);
+  };
+  put(0b0100, 4);
+  put(bytes.length, v < 10 ? 8 : 16);
+  for (const b of bytes) put(b, 8);
+  const capacity = dataCapacity(v) * 8;
+  put(0, Math.min(4, capacity - bits.length));
+  while (bits.length % 8) bits.push(0);
+  const out = [];
+  for (let i = 0; i < bits.length; i += 8) out.push(bits.slice(i, i + 8).reduce((a, b) => (a << 1) | b, 0));
+  for (let pad = 0xec; out.length < dataCapacity(v); pad ^= 0xec ^ 0x11) out.push(pad);
+  return out;
+}
+
+/** Splits into blocks, adds error correction, interleaves. */
+function interleave(data, v) {
+  const [ec, ...groups] = LEVEL_M[v];
+  const blocks = [];
+  let at = 0;
+  for (const [count, size] of groups)
+    for (let b = 0; b < count; b++) {
+      const d = data.slice(at, (at += size));
+      blocks.push({ d, e: reedSolomon(d, ec) });
+    }
+  const out = [];
+  const longest = Math.max(...blocks.map((b) => b.d.length));
+  for (let i = 0; i < longest; i++) for (const b of blocks) if (i < b.d.length) out.push(b.d[i]);
+  for (let i = 0; i < ec; i++) for (const b of blocks) out.push(b.e[i]);
+  return out;
+}
+
+const MASKS = [
+  (x, y) => (x + y) % 2 === 0,
+  (x, y) => y % 2 === 0,
+  (x) => x % 3 === 0,
+  (x, y) => (x + y) % 3 === 0,
+  (x, y) => (Math.floor(x / 3) + Math.floor(y / 2)) % 2 === 0,
+  (x, y) => ((x * y) % 2) + ((x * y) % 3) === 0,
+  (x, y) => (((x * y) % 2) + ((x * y) % 3)) % 2 === 0,
+  (x, y) => (((x + y) % 2) + ((x * y) % 3)) % 2 === 0,
+];
+
+function bch(value, poly, degree) {
+  let rem = value << degree;
+  const top = 31 - Math.clz32(poly);
+  for (let i = 31 - Math.clz32(rem); i >= top; i--) if ((rem >>> i) & 1) rem ^= poly << (i - top);
+  return (value << degree) | rem;
+}
+
+class Grid {
+  constructor(size) {
+    this.size = size;
+    this.dark = new Uint8Array(size * size);
+    this.fixed = new Uint8Array(size * size);
+  }
+  get(x, y) {
+    return this.dark[y * this.size + x];
+  }
+  set(x, y, on, fixed = true) {
+    this.dark[y * this.size + x] = on ? 1 : 0;
+    if (fixed) this.fixed[y * this.size + x] = 1;
+  }
+}
+
+function functionPatterns(g, v) {
+  const n = g.size;
+  for (let i = 0; i < n; i++) {
+    g.set(6, i, i % 2 === 0);
+    g.set(i, 6, i % 2 === 0);
+  }
+  for (const [cx, cy] of [[3, 3], [n - 4, 3], [3, n - 4]])
+    for (let dy = -4; dy <= 4; dy++)
+      for (let dx = -4; dx <= 4; dx++) {
+        const x = cx + dx,
+          y = cy + dy;
+        if (x < 0 || y < 0 || x >= n || y >= n) continue;
+        const d = Math.max(Math.abs(dx), Math.abs(dy));
+        g.set(x, y, d !== 2 && d !== 4);
+      }
+  const pos = ALIGN[v],
+    last = pos.length - 1;
+  for (let i = 0; i <= last; i++)
+    for (let j = 0; j <= last; j++) {
+      if ((i === 0 && j === 0) || (i === 0 && j === last) || (i === last && j === 0)) continue;
+      for (let dy = -2; dy <= 2; dy++)
+        for (let dx = -2; dx <= 2; dx++) g.set(pos[i] + dx, pos[j] + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+    }
+  formatBits(g, 0);
+  if (v >= 7) {
+    const bits = bch(v, 0x1f25, 12);
+    for (let i = 0; i < 18; i++) {
+      const on = (bits >>> i) & 1,
+        a = n - 11 + (i % 3),
+        b = Math.floor(i / 3);
+      g.set(a, b, on);
+      g.set(b, a, on);
+    }
+  }
+}
+
+function formatBits(g, mask) {
+  const n = g.size;
+  const bits = bch((FORMAT_M << 3) | mask, 0x537, 10) ^ 0x5412;
+  const bit = (i) => (bits >>> i) & 1;
+  for (let i = 0; i <= 5; i++) g.set(8, i, bit(i));
+  g.set(8, 7, bit(6));
+  g.set(8, 8, bit(7));
+  g.set(7, 8, bit(8));
+  for (let i = 9; i < 15; i++) g.set(14 - i, 8, bit(i));
+  for (let i = 0; i < 8; i++) g.set(n - 1 - i, 8, bit(i));
+  for (let i = 8; i < 15; i++) g.set(8, n - 15 + i, bit(i));
+  g.set(8, n - 8, 1);
+}
+
+function placeData(g, data) {
+  const n = g.size;
+  let i = 0;
+  for (let right = n - 1; right >= 1; right -= 2) {
+    if (right === 6) right = 5;
+    for (let vert = 0; vert < n; vert++)
+      for (let j = 0; j < 2; j++) {
+        const x = right - j;
+        const y = ((right + 1) & 2) === 0 ? n - 1 - vert : vert;
+        if (g.fixed[y * n + x]) continue;
+        g.set(x, y, i < data.length * 8 ? (data[i >>> 3] >>> (7 - (i & 7))) & 1 : 0, false);
+        i++;
+      }
+  }
+}
+
+function applyMask(g, mask) {
+  const n = g.size,
+    f = MASKS[mask];
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (!g.fixed[y * n + x] && f(x, y)) g.dark[y * n + x] ^= 1;
+}
+
+/** The four penalty rules (runs of five or more, 2x2 blocks, finder-like 1:1:3:1:1 runs with four light, dark share). */
+function penalty(g) {
+  const n = g.size;
+  let points = 0;
+  for (let a = 0; a < n; a++) {
+    let runRow = 0,
+      runCol = 0,
+      lastRow = -1,
+      lastCol = -1,
+      bitsRow = 0,
+      bitsCol = 0;
+    for (let b = 0; b < n; b++) {
+      const r = g.get(b, a),
+        c = g.get(a, b);
+      if (r === lastRow) runRow++;
+      else {
+        if (runRow >= 5) points += 3 + runRow - 5;
+        lastRow = r;
+        runRow = 1;
+      }
+      if (c === lastCol) runCol++;
+      else {
+        if (runCol >= 5) points += 3 + runCol - 5;
+        lastCol = c;
+        runCol = 1;
+      }
+      bitsRow = ((bitsRow << 1) & 0x7ff) | r;
+      bitsCol = ((bitsCol << 1) & 0x7ff) | c;
+      if (b >= 10 && (bitsRow === 0x5d0 || bitsRow === 0x05d)) points += 40;
+      if (b >= 10 && (bitsCol === 0x5d0 || bitsCol === 0x05d)) points += 40;
+    }
+    if (runRow >= 5) points += 3 + runRow - 5;
+    if (runCol >= 5) points += 3 + runCol - 5;
+  }
+  for (let y = 0; y < n - 1; y++)
+    for (let x = 0; x < n - 1; x++) {
+      const s = g.get(x, y) + g.get(x + 1, y) + g.get(x, y + 1) + g.get(x + 1, y + 1);
+      if (s === 0 || s === 4) points += 3;
+    }
+  const dark = g.dark.reduce((a, b) => a + b, 0);
+  points += Math.abs(Math.ceil((dark * 100) / (n * n) / 5) - 10) * 10;
+  return points;
+}
+
+/**
+ * QR code for `text` (UTF-8, byte mode, level M), smallest version that fits. Returns {version, mask, size, rows}
+ * where rows[y][x] is 1 for a dark module. Throws "qr-too-long" above version 10. `mask` forces a mask (tests only).
+ */
+function qrCode(text, { mask: forced } = {}) {
+  if (typeof text !== "string" || !text) throw Error("qr-empty");
+  const bytes = [...new TextEncoder().encode(text)];
+  let v = 1;
+  while (v <= QR_MAX_VERSION && 4 + (v < 10 ? 8 : 16) + bytes.length * 8 > dataCapacity(v) * 8) v++;
+  if (v > QR_MAX_VERSION) throw Error("qr-too-long");
+  const g = new Grid(17 + 4 * v);
+  functionPatterns(g, v);
+  placeData(g, interleave(codewords(bytes, v), v));
+  let best = forced,
+    lowest = Infinity;
+  if (best === undefined)
+    for (let m = 0; m < 8; m++) {
+      applyMask(g, m);
+      formatBits(g, m);
+      const p = penalty(g);
+      applyMask(g, m);
+      if (p < lowest) {
+        lowest = p;
+        best = m;
+      }
+    }
+  applyMask(g, best);
+  formatBits(g, best);
+  const rows = [];
+  for (let y = 0; y < g.size; y++) rows.push(Array.from(g.dark.subarray(y * g.size, (y + 1) * g.size)));
+  return { version: v, mask: best, size: g.size, rows };
+}
+
+/** SVG path data for the dark modules (one subpath per horizontal run), offset by a quiet zone of `quiet` modules. */
+function qrPath(code, quiet = 4) {
+  let d = "";
+  code.rows.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) {
+      if (!row[x]) continue;
+      let w = 1;
+      while (row[x + w]) w++;
+      d += `M${x + quiet} ${y + quiet}h${w}v1h-${w}z`;
+      x += w - 1;
+    }
+  });
+  return d;
+}
+
+return {qrCode,qrPath};})();           // src/vendor/qr.mjs: {qrCode,qrPath}
+const FUND_POLL_MS=10000,FUND_POLLS=30,FUND_POLLS_SEND=60,DEPOSIT_KEY='yeet/deposit';
+const DEPOSIT_NETS={solana:['Solana',/^[1-9A-HJ-NP-Za-km-z]{32,44}$/],base:['Base',/^0x[0-9a-fA-F]{40}$/]};
 let fundPick=null,fundWatch=0,fundTimer=null,fundBusy=false,fundGot=null;
+let fundView,fundDeposit=null,fundNet=null,fundCopied=null,fundCopyTimer=null,fundSeen=null;
+/** The account's own deposit addresses, from the server: [{network,address}], the network a first YEET spends from first. */
+function takeDeposit(meta){
+ const v=meta?.[DEPOSIT_KEY];if(!v||typeof v!=='object'||!Array.isArray(v.networks))return;
+ const list=[];
+ for(const n of v.networks.slice(0,2)){const k=n?.network;if(typeof k==='string'&&Object.hasOwn(DEPOSIT_NETS,k)&&typeof n.address==='string'&&DEPOSIT_NETS[k][1].test(n.address)&&!list.some(x=>x.network===k))list.push({network:k,address:n.address})}
+ if(!list.length)return;
+ fundDeposit={networks:list,first:list.some(x=>x.network===v.default)?v.default:list[0].network};
+}
 function fundHref(url,pick){try{const u=new URL(url);if(pick)u.searchParams.set('amount',pick);return u.href}catch{return url}}
 async function fundRefresh(){
  if(fundBusy||!canCall()||current?.kind!=='fund')return;fundBusy=true;
  let u;try{u=unwrap(await callTool('yeet_fund',{}))}catch{u=null}
  fundBusy=false;
  if(!u||kindOf(u.data)!=='fund'||current?.kind!=='fund')return;
+ takeDeposit(u.meta);
  const was=micro(current.data.usdc),is=micro(u.data.usdc);
  current={kind:'fund',data:u.data};
  if(was!==null&&is!==null&&is>was){
@@ -1577,30 +1886,90 @@ function fundTick(){
  window.clearTimeout(fundTimer);if(fundWatch<=0)return;
  fundTimer=window.setTimeout(async()=>{fundWatch-=1;if(!document.hidden)await fundRefresh();fundTick()},FUND_POLL_MS);
 }
-function fundOpened(){fundGot=null;fundWatch=FUND_POLLS;note=null;fundTick();render()}
-const fundBack=()=>{if(fundWatch>0&&!document.hidden)fundRefresh()};
+function fundWatchFor(polls){fundGot=null;fundWatch=polls;fundTick()}
+function fundOpened(){note=null;fundWatchFor(FUND_POLLS);render()}
+function fundGo(view){fundView=view;note=null;fundCopied=null;if(view==='crypto'&&fundDeposit&&fundGot===null)fundWatchFor(FUND_POLLS_SEND);render()}
+const fundBack=()=>{if((fundWatch>0||(fundView==='crypto'&&fundDeposit&&fundGot===null))&&!document.hidden)fundRefresh()};
 if(VIEW==='fund'){window.addEventListener('focus',fundBack);document.addEventListener('visibilitychange',fundBack)}
+async function copyText(text){
+ try{if(typeof window.navigator?.clipboard?.writeText==='function'){await window.navigator.clipboard.writeText(text);return true}}catch{/* the frame may not be allowed to; the older way follows */}
+ try{const t=el('textarea');t.value=text;t.setAttribute('readonly','');t.style.cssText='position:fixed;top:0;left:0;opacity:0';document.body.append(t);t.select();const ok=document.execCommand('copy');t.remove();return ok===true}catch{return false}
+}
+async function fundCopy(address){
+ const ok=await copyText(address);
+ fundCopied=ok?'ok':'no';window.clearTimeout(fundCopyTimer);fundCopyTimer=window.setTimeout(()=>{fundCopied=null;render()},ok?2000:6000);
+ if(fundGot===null)fundWatchFor(FUND_POLLS_SEND);
+ render();
+}
+function qrFigure(text){
+ try{
+  const code=QR.qrCode(text),box=code.size+8;
+  const s=svg('svg',{viewBox:`0 0 ${box} ${box}`,role:'img','aria-label':'QR code of your YEET deposit address','shape-rendering':'crispEdges'},[svg('rect',{width:box,height:box,fill:'#fff'}),svg('path',{d:QR.qrPath(code,4),fill:'#06071C'})]);
+  s.setAttribute('class','dep-qr');return s;
+ }catch{return null}
+}
+const fundSwap=(text,view)=>{const b=el('button','tx dep-swap',text);b.type='button';b.dataset.role=`to-${view}`;b.onclick=()=>fundGo(view);return b};
 function renderFund(d){
  const c=card('fund','Add funds',null);
+ if(fundView===undefined){fundView=d.method==='crypto'||d.method==='card'?d.method:null;if(fundView==='crypto'&&fundDeposit)fundWatchFor(FUND_POLLS_SEND)}
  const tot=el('div','bag-tot');tot.append(mark(el('span','v num',money(d.usdc)??'—'),'usdc',true),el('span','next','USDC'));c.append(tot);
- const presets=(Array.isArray(d.presets)?d.presets:[]).filter(v=>typeof v==='string'&&micro(v)!==null).slice(0,6);
- if(fundPick===null||!presets.includes(fundPick))fundPick=presets.includes('25')?'25':presets[0]??null;
- if(presets.length){const box=mark(el('div','amts'),'amts');box.setAttribute('role','group');box.setAttribute('aria-label','Amount to add');
-  for(const v of presets){const x=el('button',null,`$${v}`);x.type='button';x.dataset.preset=v;x.setAttribute('aria-pressed',String(v===fundPick));x.onclick=()=>{fundPick=v;render()};box.append(x)}c.append(box)}
  const url=fundUrl(d.fund_url);
- if(url){
-  const a=el('a','btn yeet lg wide run cta');const bl=el('span','bl');bl.append(el('span',null,fundPick?`Add $${fundPick}`:'Add funds'),use('i-arrow','ic'));a.append(bl);
-  a.href=fundHref(url,fundPick);a.target='_blank';a.rel='noopener noreferrer';a.dataset.role='fund';
-  a.onclick=async e=>{if(host.canOpen||typeof window.openai?.openExternal==='function'){e.preventDefault();try{await openLink(a.href)}catch{note='This link couldn’t open here.';render();return}}fundOpened()};
-  c.append(a);
- }
  let said=null;
  if(fundGot!==null)said=`${usdMicro(fundGot)} arrived. You’re ready to YEET.`;
  else if(note)said=note;
- else if(fundWatch>0)said='Finish on the YEET page, then come back. This card updates when your USDC arrives.';
- else if(!url)said='Ask in the chat for the funding page.';
- if(said){const n=noteLine(said);if(fundGot!==null)n.dataset.role='arrived';c.append(n)}
- c.append(el('p','fine','Send USDC or pay by card on the YEET page.'));
+ const sayNote=()=>{if(said){const n=noteLine(said);if(fundGot!==null)n.dataset.role='arrived';c.append(n)}};
+ if(fundView==='crypto'){
+  const nets=fundDeposit?.networks??[];
+  if(!nets.some(n=>n.network===fundNet))fundNet=fundDeposit?.first??null;
+ }
+ const seen=`${fundView}:${fundNet}`,fresh=fundSeen!==seen&&!REDUCED;fundSeen=seen;
+ if(fundView==='crypto'){
+  const nets=fundDeposit?.networks??[],at=nets.find(n=>n.network===fundNet)??null;
+  if(!at)c.append(mark(el('p','msg','Your YEET deposit address isn’t available right now. Ask in the chat to try again.'),'dep-none'));
+  else{
+   const name=DEPOSIT_NETS[at.network][0];
+   if(nets.length>1){
+    const tabs=mark(el('div','tabs'),'nets');tabs.setAttribute('role','group');tabs.setAttribute('aria-label','Network to send on');
+    for(const n of nets){const x=el('button',null,DEPOSIT_NETS[n.network][0]);x.type='button';x.dataset.network=n.network;x.setAttribute('aria-pressed',String(n.network===at.network));x.onclick=()=>{fundNet=n.network;fundCopied=null;render()};tabs.append(x)}
+    c.append(tabs);
+   }
+   const box=mark(el('div',`dep${fresh?' in':''}`),'dep');box.dataset.network=at.network;
+   const qr=qrFigure(at.address);if(qr)box.append(qr);
+   const side=el('div','dep-side'),a=el('code','dep-a',at.address);a.dataset.role='address';a.setAttribute('aria-label',`Your YEET deposit address on ${name}`);
+   side.append(el('span','dep-l','Your YEET deposit address'),a);box.append(side);c.append(box);
+   const copy=button('yeet lg wide run cta',fundCopied==='ok'?'Copied':'Copy address',()=>fundCopy(at.address),fundCopied==='ok'?'i-check':null);copy.dataset.role='copy';c.append(copy);
+   const live=el('span','sr',fundCopied==='ok'?'Address copied':'');live.setAttribute('role','status');c.append(live);
+   if(fundCopied==='no')c.append(mark(el('p','hold-hint warn','Copying isn’t allowed here. Press and hold the address to copy it.'),'copy-no',true));
+   const only=mark(el('p','dep-only'),'only',true);only.dataset.role='network-line';
+   only.append(el('strong',null,`Send USDC on ${name} only.`),document.createTextNode(' Other networks or coins sent here are lost.'));c.append(only);
+   if(!said)said='This card updates when your USDC arrives.';
+  }
+  sayNote();
+  c.append(fundSwap('Pay by card instead','card'));
+ }else if(fundView==='card'){
+  const presets=(Array.isArray(d.presets)?d.presets:[]).filter(v=>typeof v==='string'&&micro(v)!==null).slice(0,6);
+  if(fundPick===null||!presets.includes(fundPick))fundPick=presets.includes('25')?'25':presets[0]??null;
+  if(presets.length){const box=mark(el('div','amts'),'amts');box.setAttribute('role','group');box.setAttribute('aria-label','Amount to add');
+   for(const v of presets){const x=el('button',null,`$${v}`);x.type='button';x.dataset.preset=v;x.setAttribute('aria-pressed',String(v===fundPick));x.onclick=()=>{fundPick=v;render()};box.append(x)}c.append(box)}
+  if(url){
+   const a=el('a','btn yeet lg wide run cta');const bl=el('span','bl');bl.append(el('span',null,fundPick?`Pay $${fundPick} by card`:'Pay by card'),use('i-arrow','ic'));a.append(bl);
+   a.href=fundHref(url,fundPick);a.target='_blank';a.rel='noopener noreferrer';a.dataset.role='fund';
+   a.onclick=async e=>{if(host.canOpen||typeof window.openai?.openExternal==='function'){e.preventDefault();try{await openLink(a.href)}catch{note='This link couldn’t open here.';render();return}}fundOpened()};
+   c.append(a);
+  }
+  if(!said&&fundWatch>0)said='Finish on the YEET page, then come back. This card updates when your USDC arrives.';
+  else if(!said&&!url)said='Ask in the chat for the funding page.';
+  sayNote();
+  c.append(el('p','fine','Opens the YEET page, where you pay by card.'));
+  c.append(fundSwap('Send USDC instead','crypto'));
+ }else{
+  const pick=mark(el('div',`fund-pick${fresh?' in':''}`),'pick');
+  const send=button('yeet lg wide run cta','Send USDC',()=>fundGo('crypto'),'i-send');send.dataset.role='pick-crypto';
+  const pay=button('skeet lg wide','Pay by card',()=>fundGo('card'),'i-arrow');pay.dataset.role='pick-card';
+  pick.append(send,pay);c.append(pick);
+  sayNote();
+  c.append(el('p','fine','Send USDC to your YEET deposit address, or pay by card on the YEET page.'));
+ }
  return c;
 }
 /** The daily check-in card: the wheel card alone (XP, streak, stamps, the spin). */

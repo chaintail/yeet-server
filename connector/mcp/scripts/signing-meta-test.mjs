@@ -20,7 +20,7 @@ const confirm={code:'c'.repeat(43),expires_at:'2026-11-12T00:01:00Z'};
 const tradeAnswer={trade_id:'t_abcdefghij0123456789',proposal_id:proposal.proposal_id,direction:'yeet',status:'awaiting_signature',legs:[{symbol:'WIF',deposit_address:'D'.repeat(44),tx_hash:null,explorer_url:null,status:'awaiting_signature'}],sign_requests:[]};
 const statusAnswer={trade_id:tradeAnswer.trade_id,direction:'yeet',status:'signing',legs:[{symbol:'WIF',status:'PENDING_DEPOSIT',amount_in:'20',amount_out:null,origin_tx:null,destination_tx:null,refund_reason:null}],received:[],updated_at:'2026-11-12T00:00:05Z',xp_award:null};
 const submitAnswer={trade_id:tradeAnswer.trade_id,status:'submitted',legs:[{leg:0,symbol:'WIF',send_status:'signing',tx_hash:null}]};
-const home={wallets:{base:{address:'0x'+'a'.repeat(40),usdc:'20'},solana:{address:'S'.repeat(44)}},ready:'ready',xp:null,recent_wins:[],limits};
+const home={usdc:'20',ready:'ready',xp:null,recent_wins:[],limits};
 const overviewAnswer={username:'Lucky Otter 42',usdc:'20',xp:5,tier:'Noob',streak_days:1,checkin_open:true,holdings_count:0,top_winner:null,trading:'live',suggestions:[{id:'checkin',label:'Do your daily check-in',say:'Do my daily check-in'}]};
 const core=async route=>{
  if(route==='/proposals'||route==='/proposals/skeet'||/\/quote$/.test(route))return {...proposal,confirm};
@@ -29,7 +29,7 @@ const core=async route=>{
  if(/^\/trades\/t_/.test(route))return statusAnswer;
  if(route==='/home')return home;
  if(route==='/overview')return overviewAnswer;
- if(route==='/portfolio')return {solana:{address:'S'.repeat(44),holdings:[]},base:{address:'0x'+'a'.repeat(40),usdc:'20'},total_usd:'20',priced_at:'2026-11-12T00:00:00Z'};
+ if(route==='/portfolio')return {solana:{holdings:[]},base:{usdc:'20'},total_usd:'20',priced_at:'2026-11-12T00:00:00Z'};
  throw {error:'TEMPORARILY_UNAVAILABLE'};
 };
 async function connect(env){
@@ -194,4 +194,48 @@ test('the trade page hint (core card_hint): on the card-only signer page address
    assert.doesNotMatch(JSON.stringify(r),/card_hint/);
   }finally{await s.close()}
  }
+});
+
+// The Add funds card's deposit addresses: card-only `_meta["yeet/deposit"]` on yeet_fund, never where the model reads.
+test('yeet_fund: the deposit addresses go to _meta only, well-formed or not at all; method rides back; a core answer with an address is never passed on',async()=>{
+ const {depositMeta,DEPOSIT_META_KEY}=await import('../tool-registration.mjs');
+ const SOL='9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',BASE='0x5a1C0ffee0D15ea5e0000000000000000000B45E';
+ const good={default:'solana',networks:[{network:'solana',address:SOL},{network:'base',address:BASE}]};
+ assert.equal(DEPOSIT_META_KEY,'yeet/deposit');
+ assert.deepEqual(depositMeta(good),good);assert.deepEqual(depositMeta({...good,extra:1,networks:good.networks.map(n=>({...n,walletId:'w'}))}),good,'only network and address');
+ for(const bad of [null,{},{default:'solana',networks:[]},{default:'base',networks:[{network:'solana',address:SOL}]},{default:'solana',networks:[{network:'solana',address:BASE}]},
+  {default:'base',networks:[{network:'base',address:SOL}]},{default:'solana',networks:[{network:'solana',address:SOL},{network:'solana',address:SOL}]},
+  {default:'solana',networks:[{network:'solana',address:SOL},{network:'tron',address:BASE}]},{default:'solana',networks:[{network:'solana',address:`${SOL.slice(0,6)}…${SOL.slice(-4)}`}]}])
+  assert.equal(depositMeta(bad),undefined,JSON.stringify(bad));
+ let fund={usdc:'3.2',presets:['10','25','50','100'],fund_url:'https://chatgpt.yeet.win/fund?h=v1.x',card_deposit:good};
+ const leaky=async route=>{
+  if(route==='/fund')return fund;
+  if(route==='/home')return {...home,card_deposit:good,wallets:{base:{address:BASE,usdc:'20'},solana:{address:SOL}}};
+  if(route==='/portfolio')return {solana:{address:SOL,holdings:[]},base:{address:BASE,usdc:'20'},total_usd:'20',priced_at:'2026-11-12T00:00:00Z'};
+  return core(route);
+ };
+ const server=createMcpServer({token:{scope:allScopes.join(' ')},callCore:leaky,env:ENV});
+ const client=new Client({name:'deposit-test',version:'1'});const [a,b]=InMemoryTransport.createLinkedPair();
+ await server.connect(a);await client.connect(b);
+ const reads=r=>JSON.stringify([r.structuredContent??null,r.content??null]);
+ const clean=(r,label)=>assert.doesNotMatch(reads(r),/9WzDXw|YtAWWM|0x5a1C|B45E|card_deposit|yeet\/deposit/,`${label}: no part of an address where the model reads`);
+ try{
+  for(const [args,method] of [[{},undefined],[{method:'crypto'},'crypto'],[{method:'card'},'card']]){
+   const r=await client.callTool({name:'yeet_fund',arguments:args});
+   assert.equal(r.isError,undefined,JSON.stringify(r.content));
+   assert.deepEqual(r._meta[DEPOSIT_META_KEY],good);assert.equal(r.structuredContent.method,method);clean(r,`yeet_fund ${method}`);
+   assert.deepEqual(Object.keys(r.structuredContent).sort(),['fund_url','guidance','presets','usdc',...(method?['method']:[])].sort());
+  }
+  assert.equal((await client.callTool({name:'yeet_fund',arguments:{method:'bank'}})).isError,true);
+  // A block that is not exactly right is dropped whole: the card then says the address is not available.
+  fund={...fund,card_deposit:{default:'solana',networks:[{network:'solana',address:SOL},{network:'base',address:SOL}]}};
+  const dropped=await client.callTool({name:'yeet_fund',arguments:{method:'crypto'}});
+  assert.equal(dropped.isError,undefined);assert.equal(dropped._meta[DEPOSIT_META_KEY],undefined);clean(dropped,'a malformed block');
+  // Only yeet_fund carries it; a home answer that still named wallets is cut to the contract; a portfolio answer
+  // with an address fails closed (no result at all rather than an address).
+  const h=await client.callTool({name:'yeet_home',arguments:{}});
+  assert.equal(h.isError,undefined,JSON.stringify(h.content));assert.equal(h._meta?.[DEPOSIT_META_KEY],undefined);assert.equal('wallets' in h.structuredContent,false);clean(h,'yeet_home');
+  const p=await client.callTool({name:'yeet_portfolio',arguments:{}});
+  assert.equal(p.isError,true);assert.equal(p.structuredContent,undefined);clean(p,'yeet_portfolio');
+ }finally{await client.close();await server.close()}
 });

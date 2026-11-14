@@ -31,6 +31,7 @@ export const COPY=Object.freeze({
   lead_checkin:", YEET yeet_overview.lead_checkin.",
   lead_paused:", YEET yeet_overview.lead_paused.",
  },
+
  yeet_home:{
   paused:"YEET yeet_home.paused.",
   paused_no_wheel:"YEET yeet_home.paused_no_wheel.",
@@ -112,9 +113,9 @@ export const COPY=Object.freeze({
  },
 
  yeet_fund:{
-  zero:"YEET yeet_fund.zero.",
-  some:"YEET yeet_fund.some: {usdc}.",
-  unread:"YEET yeet_fund.unread.",
+  choose:"YEET yeet_fund.choose.",
+  crypto:"YEET yeet_fund.crypto.",
+  card:"YEET yeet_fund.card.",
  },
 
  yeet_checkin:{
@@ -214,7 +215,7 @@ function home(r,ctx){
   if(typeof f.base_usdc==='string'&&typeof f.solana_usdc==='string')return fill(c.ready_funding,{base:f.base_usdc,solana:f.solana_usdc,network:netName(f.chosen)});
   if(positive(usdcOf(f,f.chosen)))return fill(c.ready_funding_unread,{usdc:usdcOf(f,f.chosen),network:netName(f.chosen),other:otherOf(f.chosen)});
  }
- const usdc=r.wallets?.base?.usdc;
+ const usdc=r.usdc;
  return positive(usdc)?fill(c.ready_usdc,{usdc}):c.ready;
 }
 const amount=v=>typeof v==='string'&&/^\d+(\.\d+)?$/.test(v);
@@ -314,7 +315,7 @@ const BY_TOOL={
   if(r.board&&r.board!=='xp')return empty?c.result_empty:Number.isInteger(r.me?.rank)?fill(c.result_ranked,{rank:r.me.rank}):c.result_unranked;
   return Number.isInteger(r.me?.rank)?fill(c.ranked,{rank:r.me.rank,xp:r.me.xp}):c.unranked;
  },
- yeet_fund:r=>r.usdc===null?COPY.yeet_fund.unread:positive(r.usdc)?fill(COPY.yeet_fund.some,{usdc:r.usdc}):COPY.yeet_fund.zero,
+ yeet_fund:r=>r.method==='crypto'?COPY.yeet_fund.crypto:r.method==='card'?COPY.yeet_fund.card:COPY.yeet_fund.choose,
  yeet_checkin:r=>{const c=r.checkin??{},left=Number.isInteger(c.spins_available)?c.spins_available:c.spin_available?1:0;return left>0?COPY.yeet_checkin.open:fill(COPY.yeet_checkin.done,{days:c.streak_days,s:plural(c.streak_days)})},
  daily_spin:spin,
  yeet_set_username:r=>fill(COPY.yeet_set_username.set,{username:r.username}),

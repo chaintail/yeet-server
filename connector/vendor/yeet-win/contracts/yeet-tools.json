@@ -1777,6 +1777,61 @@
         "suggestions"
       ],
       "additionalProperties": false
+    },
+    "deposit": {
+      "type": "object",
+      "description": "Card only (result _meta, never structuredContent or content): the connected account’s own YEET deposit addresses, one per network it can be funded on today. default is the network a first YEET spends from; the Add funds card opens on it. The model never reads an address.",
+      "properties": {
+        "default": {
+          "$ref": "#/$defs/network"
+        },
+        "networks": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "network": {
+                    "const": "solana"
+                  },
+                  "address": {
+                    "$ref": "#/$defs/solana_address"
+                  }
+                },
+                "required": [
+                  "network",
+                  "address"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "network": {
+                    "const": "base"
+                  },
+                  "address": {
+                    "$ref": "#/$defs/base_address"
+                  }
+                },
+                "required": [
+                  "network",
+                  "address"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "default",
+        "networks"
+      ],
+      "additionalProperties": false
     }
   },
   "tools": {
@@ -1794,7 +1849,7 @@
           "app_version": {
             "type": "string",
             "enum": [
-              "tools-3"
+              "tools-4"
             ],
             "description": "The tools version this tool list was built for."
           },
@@ -2053,50 +2108,16 @@
       "outputSchema": {
         "type": "object",
         "properties": {
-          "wallets": {
-            "type": "object",
-            "properties": {
-              "base": {
-                "type": "object",
-                "properties": {
-                  "address": {
-                    "$ref": "#/$defs/base_address"
-                  },
-                  "usdc": {
-                    "anyOf": [
-                      {
-                        "$ref": "#/$defs/usdc"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  }
-                },
-                "required": [
-                  "address",
-                  "usdc"
-                ],
-                "additionalProperties": false
+          "usdc": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/usdc"
               },
-              "solana": {
-                "type": "object",
-                "properties": {
-                  "address": {
-                    "$ref": "#/$defs/solana_address"
-                  }
-                },
-                "required": [
-                  "address"
-                ],
-                "additionalProperties": false
+              {
+                "type": "null"
               }
-            },
-            "required": [
-              "base",
-              "solana"
             ],
-            "additionalProperties": false
+            "description": "All the USDC the person can YEET with, as one number. null: it could not be read just now."
           },
           "funding": {
             "$ref": "#/$defs/funding"
@@ -2111,7 +2132,7 @@
           },
           "fund_url": {
             "$ref": "#/$defs/https_url",
-            "description": "Where the person adds USDC: a transfer on Base or on Solana, or by card. The card opens it from its Add funds button while ready is needs_funds."
+            "description": "The YEET funding page. The card opens it from its Add funds button while ready is needs_funds."
           },
           "xp": {
             "anyOf": [
@@ -2158,7 +2179,7 @@
           }
         },
         "required": [
-          "wallets",
+          "usdc",
           "ready",
           "xp",
           "recent_wins"
@@ -2948,9 +2969,6 @@
           "solana": {
             "type": "object",
             "properties": {
-              "address": {
-                "$ref": "#/$defs/solana_address"
-              },
               "holdings": {
                 "type": "array",
                 "items": {
@@ -2985,7 +3003,6 @@
               }
             },
             "required": [
-              "address",
               "holdings"
             ],
             "additionalProperties": false
@@ -2993,9 +3010,6 @@
           "base": {
             "type": "object",
             "properties": {
-              "address": {
-                "$ref": "#/$defs/base_address"
-              },
               "usdc": {
                 "anyOf": [
                   {
@@ -3008,7 +3022,6 @@
               }
             },
             "required": [
-              "address",
               "usdc"
             ],
             "additionalProperties": false
@@ -3066,6 +3079,13 @@
       "inputSchema": {
         "type": "object",
         "properties": {
+          "method": {
+            "enum": [
+              "crypto",
+              "card"
+            ],
+            "description": "How the person wants to add money: crypto (send USDC to their YEET deposit address) or card (pay by card on the YEET page). Leave it out when they have not chosen: the card then shows both choices."
+          },
           "card_build": {
             "$ref": "#/$defs/card_build"
           }
@@ -3095,11 +3115,18 @@
             "minItems": 1,
             "maxItems": 6,
             "uniqueItems": true,
-            "description": "Amounts the funding page offers, in USDC."
+            "description": "Amounts the card payment offers, in USDC."
+          },
+          "method": {
+            "enum": [
+              "crypto",
+              "card"
+            ],
+            "description": "The view the card opens on: the method the tool was called with. Left out: the card shows both choices."
           },
           "fund_url": {
             "$ref": "#/$defs/https_url",
-            "description": "The YEET funding page. The card opens it; with ?amount= it starts on that preset."
+            "description": "The YEET funding page, for a card payment. The card opens it; with ?amount= it starts on that preset."
           },
           "guidance": {
             "$ref": "#/$defs/guidance"
@@ -3110,6 +3137,11 @@
           "presets"
         ],
         "additionalProperties": false
+      },
+      "resultMeta": {
+        "yeet/deposit": {
+          "$ref": "#/$defs/deposit"
+        }
       },
       "annotations": {
         "readOnlyHint": true,
@@ -3860,7 +3892,7 @@
     "home": {
       "uri": "ui://yeet/home-v1.html",
       "title": "YEET home",
-      "description": "Wallet readiness, USDC balance, XP, streak and the daily spin."
+      "description": "Account readiness, USDC balance, XP, streak and the daily spin."
     },
     "basket": {
       "uri": "ui://yeet/basket-v1.html",
@@ -3895,7 +3927,7 @@
     "fund": {
       "uri": "ui://yeet/fund-v1.html",
       "title": "Add funds",
-      "description": "The person’s USDC as one number, amount presets and one button that opens the YEET funding page."
+      "description": "Add funds: two choices. Send USDC shows the person’s YEET deposit address in full with a Copy button, a QR code and the one network to send on; Pay by card has amount presets and the button that opens the YEET funding page. The card reports back when USDC arrives."
     },
     "referral": {
       "uri": "ui://yeet/referral-v1.html",
@@ -3908,15 +3940,18 @@
     "card": "yeet/card",
     "build": "yeet/build",
     "account": "yeet/account",
-    "failure": "yeet/failure"
+    "failure": "yeet/failure",
+    "deposit": "yeet/deposit"
   },
   "x-yeet-app": {
     "manage_url": "https://chatgpt.com/plugins",
     "refresh_label": "Refresh YEET in ChatGPT",
     "refresh_steps": "open YEET there, select Refresh, then start a new chat",
-    "tools_version": "tools-3",
-    "tools_versions_past": [],
-    "tools_hash": "0b5c12071afc0c1d2e12694e571a5a56de47d9d33cf54137771dd6d2e872d0ad"
+    "tools_version": "tools-4",
+    "tools_versions_past": [
+      "tools-3"
+    ],
+    "tools_hash": "0648a186feec7b1c460e64b29ef7c4bf3bef00f36356b6da942c367cd3d31642"
   },
   "x-yeet-spin": {
     "base_xp": 5,

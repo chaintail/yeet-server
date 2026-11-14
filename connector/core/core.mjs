@@ -12,7 +12,7 @@ import {xpRuntime,p2On,homeXp,homeXpKeys,checkSpinTable} from './xp/xp.mjs';
 import {createAvailability,quoteProbe} from './xp/availability.mjs';
 import {z} from 'zod';
 import {toolSchemas,zodSchema,contract} from '../mcp/tool-contract.mjs';
-import {homeWithFundUrl,failureWithFundUrl,fundAnswer,fundUrlWithHint} from './fund-link.mjs';
+import {homeWithFundUrl,failureWithFundUrl,fundAnswer,fundUrlWithHint,homeAnswer,portfolioAnswer,depositFor} from './fund-link.mjs';
 import {versionInfo} from './version.mjs';
 import {overview,totalUsdc,welcomeSuggestions} from './overview.mjs';
 import {winnerOf} from './trade/pnl.mjs';
@@ -275,7 +275,8 @@ function trade(tool,fn){
 }
 app.get('/home',trade('yeet_home',async(e,ctx)=>{
  const raw=await e.home(ctx);
- const home=homeWithFundUrl(raw,raw?.ready==='needs_funds'?await fundLink(ctx.accountId):undefined);
+ // No wallets and no address in the answer (fund-link.mjs homeAnswer): one USDC number.
+ const home=homeAnswer(homeWithFundUrl(raw,raw?.ready==='needs_funds'?await fundLink(ctx.accountId):undefined));
  if(!p2On())return home;
  return {...home,xp:xpSafe('home',()=>homeXp(xpRuntime().summary(ctx.accountId),HOME_XP_KEYS),null),recent_wins:xpSafe('wins',()=>xpRuntime().recentWins(),[])};
 }));
@@ -301,7 +302,10 @@ app.get('/overview',trade('yeet_overview',(e,ctx)=>overviewFor(e,ctx,{card:true}
 // yeet_fund: the funding card. All USDC as one number (read fresh: the card asks again after the funding page).
 app.get('/fund',trade('yeet_fund',async(e,ctx)=>{
  const home=await e.home(ctx),f=home.funding;
- return fundAnswer(f?totalUsdc(f.base_usdc,f.solana_usdc):totalUsdc(home.wallets?.base?.usdc),await fundLink(ctx.accountId));
+ // The account's own deposit addresses, for the card only (card_deposit; the connector moves it to _meta). They are
+ // the bound account's (ctx.accountId is the token's subject), read by e.home from the wallet directory.
+ const deposit=depositFor(home.wallets,e.funding?.deposits?.());
+ return {...fundAnswer(f?totalUsdc(f.base_usdc,f.solana_usdc):totalUsdc(home.wallets?.base?.usdc),await fundLink(ctx.accountId)),...(deposit?{card_deposit:deposit}:{})};
 }));
 // lucky_id (optional): the caller's own lucky wheel, spun today, else INVALID_ARGUMENT. The proposal is linked to it;
 // the bonus is decided when the trade settles (lucky.settle), since yeet_quote can still change coins and amount.
@@ -328,7 +332,7 @@ app.get('/trades/:id',trade(null,statusCard((e,ctx,_a,q)=>{
  if(view.direction==='yeet')xpSafe('lucky_status',()=>luckyClaim(e,ctx.accountId,view.trade_id,view));
  return {...view,xp_award:xpSafe('trade',()=>xpRuntime().tradeAward(ctx.accountId,view),null)};
 })));
-app.get('/portfolio',trade('yeet_portfolio',(e,ctx)=>e.portfolio(ctx)));
+app.get('/portfolio',trade('yeet_portfolio',async(e,ctx)=>portfolioAnswer(await e.portfolio(ctx))));
 // The first-party signing page (as/sign-page.mjs, CARD-SIGNING.md section 2.5). Only the sign-in server reaches these,
 // and only after it verified the person's Privy access token and looked up the account already linked to it: that
 // account is `x-yeet-subject` (checked to exist and not be suspended above). The engine then answers only for a trade

@@ -2,6 +2,12 @@
 
 What the page does now, what Apple Pay and Google Pay need, and what a white-label card flow would take.
 
+## Where a person starts
+
+In ChatGPT the Add funds card comes first (docs/JOURNEYS.md "Adding money"). Sending USDC is done from the card itself:
+it shows the person's YEET deposit address with Copy and a QR code. The card's "Pay by card" button opens the page
+described here.
+
 ## What the page offers
 
 1. **Send USDC** to the person's own YEET wallet on Base or Solana (address, QR code, wallet links, live balance). Unchanged, and first.

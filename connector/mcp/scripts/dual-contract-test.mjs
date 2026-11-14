@@ -61,9 +61,14 @@ test('model-visible catalog: titles and descriptions for every tool; data-not-in
  assert.deepEqual(Object.keys(titles),ALL);assert.deepEqual(Object.keys(descriptions),ALL);
  assert.match(instructions,/YEET/);
  assert.match(instructions,/YEET/);
- // 1400 before the terms sentence (the person accepts the terms in the chat; mcp/instructions.mjs); 2000 before the
- // sentence on why limits are low (beta and the judging period).
- assert.ok(instructions.length>=450&&instructions.length<=2074,`instructions length ${instructions.length}`);
+ 
+ 
+ 
+ assert.ok(instructions.length>=450&&instructions.length<=2450,`instructions length ${instructions.length}`);
+ assert.match(instructions,/YEET/);
+ assert.match(instructions,/YEET/);
+ assert.doesNotMatch(descriptions.yeet_home,/wallet/i);assert.match(descriptions.yeet_home,/YEET/);
+ assert.match(descriptions.yeet_fund,/YEET/);assert.match(descriptions.yeet_fund,/YEET/);
  // Owner, voice 39611: the overview is the entry; a basket only after the person brought up a coin.
  assert.match(instructions,/YEET/);
  assert.match(instructions,/YEET/);

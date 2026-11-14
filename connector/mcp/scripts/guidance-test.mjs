@@ -17,6 +17,8 @@ import {failure,withUserMessage} from '../../core/failure.mjs';
 import {utcDay} from '../../core/trade/util.mjs';
 import {instructions} from '../instructions.mjs';
 
+const ASK_FUND="YEET ASK_FUND.";
+
 const ALL_P2={tools:new Set(Object.keys(contract.tools))};
 const P01={tools:new Set(Object.entries(contract.tools).filter(([,t])=>t.priority!=='P2').map(([n])=>n))};
 const entries=Object.entries(COPY).flatMap(([group,v])=>Object.entries(v).map(([key,text])=>[`${group}.${key}`,text]));
@@ -68,25 +70,24 @@ function noInventedNumbers(label,text,result,templateKeys){
 }
 const g=(name,r,ctx=ALL_P2)=>{const out=guidanceFor(name,r,ctx);rules(name,out,{risk:/go to zero/.test(out)});noInventedNumbers(name,out,r,Object.values(COPY).flatMap(Object.values));return out};
 
-const wallets=(usdc='0')=>({base:{address:'0x'+'1'.repeat(40),usdc},solana:{address:'1'.repeat(44)}});
 const xp=(over={})=>({total:5,streak_days:1,spin_available:true,spins_available:1,...over});
 test('yeet_home: paused, wallet set-up, no USDC (with and without a spin), ready (spin, USDC)',()=>{
- assert.equal(g('yeet_home',{wallets:wallets(),ready:'paused',xp:xp(),recent_wins:[]}),COPY.yeet_home.paused);
- assert.equal(g('yeet_home',{wallets:wallets(),ready:'paused',xp:null,recent_wins:[]},P01),COPY.yeet_home.paused_no_wheel);
- assert.equal(g('yeet_home',{wallets:wallets(),ready:'needs_signer',xp:xp(),recent_wins:[]}),COPY.yeet_home.needs_signer);
- const fund=g('yeet_home',{wallets:wallets('0'),ready:'needs_funds',fund_url:'https://chatgpt.yeet.win/fund',xp:xp(),recent_wins:[]});
+ assert.equal(g('yeet_home',{usdc:'0',ready:'paused',xp:xp(),recent_wins:[]}),COPY.yeet_home.paused);
+ assert.equal(g('yeet_home',{usdc:'0',ready:'paused',xp:null,recent_wins:[]},P01),COPY.yeet_home.paused_no_wheel);
+ assert.equal(g('yeet_home',{usdc:'0',ready:'needs_signer',xp:xp(),recent_wins:[]}),COPY.yeet_home.needs_signer);
+ const fund=g('yeet_home',{usdc:'0',ready:'needs_funds',fund_url:'https://chatgpt.yeet.win/fund',xp:xp(),recent_wins:[]});
  assert.equal(fund,COPY.yeet_home.needs_funds_spin);assert.match(fund,/Add funds/);assert.match(fund,/daily wheel is free/);
- assert.equal(g('yeet_home',{wallets:wallets('0'),ready:'needs_funds',xp:xp({spin_available:false,spins_available:0}),recent_wins:[]}),COPY.yeet_home.needs_funds);
- assert.equal(g('yeet_home',{wallets:wallets('0'),ready:'needs_funds',xp:null,recent_wins:[]},P01),COPY.yeet_home.needs_funds_no_wheel);
- // Zero balance: the model may give the YEET wallet address and its network for a direct USDC transfer, or Add funds.
- const direct="YEET direct.";
+ assert.equal(g('yeet_home',{usdc:'0',ready:'needs_funds',xp:xp({spin_available:false,spins_available:0}),recent_wins:[]}),COPY.yeet_home.needs_funds);
+ assert.equal(g('yeet_home',{usdc:'0',ready:'needs_funds',xp:null,recent_wins:[]},P01),COPY.yeet_home.needs_funds_no_wheel);
+ // Zero balance: one question with two choices, then yeet_fund with the method. Never an address, never a network.
  for(const k of ['needs_funds_spin','needs_funds','needs_funds_no_wheel']){
-  assert.ok(COPY.yeet_home[k].includes(` ${direct}`),k);assert.match(COPY.yeet_home[k],/YEET/,k);
+  assert.ok(COPY.yeet_home[k].startsWith(`YEET text: ${ASK_FUND}.`),k);
+  assert.doesNotMatch(COPY.yeet_home[k],/wallet|Base|Solana|from wallets|give them/i,k);
  }
- for(const k of ['paused','needs_signer','ready_spin','ready_usdc','ready'])assert.doesNotMatch(COPY.yeet_home[k],/direct USDC transfer/,k);
- assert.equal(g('yeet_home',{wallets:wallets('40'),ready:'ready',xp:xp(),recent_wins:[]}),COPY.yeet_home.ready_spin);
- assert.equal(g('yeet_home',{wallets:wallets('40'),ready:'ready',xp:xp({spin_available:false,spins_available:0}),recent_wins:[]}),"YEET text.");
- assert.equal(g('yeet_home',{wallets:wallets(null),ready:'ready',xp:null,recent_wins:[]},P01),COPY.yeet_home.ready);
+ for(const k of ['paused','needs_signer','ready_spin','ready_usdc','ready'])assert.doesNotMatch(COPY.yeet_home[k],/yeet_fund|address/,k);
+ assert.equal(g('yeet_home',{usdc:'40',ready:'ready',xp:xp(),recent_wins:[]}),COPY.yeet_home.ready_spin);
+ assert.equal(g('yeet_home',{usdc:'40',ready:'ready',xp:xp({spin_available:false,spins_available:0}),recent_wins:[]}),"YEET text.");
+ assert.equal(g('yeet_home',{usdc:null,ready:'ready',xp:null,recent_wins:[]},P01),COPY.yeet_home.ready);
 });
 
 test('yeet_overview: offer the suggestions in order, never a coin; the lead follows the first suggestion; paused is said first',()=>{
@@ -102,11 +103,17 @@ test('yeet_overview: offer the suggestions in order, never a coin; the lead foll
  for(const k of Object.keys(COPY.yeet_overview))assert.doesNotMatch(COPY.yeet_overview[k],/wallet|Base|Solana|chain/i,k);
 });
 
-test('yeet_fund: no USDC yet, some USDC, unread; the card reports back',()=>{
- const f=usdc=>g('yeet_fund',{usdc,presets:['10','25'],fund_url:'https://chatgpt.yeet.win/fund'});
- assert.equal(f('0'),COPY.yeet_fund.zero);assert.equal(f(null),COPY.yeet_fund.unread);
- assert.equal(f('3.2'),"YEET text.");
- for(const k of Object.keys(COPY.yeet_fund))assert.doesNotMatch(COPY.yeet_fund[k],/wallet|Base|Solana|address/i,k);
+test('yeet_fund: by method (both choices, the deposit address, the card payment); never an address from the model; the card reports back',()=>{
+ const f=method=>g('yeet_fund',{usdc:'3.2',presets:['10','25'],...(method?{method}:{}),fund_url:'https://chatgpt.yeet.win/fund'});
+ assert.equal(f(),'YEET yeet_fund.choose.');
+ assert.equal(f('crypto'),'YEET yeet_fund.crypto.');
+ assert.equal(f('card'),'YEET yeet_fund.card.');
+ assert.equal(g('yeet_fund',{usdc:null,presets:['10']}),COPY.yeet_fund.choose);
+ for(const k of Object.keys(COPY.yeet_fund)){assert.doesNotMatch(COPY.yeet_fund[k],/wallet|Base|Solana|device|\bcode\b|email/i,k);assert.match(COPY.yeet_fund[k],/YEET/,k)}
+ // Everywhere the model is sent to add money it gets the same question, and is told not to write an address.
+ for(const text of [COPY.yeet_portfolio.empty,COPY.errors.BALANCE_LOW_usdc]){assert.match(text,/YEET/);assert.match(text,/Never write out an address\.$/)}
+ // No guidance string offers an address or tells the model where one is.
+ for(const [label,text] of entries)assert.doesNotMatch(text,/YEET/,label);
 });
 
 test('yeet_checkin: a spin waiting, or done for today with the streak',()=>{
@@ -117,15 +124,12 @@ test('yeet_checkin: a spin waiting, or done for today with the streak',()=>{
 
 test('funding is described for both networks: no string says USDC can only be added or held on Base',()=>{
  for(const [label,text] of entries)assert.doesNotMatch(text,/adds USDC on Base|Add USDC on Base|USDC on Base\.$/,label);
- for(const k of ['needs_funds_spin','needs_funds','needs_funds_no_wheel'])assert.match(COPY.yeet_home[k],/YEET/,k);
- assert.match(COPY.yeet_portfolio.empty,/YEET/);
  // yeet_home with funding: both balances and the network that pays; a zero on Base is not "needs funds" when Solana holds USDC.
- const home={wallets:wallets('0'),funding:{base_usdc:'0',solana_usdc:'40',chosen:'solana'},ready:'ready',xp:null,recent_wins:[]};
+ const home={usdc:'0',funding:{base_usdc:'0',solana_usdc:'40',chosen:'solana'},ready:'ready',xp:null,recent_wins:[]};
  assert.equal(g('yeet_home',home,P01),"YEET text.");
  // The contract says the same: funding on yeet_home and on a proposal, and fund_url no longer names one network.
  assert.ok(contract.tools.yeet_home.outputSchema.properties.funding);assert.ok(contract.$defs.proposal.properties.funding);
  assert.doesNotMatch(contract.tools.yeet_home.outputSchema.properties.fund_url.description,/adds USDC on Base\b/);
- assert.match(contract.tools.yeet_home.outputSchema.properties.fund_url.description,/YEET/);
  assert.doesNotMatch(contract['x-yeet-scopes']['yeet:prepare'],/tap/i);
  assert.equal(contract['x-yeet-scopes']['yeet:trade'],undefined,'the old scope name has no description any more');
 });
@@ -382,18 +386,17 @@ test('registered tools: guidance in structuredContent and in the text the model 
  }finally{await close()}
 });
 
-test('yeet_home with no USDC: the text the model reads carries both wallet addresses and the direct-transfer guidance',async()=>{
- const home={wallets:{base:{address:'0x5a1C0ffee0D15ea5e0000000000000000000B45E',usdc:'0'},solana:{address:'9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM'}},ready:'needs_funds',fund_url:'https://chatgpt.yeet.win/fund',xp:null,recent_wins:[]};
+test('yeet_home with no USDC: the model reads one USDC number and the question to ask, and no address, whatever the core sends',async()=>{
+ // A core answer that still carried the wallets (it no longer does) would not get them past the connector.
+ const home={usdc:'0',wallets:{base:{address:'0x5a1C0ffee0D15ea5e0000000000000000000B45E',usdc:'0'},solana:{address:'9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM'}},ready:'needs_funds',fund_url:'https://chatgpt.yeet.win/fund',xp:null,recent_wins:[]};
  const {client,close}=await connect(async route=>{assert.equal(route,'/home');return home});
  try{
   const r=await client.callTool({name:'yeet_home',arguments:{}});
   assert.equal(r.isError,undefined,JSON.stringify(r.content));
   const text=JSON.parse(r.content[0].text);
-  assert.equal(text.wallets.base.address,home.wallets.base.address);
-  assert.equal(text.wallets.solana.address,home.wallets.solana.address);
-  assert.equal(text.fund_url,home.fund_url);
-  assert.equal(text.guidance,COPY.yeet_home.needs_funds_no_wheel);assert.match(text.guidance,/direct USDC transfer/);
-  assert.deepEqual(r.structuredContent.wallets,home.wallets,'the card reads the same addresses');
+  assert.equal(text.usdc,'0');assert.equal(text.fund_url,home.fund_url);assert.equal('wallets' in text,false);assert.equal('wallets' in r.structuredContent,false);
+  assert.equal(text.guidance,COPY.yeet_home.needs_funds_no_wheel);assert.match(text.guidance,/YEET/);
+  assert.doesNotMatch(JSON.stringify([r.structuredContent,r.content]),/0x5a1C|9WzDXw|B45E|YtAWWM/,'no part of an address reaches the model');
  }finally{await close()}
 });
 

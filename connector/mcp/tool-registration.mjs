@@ -22,6 +22,20 @@ export function boundSigner(signer,hint){
 const LINK_TOKEN=/^v1\.[A-Za-z0-9_-]{8,300}\.[A-Za-z0-9_-]{43}$/;
 /** Card-only `_meta` key for the connected account (contract x-yeet-meta.account): the device check in the trade card. */
 export const ACCOUNT_META_KEY='yeet/account';
+/** Card-only `_meta` key for the Add funds card's deposit addresses (contract x-yeet-meta.deposit, $defs.deposit). */
+export const DEPOSIT_META_KEY='yeet/deposit';
+const DEPOSIT_ADDRESS=Object.freeze({solana:/^[1-9A-HJ-NP-Za-km-z]{32,44}$/,base:/^0x[0-9a-fA-F]{40}$/});
+/** The core's `card_deposit` as the card gets it, or undefined: one address per known network, each fitting its
+ * network, the default among them. Anything else is dropped rather than shown: a wrong address loses the money. */
+export function depositMeta(v){
+ if(!v||typeof v!=='object'||!Array.isArray(v.networks))return undefined;
+ const networks=[];
+ for(const n of v.networks.slice(0,2)){
+  if(!n||typeof n!=='object'||typeof n.network!=='string'||!Object.hasOwn(DEPOSIT_ADDRESS,n.network)||typeof n.address!=='string'||!DEPOSIT_ADDRESS[n.network].test(n.address)||networks.some(x=>x.network===n.network))return undefined;
+  networks.push({network:n.network,address:n.address});
+ }
+ return networks.length&&networks.some(n=>n.network===v.default)?{default:v.default,networks}:undefined;
+}
 
 /** Core route per tool: route(args) -> [core route, body or undefined for GET]. Everything else about a tool (title,
  * description, schemas, annotations, scope, card, visibility, widget access, card-only confirm) is the contract's. */
@@ -42,6 +56,7 @@ const ROUTES={
  submit_trade_signature:({trade_id,...rest})=>[`/trades/${trade_id}/signature`,rest],
  trade_status:({trade_id})=>[`/trades/${trade_id}`],
  yeet_portfolio:()=>['/portfolio'],
+ // `method` (crypto | card) only picks the card's view: the connector echoes it, the core is not asked.
  yeet_fund:()=>['/fund'],
  skeet_propose:args=>['/proposals/skeet',args],
  yeet_leaderboard:({board='xp',window})=>[`/leaderboard/${board}${window?`/${window}`:''}`],
@@ -89,8 +104,8 @@ export function checkinText(r){
  const left=Number.isInteger(c.spins_available)?c.spins_available:c.spin_available?1:0;
  return `Daily check-in: ${c.streak_days}-day streak, ${c.total} XP. ${left>0?`${left} spin${left===1?' is':'s are'} waiting in the card.`:'Today\'s spin is done.'}`;
 }
-/** yeet_fund's text for the model: the one USDC number. */
-export const fundText=r=>`${r.usdc===null?"YEET fundText.":`They have ${r.usdc} USDC`}. The funding card is up.`;
+
+export const fundText=r=>`YEET fundText.`;
 /** yeet_terms and yeet_accept_terms: what the model reads first, in one line; the JSON follows in structuredContent. */
 /** yeet_profile's text for the model: the name, XP, tier and streak. Nothing else of the overview is in it. */
 export const profileText=r=>`Profile: ${r.username}${r.xp===null?'':`, ${r.xp} XP`} (${r.tier})${r.streak_days===null?'':`, ${r.streak_days}-day streak`}.`;
@@ -160,16 +175,20 @@ export function createMcpServer({token,callCore,env=process.env,staleness=proces
     const account=isObject&&result.card_account&&typeof result.card_account==='object'?result.card_account:undefined;
     // The signed hint for the trade page link (core account-login.mjs hintFor): card only, on the signer's page address.
     const hint=isObject&&typeof result.card_hint==='string'&&LINK_TOKEN.test(result.card_hint)?result.card_hint:undefined;
-    const data=isObject?Object.fromEntries(Object.entries(result).filter(([k])=>k!=='confirm'&&k!=='guidance'&&k!=='card_account'&&k!=='card_hint'&&(!listed||listed.has(k)))):result;
+    // The Add funds card's deposit addresses: card only, and only on yeet_fund. No address is ever in what the model reads.
+    const deposit=name==='yeet_fund'&&isObject?depositMeta(result.card_deposit):undefined;
+    const shown=isObject?Object.fromEntries(Object.entries(result).filter(([k])=>k!=='confirm'&&k!=='guidance'&&k!=='card_account'&&k!=='card_hint'&&k!=='card_deposit'&&(!listed||listed.has(k)))):result;
+    
+    const data=name==='yeet_fund'&&isObject&&(args.method==='crypto'||args.method==='card')?{...shown,method:args.method}:shown;
     // Agent guidance (guidance.mjs): for the model, in structuredContent (the card ignores it) and in the text it reads.
     const own=isObject?guidanceFor(name,data,ctx):undefined;
     const guidance=tellRefresh&&isObject?withRefresh(refreshGuidance(),own):own;
     const refresh=tellRefresh&&name==='yeet_overview'&&isObject?{app_refresh:appRefresh()}:{};
     const parsed=output.safeParse(guidance?{...data,...refresh,guidance}:data);
     if(!parsed.success)return toolError({error:'TEMPORARILY_UNAVAILABLE'},ctx,{tool:name});
-    const text=TEXT[name]?TEXT[name](result):JSON.stringify(parsed.data);
+    const text=TEXT[name]?TEXT[name](name==='yeet_fund'?parsed.data:result):JSON.stringify(parsed.data);
     // Card only: the server's card build, so a card built from another commit can tell it is stale.
-    const cardMeta={[BUILD_META_KEY]:staleness.build,...(confirm?{[CONFIRM_META_KEY]:confirm}:{}),...(account?{[ACCOUNT_META_KEY]:account}:{}),...(signer&&SIGNER_TOOLS.has(name)?{[SIGNER_META_KEY]:boundSigner(signer,hint)}:{})};
+    const cardMeta={[BUILD_META_KEY]:staleness.build,...(confirm?{[CONFIRM_META_KEY]:confirm}:{}),...(account?{[ACCOUNT_META_KEY]:account}:{}),...(deposit?{[DEPOSIT_META_KEY]:deposit}:{}),...(signer&&SIGNER_TOOLS.has(name)?{[SIGNER_META_KEY]:boundSigner(signer,hint)}:{})};
     // The one-sentence tools (spin, lucky wheel) carry the guidance as a second text block; JSON text already has it.
     const content=[{type:'text',text},...(TEXT[name]&&parsed.data.guidance?[{type:'text',text:parsed.data.guidance}]:[])];
     return {structuredContent:parsed.data,...(Object.keys(cardMeta).length?{_meta:cardMeta}:{}),content};

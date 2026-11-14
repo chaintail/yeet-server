@@ -13,6 +13,8 @@ export const instructions = [
  "YEET LINES.12.",
  "YEET LINES.13.",
  "YEET LINES.11.",
+ "YEET LINES.15.",
+ "YEET LINES.16.",
  "YEET LINES.17.",
  "YEET LINES.20.",
  "YEET LINES.23.",
