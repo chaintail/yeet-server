@@ -123,7 +123,7 @@ test('the guidance: show every statement with its link, accept only on the perso
  assert.match(instructions,/YEET/);
  assert.match(instructions,/YEET/);
  // No text a person could be handed carries a raw id list or the version string.
- for(const t of [g,COPY.terms.missing,COPY.terms.version,COPY.terms.recorded,COPY.yeet_overview.terms_chat])assert.doesNotMatch(t,/2026-11-13|near_intents|no_advice/);
+ for(const t of [g,COPY.terms.missing,COPY.terms.version,COPY.terms.recorded,COPY.yeet_overview.terms_chat])assert.doesNotMatch(t,/2026-11-1[345]|near_intents|eligibility|no_advice/);
  assert.equal(termsGuidance(due('page')),COPY.terms.due_page);
  assert.match(COPY.terms.due_page,/YEET/);assert.match(COPY.terms.due_page,/YEET/);
  assert.equal(termsGuidance(due(),'missing'),COPY.terms.missing);assert.equal(termsGuidance(due(),'version'),COPY.terms.version);

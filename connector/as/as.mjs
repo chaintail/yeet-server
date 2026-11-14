@@ -71,6 +71,7 @@ import {
   BetaFull,
 } from "#shared/common.mjs";
 import { betaFullRoutes, betaFullHref, BETA_FULL_LINE } from "./beta-full.mjs";
+import { regionGate } from "./region-page.mjs";
 import { issuableScopes } from "./scopes.mjs";
 import { loginMethods } from "./login-methods.mjs";
 import { signupEmailStep, signupEmailRoutes, stepReader, stepGuard, stepAccount, StepChanged, changedBody, STEP_PATH } from "./signup-email.mjs";
@@ -378,6 +379,8 @@ app.use((q, r, next) => {
   next();
 });
 if (process.env.TRUST_PROXY === "1") app.set("trust proxy", 1);
+// The sanctions geoblock (as/region-page.mjs, YEET_GEOBLOCK, off by default): before every page, the agent host included.
+app.use(regionGate());
 // Agent approval (agent-page.mjs): the Verification URI of Privy's CLI and agent access, at /approve on the agent host
 // (the host of AGENT_RESOURCE) only. On that host this answers every request (the page, its frame and bundle
 // files, the public identity config; 404 for everything else); on every other host /approve and /agent/approve are 404.

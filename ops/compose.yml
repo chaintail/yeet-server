@@ -33,6 +33,10 @@ services:
       PUBLIC_MODE: ${PUBLIC_MODE:-}
       COOKIE_SECURE: ${COOKIE_SECURE:-}
       TRUST_PROXY: ${TRUST_PROXY:-}
+      # The sanctions geoblock (connector/shared/region.mjs): on refuses sign-in, consent, approval and the trade pages
+      # from the listed countries (CF-IPCountry, needs TRUST_PROXY=1). Default off; the list defaults to CU,IR,KP,SY.
+      YEET_GEOBLOCK: ${YEET_GEOBLOCK:-}
+      YEET_GEOBLOCK_COUNTRIES: ${YEET_GEOBLOCK_COUNTRIES:-}
       ACCESS_TTL: ${ACCESS_TTL:-}
       # ChatGPT stays connected for 7 days (absolute, from the first refresh token; the person ticks "stay connected"
       # on the consent page), with the ChatGPT refresh compatibility and its diagnostics on.
@@ -81,6 +85,11 @@ services:
       YEET_P2: ${YEET_P2:-}
       # 1: yeet_how_it_works is registered (keys, custody, the key export). Default off. connector/mcp/tool-registration.mjs OPT_IN.
       YEET_HOW_IT_WORKS: ${YEET_HOW_IT_WORKS:-}
+      # The sanctions geoblock (connector/shared/region.mjs): on refuses the tool calls that create an account or prepare
+      # or send a trade, on both hosts, from the listed countries. TRUST_PROXY=1 is needed with it (CF-IPCountry).
+      TRUST_PROXY: ${TRUST_PROXY:-}
+      YEET_GEOBLOCK: ${YEET_GEOBLOCK:-}
+      YEET_GEOBLOCK_COUNTRIES: ${YEET_GEOBLOCK_COUNTRIES:-}
     env_file: [{path: /var/lib/yeet-connector/config/connector.env, required: false}]
     ports: ['127.0.0.1:38861:38313']
     volumes: ['/var/lib/yeet-connector/secrets/mcp:/secrets:ro']

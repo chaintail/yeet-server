@@ -211,6 +211,8 @@ export const COPY=Object.freeze({
   USERNAME_NOT_ALLOWED:"YEET errors.USERNAME_NOT_ALLOWED.",
 
   BETA_FULL:"YEET errors.BETA_FULL.",
+
+  REGION_BLOCKED:"YEET errors.REGION_BLOCKED.",
  },
 });
 

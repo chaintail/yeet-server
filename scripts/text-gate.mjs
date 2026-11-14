@@ -26,7 +26,7 @@ if(hits.length!==2){console.error('text gate self-test failed');process.exit(2)}
 hits.length=0;
 
 // 1. Whole files whose text is shown to people (pages, consent copy, card and tool text, error catalogue, login bundle).
-const files=['as/as.mjs','as/auth-pages.mjs','as/consent-selection.mjs','as/account-recovery.mjs','as/viewer/auth-pages.css',
+const files=['as/as.mjs','as/auth-pages.mjs','as/region-page.mjs','as/consent-selection.mjs','as/account-recovery.mjs','as/viewer/auth-pages.css',
  'mcp/instructions.mjs','mcp/widgets.mjs','mcp/errors.mjs','mcp/tool-registration.mjs','mcp/guidance.mjs',
  'vendor/yeet-win/contracts/yeet-tools.json','contracts/errors.mjs','core/failure.mjs','core/coins.mjs','core/trade/proposals.mjs','core/trade/tracker.mjs','core/trade/engine.mjs','core/xp/ledger.mjs','core/xp/board.mjs','core/xp/spin.mjs','core/xp/xp.mjs','login/src.jsx','login/choose-method.jsx','login/sign.jsx','login/build.mjs','login/fund.jsx','login/privy-app.jsx','login/fund-balance.js','login/fund-links.js','login/fund-watch.js','login/qr.js','login/login-methods.js','as/fund-page.mjs','as/sign-page.mjs','as/viewer/sign/sign.js','as/viewer/sign/flow.mjs','as/viewer/sign/sign.css','shared/signing.mjs'];
 const widgetDir=new URL('vendor/yeet-win/widget/',C);

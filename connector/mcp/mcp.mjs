@@ -7,7 +7,13 @@ import {introspectBearer,validatePrincipal} from '#shared/introspection.mjs';
 import express from 'express';
 import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import {AS,RESOURCE,CORE,secret,PUBLIC,port} from '#shared/common.mjs';
+import {readGeoblock,blockedCountry,regionGatedRoute,REGION_BLOCKED} from '#shared/region.mjs';
+import {toolMessage} from '#contracts/errors';
 const app=express();app.disable('x-powered-by');
+// The sanctions geoblock (shared/region.mjs, YEET_GEOBLOCK, off by default): on both hosts, a tool call that would
+// create an account or prepare or send a trade is refused with REGION_BLOCKED before core is asked. Reads go through.
+const GEOBLOCK=readGeoblock();
+const regionRefusal=(country,route)=>{console.log(JSON.stringify({event:'region_blocked',country,route}));return {error:REGION_BLOCKED,message:toolMessage(REGION_BLOCKED),retryable:false}};
 // Health first: the container check runs without the public Host header.
 app.get('/health',(_q,r)=>r.json({ok:true}));
 // The agent endpoint (mcp/agent.mjs, connector/docs/AGENT-ROUTE.md) answers only requests whose Host is the agent host; such a
@@ -41,11 +47,13 @@ app.post(resourcePath,async(req,res)=>{
  const auth=await authenticate(bearer,{introspect:b=>introspectBearer(b,'mcp-resource','introspection'),validate:validatePrincipal});
  if(auth.status){if(auth.status===401)challenge(res);return res.status(auth.status).json({error:auth.error})}
  const token=auth.token;
+ const blocked=blockedCountry(req.headers,GEOBLOCK);
  // The agent route: a token of an agent client never reaches the ChatGPT tools (WRONG_ROUTE, with the agent URL).
  if(AGENT_ON&&validatePrincipal(token).route==='agent')return wrongRouteAnswer(req,res,'agent');
  if(AGENT_ON&&token.aud!==RESOURCE){challenge(res);return res.status(401).json({error:'invalid_token'})}
  async function callCore(route,body){
   const method=body===undefined?'GET':'POST';
+  if(blocked&&regionGatedRoute(route,body))throw regionRefusal(blocked,route);
   try{
    const r=await fetch(CORE+route,{method,redirect:'error',headers:{authorization:`Bearer ${secret('core-mcp')}`,'x-delegated-bearer':bearer,'content-type':'application/json'},
     ...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(coreTimeout(route,method))});
@@ -80,8 +88,10 @@ if(AGENT_ON){
   // A ChatGPT token here: WRONG_ROUTE with the ChatGPT URL. An agent token for another resource: not valid here.
   if(principal.route!=='agent')return wrongRouteAnswer(req,res,'chatgpt');
   if(auth.token.aud!==AGENT_RESOURCE){agentChallenge(res);return res.status(401).json({error:'invalid_token'})}
+  const blocked=blockedCountry(req.headers,GEOBLOCK);
   async function callCore(route,body){
    const method=body===undefined?'GET':'POST';let r,raw;
+   if(blocked&&regionGatedRoute(route,body))throw regionRefusal(blocked,route);
    try{
     r=await fetch(CORE+route,{method,redirect:'error',headers:{authorization:`Bearer ${secret('core-mcp')}`,'x-delegated-bearer':bearer,'content-type':'application/json'},
      ...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(route==='/agent/submit'||route==='/agent/prepare'?25_000:route==='/agent/quote'?15_000:8000)});

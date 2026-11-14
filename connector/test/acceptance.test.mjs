@@ -578,7 +578,7 @@ test('the account\'s terms link, end to end: the core signs it, the page accepts
  const page=await fetch(AS+'/account/terms?t='+t,{redirect:'manual'});
  assert.equal(page.status,200);assert.equal(page.headers.get('set-cookie'),null);
  const html=await page.text();
- assert.match(html,/<button type="submit">Accept<\/button>/);assert.match(html,/You are at least 18/);
+ assert.match(html,/<button type="submit">Accept<\/button>/);assert.match(html,/I am at least 18\./);
  assert.match(claims.j,/^[A-Za-z0-9_-]{16,32}$/,'the token has its own id (single use)');
  assert.doesNotMatch(html,/type="checkbox"|agree_product_email/,'the optional opt-in is not on the bearer page');
  // Their payload under our signature, our token cut short, an empty one: the expired state. Nothing is recorded,

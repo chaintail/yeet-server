@@ -30,7 +30,7 @@ What each removed screen did, and where that lives now:
 | Details (account id, client URL, server, raw scope names) | Gone from every page. |
 | Checkbox: a YEET wallet created and secured by Privy | Terms statement `wallet` |
 | Checkbox: I allow ChatGPT to use YEET for me | The sign-in (or the Connect press) is that permission; ChatGPT's own connect step asks too |
-| Checkbox: trades are routed through NEAR Intents | Terms statement `near_intents` |
+| Checkbox: trades are routed through NEAR Intents | Terms statement `interface` (since 2026-11-15; `near_intents` before) |
 | Checkbox: Terms of Service / Privacy Policy | Terms statements `terms` and `privacy` |
 | Checkbox: product emails (optional) | Terms statement `product_email` (optional, never ticked for the person) |
 | Checkbox: stay connected for up to 7 days | Always on for ChatGPT; one line on the connect page |
@@ -40,7 +40,7 @@ What each removed screen did, and where that lives now:
 
 ## 2. The terms are accepted in the chat
 
-`connector/core/terms.mjs` holds the version (`TERMS_VERSION`, now `2026-11-14`) and the statements. Edit them there.
+`connector/core/terms.mjs` holds the version (`TERMS_VERSION`, now `2026-11-15`) and the statements. Edit them there.
 The structure is Folio's consent flow (chaintail/stock-app `origin/main`: `apps/server/src/consent.ts`,
 `apps/android/app/src/main/java/io/tryfolio/android/ui/consent/ConsentText.kt` and `ConsentScreen.kt`,
 `apps/android/app/src/main/java/io/tryfolio/android/data/ConsentGate.kt`): one version constant, a list of lines each
@@ -50,9 +50,9 @@ a new version is a new acceptance, the money routes answer a typed refusal until
 | id | Statement | Link | Required |
 |---|---|---|---|
 | `risk` | You understand meme coin trading is extremely risky, meme coins can go to zero, and you will never trade more than you are willing to lose. | https://yeet.win/terms#section-7 | yes |
-| `age` | You are at least 18 and allowed to use YEET where you live. | https://yeet.win/terms#section-2 | yes |
+| `eligibility` | I am at least 18. I am legally allowed to use these protocols where I live and I am not in a sanctioned region. | https://yeet.win/terms#section-2a | yes |
 | `wallet` | You agree to a YEET wallet created and secured by Privy, which only you control. | https://privy.io/user-terms-of-service | yes |
-| `near_intents` | You understand your trades are routed through NEAR Intents. | https://yeet.win/terms#section-9 | yes |
+| `interface` | I understand YEET is an interface. My trades run on third-party protocols and services (NEAR Intents, 1Click, the PoA bridge, Privy, Solana, Base, NEAR) that YEET does not control. | https://yeet.win/terms#section-1a | yes |
 | `no_advice` | You understand nothing in YEET or from ChatGPT is financial advice. | https://yeet.win/terms#section-4 | yes |
 | `xp` | I understand XP has no monetary value. | https://yeet.win/terms#section-10a | yes |
 | `terms` | You agree to the YEET Terms and Conditions. | https://yeet.win/terms | yes |
@@ -136,6 +136,51 @@ These sections are not part of this repository.
   accounts that accepted `2026-11-13`.
 - `core/terms.test.mjs` checks the anchors against `YEET_WIN_DIR` (default the sibling `yeet-win-wt-int`); a checkout
   whose terms page carries another `data-terms-version` is skipped.
+
+## Version 2026-11-15 (owner asks of 2026-11-15)
+
+- Terms (yeet-win `apps/landing/terms`): 1A "YEET is an interface" (what YEET provides: the interface, routing,
+  submission, access limits, network fees it may pay, one solver; everything else is run by others); 2A "Your
+  responsibility and eligibility" (legally allowed where you live, sanctions, taxes); 5A gains the custody caveat for
+  funds in `intents.near` or the PoA bridge and drops "has no way into it"; 5B "AI agents"; 6 and 6A: external solvers
+  are independent, Chaintail Labs Inc. operates one solver (counterparty for ledger trades, no margin today, a potential
+  conflict of interest); 9 "Third-party services and protocols" lists each service the code uses (OpenAI ChatGPT,
+  Privy, `intents.near`, the 1Click API, the PoA bridge, the Omni Bridge, solvers, the Solana, Base and NEAR networks and
+  their RPC providers, Jupiter and GeckoTerminal, Stripe and Coinbase Onramp for card funding, Cloudflare); 9A "No
+  affiliation"; 10A one factual sentence on wheel prizes. Privacy: the waitlist line, the country used for the regional
+  restrictions.
+- Statements: `interface` replaces `near_intents`; `eligibility` replaces `age` (it keeps the age). Still eight
+  required lines and the optional product emails.
+- Raising the version asks every account again through the normal flow (`TERMS_REQUIRED`); no code for accounts that
+  accepted `2026-11-14`. No tool schema changed, so the tools version stays `tools-8`.
+- Vendoring: the yeet-win change (branch `feat/terms-interface`, 2efddd9) touches only `apps/landing/terms` and
+  `apps/landing/privacy`, which `scripts/vendor-yeet-win.sh` does not archive. Re-vendoring would only move the card
+  build stamp off e2225ad and send every ChatGPT client a refresh notice for identical cards, so `vendor/yeet-win`
+  stays at e2225ad. The yeet-win commit must reach yeet-win `main` before this deploy, so yeet.win serves the
+  2026-11-15 page that the statements link to (`#section-1a`, `#section-2a`).
+
+## The sanctions geoblock (`YEET_GEOBLOCK`)
+
+`connector/shared/region.mjs`, ported from Folio's region gate (chaintail/stock-app `apps/server/src/region.ts`,
+`regionVersion` 2026-10-07): its `app_blocked` list (`CU`, `IR`, `KP`, `SY`), its reading of Cloudflare's
+`CF-IPCountry` (two letters; `XX`, `T1` and anything else is no country; no country is never blocked) and its answer
+(HTTP 451, `REGION_BLOCKED`).
+
+- `YEET_GEOBLOCK=on` turns it on (as and mcp); unset, empty or `off` is off (the default); any other value stops the
+  service. `YEET_GEOBLOCK_COUNTRIES` replaces the list (comma list of two-letter codes; a bad entry stops the service).
+- The header is read only with `TRUST_PROXY=1`, the same switch that makes the sign-in server trust the proxy. `on`
+  without it stops the service. `ops/compose.yml` now passes `TRUST_PROXY` to mcp as well.
+- Sign-in server (`as/region-page.mjs`): `/account/login`, `/account/email-step`, `/account/wallets`, `/interaction/*`,
+  `/approve` (and `/agent/approve`), `/sign`, `/sign/api/*`, `/fund`, `/fund/api/*` answer 451: the page "Not available
+  in your region", or `{error: "REGION_BLOCKED", country}` for the JSON calls. `/account/terms`, sign-out, static
+  files and the OAuth endpoints stay open.
+- MCP, both hosts (`mcp/mcp.mjs`): before core is asked, `yeet_propose`, `skeet_propose`, `yeet_quote`,
+  `execute_trade`, `submit_trade_signature`, `agent_register_key`, `agent_quote`, `agent_prepare_trade` and
+  `agent_submit_signature` (not a budget return, `a_...`) answer the private code `REGION_BLOCKED`
+  (`contracts/errors.mjs` `PRIVATE_ERRORS`, guidance in `mcp/guidance.mjs`). Reads answer as before. tools/list is
+  the same from any country.
+- Each refusal logs `region_blocked` with the country and the path or route.
+- Tests: `test/region.test.mjs` (ports 38940 to 38943).
 
 ## yeet_how_it_works
 

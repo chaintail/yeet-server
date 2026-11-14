@@ -31,9 +31,12 @@ export const FAILURE_CODES=Object.freeze([...enumCodes]);
  * built from the public contract does not list them (what it draws for one is the card's own fallback). The model's guidance for them is in
  * the connector's guidance.mjs COPY.errors with the other refusals.
  * BETA_FULL: a ChatGPT person with no YEET account while the limited beta is full (core/identity-store.mjs betaFull);
- * the result's JSON carries waitlist_url, the "beta is full" page with the waitlist form (as/beta-full.mjs). */
+ * the result's JSON carries waitlist_url, the "beta is full" page with the waitlist form (as/beta-full.mjs).
+ * REGION_BLOCKED: the request came from a country under the sanctions geoblock (YEET_GEOBLOCK, shared/region.mjs); no
+ * account was made and no trade was prepared or sent. */
 export const PRIVATE_ERRORS=deepFreeze({
  BETA_FULL:{title:'The beta is full',message:'YEET is in a limited beta and every spot is taken right now. Join the waitlist and we will email you when a spot opens.',retryable:false},
+ REGION_BLOCKED:{title:'Not available in your region',message:'YEET is not available in your region. Nothing was traded and no account was made.',retryable:false},
 });
 for(const code of Object.keys(PRIVATE_ERRORS))if(Object.hasOwn(TOOL_ERRORS,code))invalid(`${code}: private code shadows a contract code`);
 const ALL_ERRORS=Object.freeze({...TOOL_ERRORS,...PRIVATE_ERRORS});

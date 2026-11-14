@@ -70,7 +70,7 @@ for (const [role, dirs] of Object.entries(roles)) {
     (n) => !passed.has(n) && !IN_IMAGE.includes(n) && !SECRETS[role].includes(n) && !OPERATOR_ONLY[role].includes(n),
   );
   // shared/ is read by every role; a name only some roles need is listed here.
-  const sharedOnly = { mcp: ["PRIVY_JWKS_URL", "DEV_IDENTITY_STUB", "TEST_PROFILE", "STATE_DIR", "SECRETS_DIR"], core: ["PUBLIC_MODE", "DEV_IDENTITY_STUB", "TEST_PROFILE", "CORE_INTERNAL"], as: ["AS_INTERNAL"] };
+  const sharedOnly = { mcp: ["PRIVY_JWKS_URL", "DEV_IDENTITY_STUB", "TEST_PROFILE", "STATE_DIR", "SECRETS_DIR"], core: ["PUBLIC_MODE", "DEV_IDENTITY_STUB", "TEST_PROFILE", "CORE_INTERNAL", "YEET_GEOBLOCK", "YEET_GEOBLOCK_COUNTRIES", "TRUST_PROXY"], as: ["AS_INTERNAL"] };
   const real = missing.filter((n) => !sharedOnly[role].includes(n));
   assert.deepEqual(real, [], `${role} reads names compose does not pass: ${real.join(", ")}`);
   for (const s of SECRETS[role]) assert.ok(!passed.has(s), `${role}: secret ${s} must come from env_file, not compose`);
@@ -86,6 +86,8 @@ for (const name of ["YEET_LEDGER_DEPOSIT_NETWORKS", "YEET_LEDGER_DEPOSIT_STAGES"
   assert.ok(env.core.has(name), `core gets ${name}`);
   assert.ok(!env.as.has(name) && !env.mcp.has(name), `${name} is the core's alone`);
 }
+// The sanctions geoblock (shared/region.mjs) runs on the sign-in server and the connector, with the proxy trust it needs.
+for (const role of ["as", "mcp"]) for (const name of ["YEET_GEOBLOCK", "YEET_GEOBLOCK_COUNTRIES", "TRUST_PROXY"]) assert.ok(env[role].has(name), `${role} gets ${name}`);
 // Card signing: the connector names the public Privy app id in trade results; the sign-in server serves the page.
 assert.ok(env.mcp.has("PRIVY_APP_ID") && env.as.has("PRIVY_APP_ID") && env.mcp.has("RESOURCE"));
 console.log(`PASS compose passes every setting each service reads (${Object.keys(roles).join(", ")})`);

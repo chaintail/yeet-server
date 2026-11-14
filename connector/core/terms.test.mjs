@@ -14,19 +14,19 @@ const {z}=await import('zod');
 const A='yeet-privy-terms-a',B='yeet-privy-terms-b';
 
 test('the statements: each has its own link to the exact document or section; all but the product emails are required',()=>{
- assert.equal(TERMS_VERSION,'2026-11-14');
+ assert.equal(TERMS_VERSION,'2026-11-15');
  assert.deepEqual(STATEMENTS.map(s=>[s.id,s.text,s.url,s.required]),[
   ['risk','You understand meme coin trading is extremely risky, meme coins can go to zero, and you will never trade more than you are willing to lose.','https://yeet.win/terms#section-7',true],
-  ['age','You are at least 18 and allowed to use YEET where you live.','https://yeet.win/terms#section-2',true],
+  ['eligibility','I am at least 18. I am legally allowed to use these protocols where I live and I am not in a sanctioned region.','https://yeet.win/terms#section-2a',true],
   ['wallet','You agree to a YEET wallet created and secured by Privy, which only you control.','https://privy.io/user-terms-of-service',true],
-  ['near_intents','You understand your trades are routed through NEAR Intents.','https://yeet.win/terms#section-9',true],
+  ['interface','I understand YEET is an interface. My trades run on third-party protocols and services (NEAR Intents, 1Click, the PoA bridge, Privy, Solana, Base, NEAR) that YEET does not control.','https://yeet.win/terms#section-1a',true],
   ['no_advice','You understand nothing in YEET or from ChatGPT is financial advice.','https://yeet.win/terms#section-4',true],
   ['xp','I understand XP has no monetary value.','https://yeet.win/terms#section-10a',true],
   ['terms','You agree to the YEET Terms and Conditions.','https://yeet.win/terms',true],
   ['privacy','You agree to the YEET Privacy Policy.','https://yeet.win/privacy',true],
   ['product_email','Send me YEET product emails.','https://yeet.win/privacy#section-3',false],
  ]);
- assert.deepEqual([...REQUIRED_IDS],['risk','age','wallet','near_intents','no_advice','xp','terms','privacy']);
+ assert.deepEqual([...REQUIRED_IDS],['risk','eligibility','wallet','interface','no_advice','xp','terms','privacy']);
  // Owner wording rules: no tapping, nothing about the wallet's act.
  for(const s of STATEMENTS)assert.doesNotMatch(s.text,/\btap|\bsign(ing|ature)?\b|only when/i,s.id);
  const schema=zodSchema(z,contract.$defs.terms);
