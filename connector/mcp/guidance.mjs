@@ -177,6 +177,10 @@ export const COPY=Object.freeze({
   stale:"YEET refresh.stale: {url} {steps}.",
  },
 
+ style:{
+  reminder:"YEET style.reminder.",
+ },
+
  errors:{
 
   LIMIT_EXCEEDED_trade:"YEET errors.LIMIT_EXCEEDED_trade: {tier}.",
@@ -381,6 +385,25 @@ const BY_TOOL={
  lucky_wheel:lucky,lucky_spin:lucky,
 };
 export const GUIDED_TOOLS=Object.freeze(Object.keys(BY_TOOL));
+
+const STYLED={
+ yeet_overview:r=>r.terms?.accepted!==false,
+ yeet_home:r=>r.ready==='ready',
+ yeet_coins:()=>true,yeet_coin:()=>true,
+ yeet_propose:()=>true,yeet_quote:()=>true,skeet_propose:()=>true,
+ trade_status:r=>r.status==='success',
+ yeet_portfolio:r=>(r.solana?.holdings??[]).some(h=>positive(h.amount))||positive(r.base?.usdc),
+ yeet_leaderboard:()=>true,
+ yeet_checkin:()=>true,daily_spin:()=>true,yeet_profile:()=>true,
+ lucky_wheel:r=>!!r?.lucky,lucky_spin:r=>!!r?.lucky,
+};
+export const STYLED_TOOLS=Object.freeze(Object.keys(STYLED));
+
+export function styleFor(name,result){
+ const f=STYLED[name];
+ if(!f||!result||typeof result!=='object')return undefined;
+ try{return f(result)?COPY.style.reminder:undefined}catch{return undefined}
+}
 
 export function guidanceFor(name,result,ctx){
  const f=BY_TOOL[name];

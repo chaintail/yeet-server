@@ -5,7 +5,8 @@ import assert from 'node:assert/strict';
 import {z} from 'zod';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
-import {COPY,TIER_XP,GUIDED_TOOLS,guidanceFor,refusalGuidance,fill,firstBuy,hoursToReset} from '../guidance.mjs';
+import {COPY,TIER_XP,GUIDED_TOOLS,STYLED_TOOLS,guidanceFor,styleFor,refusalGuidance,fill,firstBuy,hoursToReset} from '../guidance.mjs';
+import {createAgentMcpServer} from '../agent.mjs';
 import {createMcpServer} from '../tool-registration.mjs';
 import {CARD_BUILD} from '../refresh.mjs';
 import {toolError} from '../errors.mjs';
@@ -15,7 +16,7 @@ import {allScopes} from '#scope-catalog';
 import {TIER_DEFAULTS,checkBasket,checkDaily,capsFor,capsView,limitsFromEnv,skeetTooSmall} from '../../core/trade/limits.mjs';
 import {failure,withUserMessage} from '../../core/failure.mjs';
 import {utcDay} from '../../core/trade/util.mjs';
-import {instructions} from '../instructions.mjs';
+import {instructions,STYLE_LINES} from '../instructions.mjs';
 
 const ASK_FUND="YEET ASK_FUND.";
 
@@ -468,4 +469,84 @@ test('BETA_FULL (private code): the catalogue shape, the guidance follows the ru
  // Another code never carries it.
  assert.equal(Object.hasOwn(JSON.parse(toolError({error:'TRADING_PAUSED',waitlist_url:'https://x.example/'}).content[0].text),'waitlist_url'),false);
  assert.ok(!FAILURE_CODES.includes('BETA_FULL'),'not a contract code: the vendored contract is unchanged');
+});
+
+// The style rule (owner, 2026-11-14): rich visuals from YEET's own numbers, a playful, a little degen voice. The standing
+// rule is in the server instructions; read-type results carry a one-line reminder as their own text block.
+test('style: the standing rule is in the instructions, two lines, with the limits on the voice', ()=>{
+ assert.equal(STYLE_LINES.length,2);
+ for(const line of STYLE_LINES)assert.ok(instructions.includes(` ${line} `),line);
+ const [look,voice]=STYLE_LINES;
+ assert.match(look,/charts, tables, compact visual summaries/);assert.match(look,/YEET/);assert.match(look,/YEET/);
+ assert.match(voice,/a little degen/);assert.match(voice,/YEET/);
+ assert.match(voice,/YEET/);assert.match(voice,/YEET/);
+ assert.ok(STYLE_LINES.every(l=>sentences(l).length<=2));
+});
+
+const STYLE=COPY.style.reminder;
+test('style reminder: on the conversational, read-type results; never on terms, funding, trades going out, safety answers or a trade that did not land',()=>{
+ rules('style.reminder',STYLE);assert.equal(sentences(STYLE).length,1);assert.ok(STYLE.length<=180,String(STYLE.length));
+ const S=(...ids)=>ids.map(id=>({id,label:'x',say:'y'}));
+ const on={
+  yeet_overview:{username:'Lucky Otter 42',suggestions:S('discover'),trading:'live',terms:{accepted:true}},
+  yeet_home:{usdc:'40',ready:'ready',xp:null,recent_wins:[]},
+  yeet_coins:{coins:[{symbol:'WIF',price_usd:'0.14'}]},
+  yeet_coin:{symbol:'WIF',price_usd:'0.14',description:'A dog in a hat.'},
+  yeet_propose:proposal(),yeet_quote:proposal({revision:2}),skeet_propose:proposal({direction:'skeet'}),
+  trade_status:status('success'),
+  yeet_portfolio:pf([{symbol:'WIF',amount:'7',usd:'19'}],'1','20'),
+  yeet_leaderboard:{rows:[],me:{rank:3,xp:120}},
+  yeet_checkin:{checkin:{streak_days:1,spins_available:1}},daily_spin:spin(),yeet_profile:{username:'kat_king'},
+  lucky_wheel:lucky(),lucky_spin:lucky({slice:1}),
+ };
+ assert.deepEqual(Object.keys(on).sort(),[...STYLED_TOOLS].sort());
+ for(const [name,r] of Object.entries(on))assert.equal(styleFor(name,r),STYLE,name);
+ const off=[
+  ['yeet_overview',{username:'x',suggestions:[],terms:{accepted:false,mode:'chat'}}],
+  ['yeet_terms',{terms:{accepted:true}}],['yeet_terms',{terms:{accepted:false}}],['yeet_accept_terms',{terms:{accepted:true}}],
+  ['yeet_how_it_works',{how_it_works:{}}],['yeet_referral',{status:'open'}],['apply_referral',{status:'applied',code:'WIN'}],
+  ['yeet_fund',{method:'crypto'}],['yeet_fund',{methods:['crypto'],watch:{stage:'ready'}}],['yeet_set_username',{username:'kat_king'}],
+  ['yeet_home',{usdc:'0',ready:'needs_funds'}],['yeet_home',{usdc:'0',ready:'paused'}],['yeet_home',{usdc:'0',ready:'needs_signer'}],
+  ['yeet_portfolio',pf([],'0','0')],['yeet_portfolio',pf([],null,null)],
+  ['execute_trade',{status:'awaiting_signature'}],['execute_trade',{status:'submitted'}],
+  ['submit_trade_signature',{status:'signing',sign_requests:[{}]}],['submit_trade_signature',{status:'success'}],
+  ...['signing','submitted','settling','partial','refunded','failed'].map(st=>['trade_status',status(st)]),
+  ['lucky_wheel',{lucky:null}],['unknown_tool',{}],['yeet_coin',null],
+ ];
+ for(const [name,r] of off)assert.equal(styleFor(name,r),undefined,`${name} ${JSON.stringify(r)?.slice(0,60)}`);
+ // Never inside guidance, the 500-character field the schemas cap: the copy table keeps them apart.
+ for(const [label,text] of entries)if(label!=='style.reminder')assert.ok(!text.includes(STYLE),label);
+});
+
+test('style reminder through the registered server: its own last text block on read-type results; never in structuredContent, a refusal or a terms answer',async()=>{
+ const answers={'/proposals':proposal(),'/spin':spin(),'/terms':{terms:{accepted:true,version:'v1',statements:[]}},'/home':{usdc:'0',ready:'needs_funds',fund_url:'https://chatgpt.yeet.win/fund',xp:null,recent_wins:[]}};
+ const {client,close}=await connect(async route=>{if(route==='/proposals/skeet')throw {error:'TRADING_PAUSED'};return answers[route]},{YEET_P2:'1'});
+ try{
+  const p=await client.callTool({name:'yeet_propose',arguments:{request_id:'r1',amount_usdc:'20',legs:[{symbol:'WIF',parts:10}]}});
+  assert.equal(p.isError,undefined,JSON.stringify(p.content));
+  assert.equal(p.content.length,2);assert.equal(p.content[1].text,STYLE);
+  assert.deepEqual(JSON.parse(p.content[0].text),p.structuredContent);assert.equal(p.structuredContent.guidance,`${COPY.propose_yeet.base} ${COPY.propose_yeet.risk}`);
+  assert.doesNotMatch(JSON.stringify(p.structuredContent),/Style:/);
+  const s=await client.callTool({name:'daily_spin',arguments:{card_build:CARD_BUILD}});
+  assert.equal(s.content.length,3);assert.equal(s.content[1].text,s.structuredContent.guidance);assert.equal(s.content[2].text,STYLE);
+  const x=await client.callTool({name:'skeet_propose',arguments:{request_id:'r2',legs:[{symbol:'WIF',percent:100}]}});
+  assert.equal(x.isError,true);assert.equal(x.content.length,1);assert.doesNotMatch(JSON.stringify(x),/Style:/);
+  const h=await client.callTool({name:'yeet_home',arguments:{}});
+  assert.equal(h.isError,undefined,JSON.stringify(h.content));assert.doesNotMatch(JSON.stringify(h),/Style:/,'funding stays plain');
+ }finally{await close()}
+});
+
+test('style: never on the agent route (plain JSON, its own instructions)',async()=>{
+ const server=createAgentMcpServer({token:{scope:allScopes.join(' ')},callCore:async()=>({ok:true})});
+ const client=new Client({name:'guidance-test',version:'1'});const [a,b]=InMemoryTransport.createLinkedPair();
+ await server.connect(a);await client.connect(b);
+ try{
+  const ins=client.getInstructions();
+  for(const line of STYLE_LINES)assert.ok(!ins.includes(line));assert.doesNotMatch(ins,/degen|playful|Style:/);
+  const {tools}=await client.listTools();
+  for(const t of tools){
+   const r=await client.callTool({name:t.name,arguments:{}}).catch(e=>({content:[{type:'text',text:String(e)}]}));
+   assert.doesNotMatch(JSON.stringify(r),/Style:|degen|playful/,t.name);
+  }
+ }finally{await client.close();await server.close()}
 });

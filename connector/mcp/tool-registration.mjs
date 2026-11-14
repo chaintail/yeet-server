@@ -4,7 +4,7 @@ import {toolError} from './errors.mjs';
 import {toolSchemas,toolSpecs,zodSchema,registrationInput,META_KEYS} from './tool-contract.mjs';
 import {registerWidgets,toolMeta,CONFIRM_META_KEY} from './widgets.mjs';
 import {instructionsFor} from './instructions.mjs';
-import {guidanceFor} from './guidance.mjs';
+import {guidanceFor,styleFor} from './guidance.mjs';
 import {SIGNER_META_KEY,signerMetaFromEnv} from '#shared/signing.mjs';
 import {staleness as processStaleness,staleKey,appRefresh,withRefresh,BUILD_META_KEY,TOOLS_VERSIONS,classifyToolsVersion,loggedVersion} from './refresh.mjs';
 import {refreshGuidance} from './guidance.mjs';
@@ -233,7 +233,10 @@ export function createMcpServer({token,callCore,env=process.env,staleness=proces
     // Card only: the server's card build, so a card built from another commit can tell it is stale.
     const cardMeta={[BUILD_META_KEY]:staleness.build,...(confirm?{[CONFIRM_META_KEY]:confirm}:{}),...(account?{[ACCOUNT_META_KEY]:account}:{}),...(deposit?{[DEPOSIT_META_KEY]:deposit}:{}),...(chart?{[CHART_META_KEY]:chart}:{}),...(signer&&SIGNER_TOOLS.has(name)?{[SIGNER_META_KEY]:boundSigner(signer,hint)}:{})};
     // The one-sentence tools (spin, lucky wheel) carry the guidance as a second text block; JSON text already has it.
-    const content=[{type:'text',text},...(TEXT[name]&&parsed.data.guidance?[{type:'text',text:parsed.data.guidance}]:[])];
+    // The style reminder (guidance.mjs STYLED): its own text block after the guidance, on read-type results only.
+    // Text only, never structuredContent: the output schemas are closed and stay as they are.
+    const style=isObject?styleFor(name,data):undefined;
+    const content=[{type:'text',text},...(TEXT[name]&&parsed.data.guidance?[{type:'text',text:parsed.data.guidance}]:[]),...(style?[{type:'text',text:style}]:[])];
     return {structuredContent:parsed.data,...(Object.keys(cardMeta).length?{_meta:cardMeta}:{}),content};
    }catch(e){return toolError(e,ctx,{tool:name})}
   });

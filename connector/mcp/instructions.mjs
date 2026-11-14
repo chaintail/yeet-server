@@ -2,6 +2,11 @@
 // neutral text in every line; the wording YEET deploys is not part of it.
 import {toolSpecs,contract} from './tool-contract.mjs';
 const APP=contract['x-yeet-app'];
+
+export const STYLE_LINES = Object.freeze([
+ "YEET STYLE_LINES.1.",
+ "YEET STYLE_LINES.2.",
+]);
 const LINES = [
  "YEET LINES.1.",
  "YEET LINES.2.",
@@ -16,6 +21,7 @@ const LINES = [
  "YEET LINES.15.",
  "YEET LINES.16.",
  "YEET LINES.17.",
+ ...STYLE_LINES,
  "YEET LINES.20.",
  "YEET LINES.23.",
  "YEET LINES.24.",
