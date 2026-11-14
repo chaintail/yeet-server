@@ -1,7 +1,7 @@
 import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {z} from 'zod';
 import {toolError} from './errors.mjs';
-import {toolSchemas,toolSpecs,zodSchema} from './tool-contract.mjs';
+import {toolSchemas,toolSpecs,zodSchema,META_KEYS} from './tool-contract.mjs';
 import {registerWidgets,toolMeta,CONFIRM_META_KEY} from './widgets.mjs';
 import {instructions} from './instructions.mjs';
 import {guidanceFor} from './guidance.mjs';
@@ -23,6 +23,18 @@ const LINK_TOKEN=/^v1\.[A-Za-z0-9_-]{8,300}\.[A-Za-z0-9_-]{43}$/;
 /** Card-only `_meta` key for the connected account (contract x-yeet-meta.account): the device check in the trade card. */
 export const ACCOUNT_META_KEY='yeet/account';
 
+/** Card-only `_meta` key for the coin card's chart (contract x-yeet-meta.chart): the 24 hourly prices, never read by the model. */
+export const CHART_META_KEY=META_KEYS.chart;
+export function coinSymbol(value){
+ if(typeof value!=='string')return null;
+ const s=value.trim().replace(/^\$/,'').toUpperCase();
+ return /^[A-Z0-9]{2,12}$/.test(s)?s:null;
+}
+/** The core's `card_chart` as the card may read it: 2 to 48 positive numbers, or nothing. */
+export function chartMeta(value){
+ const p=value?.points;
+ return Array.isArray(p)&&p.length>=2&&p.length<=48&&p.every(v=>typeof v==='number'&&Number.isFinite(v)&&v>0)?{points:p.slice()}:undefined;
+}
 /** Core route per tool: route(args) -> [core route, body or undefined for GET]. Everything else about a tool (title,
  * description, schemas, annotations, scope, card, visibility, widget access, card-only confirm) is the contract's. */
 const ROUTES={
@@ -36,6 +48,8 @@ const ROUTES={
  apply_referral:args=>['/referral',args],
  yeet_home:()=>['/home'],
  yeet_coins:()=>['/coins'],
+ // One coin by its symbol as a person may write it ("wif", "$WIF"); anything that cannot be a symbol is the coin refusal.
+ yeet_coin:({symbol})=>{const s=coinSymbol(symbol);if(!s)throw {error:'COIN_NOT_SUPPORTED'};return [`/coins/${s}`]},
  yeet_propose:args=>['/proposals',args],
  yeet_quote:({proposal_id,...rest})=>[`/proposals/${proposal_id}/quote`,rest],
  execute_trade:args=>['/trades',args],
@@ -141,7 +155,9 @@ export function createMcpServer({token,callCore,env=process.env,staleness=proces
     const account=isObject&&result.card_account&&typeof result.card_account==='object'?result.card_account:undefined;
     // The signed hint for the trade page link (core account-login.mjs hintFor): card only, on the signer's page address.
     const hint=isObject&&typeof result.card_hint==='string'&&LINK_TOKEN.test(result.card_hint)?result.card_hint:undefined;
-    const data=isObject?Object.fromEntries(Object.entries(result).filter(([k])=>k!=='confirm'&&k!=='guidance'&&k!=='card_account'&&k!=='card_hint'&&(!listed||listed.has(k)))):result;
+    // The coin card's chart points: card only (they would only make the model's result longer).
+    const chart=CHART_META_KEY&&isObject?chartMeta(result.card_chart):undefined;
+    const data=isObject?Object.fromEntries(Object.entries(result).filter(([k])=>k!=='confirm'&&k!=='guidance'&&k!=='card_account'&&k!=='card_hint'&&k!=='card_chart'&&(!listed||listed.has(k)))):result;
     // Agent guidance (guidance.mjs): for the model, in structuredContent (the card ignores it) and in the text it reads.
     const own=isObject?guidanceFor(name,data,ctx):undefined;
     const guidance=tellRefresh&&isObject?withRefresh(refreshGuidance(),own):own;
@@ -150,7 +166,7 @@ export function createMcpServer({token,callCore,env=process.env,staleness=proces
     if(!parsed.success)return toolError({error:'TEMPORARILY_UNAVAILABLE'},ctx,{tool:name});
     const text=TEXT[name]?TEXT[name](result):JSON.stringify(parsed.data);
     // Card only: the server's card build, so a card built from another commit can tell it is stale.
-    const cardMeta={[BUILD_META_KEY]:staleness.build,...(confirm?{[CONFIRM_META_KEY]:confirm}:{}),...(account?{[ACCOUNT_META_KEY]:account}:{}),...(signer&&SIGNER_TOOLS.has(name)?{[SIGNER_META_KEY]:boundSigner(signer,hint)}:{})};
+    const cardMeta={[BUILD_META_KEY]:staleness.build,...(confirm?{[CONFIRM_META_KEY]:confirm}:{}),...(account?{[ACCOUNT_META_KEY]:account}:{}),...(chart?{[CHART_META_KEY]:chart}:{}),...(signer&&SIGNER_TOOLS.has(name)?{[SIGNER_META_KEY]:boundSigner(signer,hint)}:{})};
     // The one-sentence tools (spin, lucky wheel) carry the guidance as a second text block; JSON text already has it.
     const content=[{type:'text',text},...(TEXT[name]&&parsed.data.guidance?[{type:'text',text:parsed.data.guidance}]:[])];
     return {structuredContent:parsed.data,...(Object.keys(cardMeta).length?{_meta:cardMeta}:{}),content};

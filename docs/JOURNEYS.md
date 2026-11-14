@@ -33,6 +33,22 @@ there is USDC); "Review your meme holdings" precedes "Discover a new coin to yee
 other people are yeeting" is last. A check-in already done today is left out. Without `YEET_P2=1` the check-in and the
 board are left out.
 
+## Coin prices and the coin card
+
+`yeet_coins` and `yeet_coin` carry live numbers from free public endpoints with no key, read by the core
+(`connector/core/market.mjs`): Jupiter's Tokens API V2 gives the price, the 1 hour, 6 hour and 24 hour change, market
+cap, liquidity and 24 hour volume for the whole catalogue in one request (kept 45 s); GeckoTerminal's public API gives
+the coin's description, website and X profile (kept 10 minutes) and 24 hourly prices for the chart (kept 3 minutes).
+Only catalogue mints are looked up. A number a source does not have is null: the card hides that chip or the chart, and
+the guidance tells the model to say the price could not be read, never to guess. `yeet_coin {symbol}` is read only and
+moves nothing. Its card shows logo, ticker, name, price, the 24 hour chart (card-only `_meta["yeet/chart"]`), the three
+changes, the holding line and one button, YEET {SYMBOL}, which posts those words to the chat as the person's own
+message, so the model continues with the usual basket flow. The description, website, X profile and market numbers are
+for the model to tell, never on the card; the description is third-party text (cleaned, 280 characters at most, marked
+as such in the schema, never copied into guidance). When the person picks "Research {SYMBOL} deeper" the model uses its
+own knowledge and browsing and says it is general information, not advice; it never predicts a price or recommends
+buying. An unknown symbol answers `COIN_NOT_SUPPORTED` and the model offers the list from `yeet_coins`.
+
 ## What the cards report to the chat
 
 Each report is one chat message from the card (`window.openai.sendFollowUpMessage`, else `ui/message`) and a model

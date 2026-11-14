@@ -130,6 +130,8 @@ services:
       YEET_DAILY_CAP_USDC: ${YEET_DAILY_CAP_USDC:-}
       YEET_MIN_LEG_USDC: ${YEET_MIN_LEG_USDC:-}
       YEET_MIN_SKEET_USDC: ${YEET_MIN_SKEET_USDC:-}
+      # `off` stops the coin price lookups (core/market.mjs); prices then read null.
+      YEET_MARKET_DATA: ${YEET_MARKET_DATA:-}
       YEET_MAX_COST_BPS: ${YEET_MAX_COST_BPS:-}
       YEET_MAX_ACCOUNTS: ${YEET_MAX_ACCOUNTS:-}
       YEET_REQUOTE_TOLERANCE_BPS: ${YEET_REQUOTE_TOLERANCE_BPS:-}

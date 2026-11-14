@@ -1,9 +1,9 @@
 repo: chaintail/yeet-win
-branch: main
-commit: afe1796d48bd920f4ea2dc8bb5ee3c9553e0bba2
+branch: feat/coin
+commit: f75e389b0dda0bcb3f82165cacdc688775e793e2
 built: router (tsc 7.0.2), widget (node build.mjs), signer (scripts/build-signer.mjs, esbuild 0.28.2, @privy-io/js-sdk-core 0.79.5, sha256 a4affb0c76ce)
 files:
   contracts/yeet-tools.json
-  widget/basket-v1.html fund-v1.html home-v1.html leaderboard-v1.html lucky-v1.html overview-v1.html portfolio-v1.html receipt-v1.html referral-v1.html templates.json wheel-v1.html yeet-signer.js 
+  widget/basket-v1.html coin-v1.html fund-v1.html home-v1.html leaderboard-v1.html lucky-v1.html overview-v1.html portfolio-v1.html receipt-v1.html referral-v1.html templates.json wheel-v1.html yeet-signer.js 
   router/dist/src/**
   router/test/fixtures/*.json

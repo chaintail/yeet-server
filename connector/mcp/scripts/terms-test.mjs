@@ -44,7 +44,7 @@ test('contract: the terms tools; accepting is not read-only and asks for the hos
 // -32602 (it checks any structuredContent against the tool's output schema, error or not). Every tool the contract
 // lets answer TERMS_REQUIRED is called through a client that has read tools/list, so the SDK client applies exactly
 // that check, and the same rules are applied here by hand against the advertised schema.
-const ARGS={yeet_accept_terms:{version:TERMS_VERSION,confirmed:REQUIRED_IDS},apply_referral:{skip:true},trade_status:{trade_id:'t_abcdefghij0123456789'},
+const ARGS={yeet_coin:{symbol:'WIF'},yeet_accept_terms:{version:TERMS_VERSION,confirmed:REQUIRED_IDS},apply_referral:{skip:true},trade_status:{trade_id:'t_abcdefghij0123456789'},
  yeet_propose:{request_id:'11111111-1111-4111-8111-111111111111',amount_usdc:'20',legs:[{symbol:'WIF',parts:10}]},yeet_quote:{proposal_id:'p_abcdefghij0123456789'},
  skeet_propose:{request_id:'22222222-2222-4222-8222-222222222222',legs:[{symbol:'WIF',percent:100}]},
  execute_trade:{proposal_id:'p_abcdefghij0123456789',revision:1,confirm:'a'.repeat(43)},
