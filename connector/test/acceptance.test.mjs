@@ -409,6 +409,22 @@ test('add funds: sign-in carries only the fund return target; /fund is off witho
  assert.equal(r.status,302);assert.equal(r.headers.get('location'),'/fund');
 });
 
+test('agent approval: /agent/approve is off by default, needs YEET_AGENT_ACCESS=on and the Privy sign-in',async()=>{
+ const was={a:process.env.YEET_AGENT_ACCESS,p:process.env.PRIVY_LOGIN};
+ const status=async()=>(await fetch(AS+'/agent/approve?user_code=ABCD-1234',{redirect:'manual'})).status;
+ try{
+  delete process.env.YEET_AGENT_ACCESS;assert.equal(await status(),404);
+  process.env.YEET_AGENT_ACCESS='on';assert.equal(await status(),404,'no Privy sign-in: off');
+  process.env.PRIVY_LOGIN='1';
+  const r=await fetch(AS+'/agent/approve?user_code=ABCD-1234');
+  assert.equal(r.status,200);assert.equal(r.headers.get('referrer-policy'),'no-referrer');
+  assert.match(await r.text(),/<script type="module" src="\/account\/privy-login\/agent\.js"><\/script>/);
+  process.env.YEET_AGENT_ACCESS='off';assert.equal(await status(),404);
+ }finally{
+  for(const [k,v] of [['YEET_AGENT_ACCESS',was.a],['PRIVY_LOGIN',was.p]])if(v===undefined)delete process.env[k];else process.env[k]=v;
+ }
+});
+
 const STABLE='https://chatgpt.com/connector_platform_oauth_redirect';
 const register=async(extra={})=>{const r=await fetch(AS+'/reg',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({redirect_uris:[STABLE],response_types:['code'],grant_types:['authorization_code','refresh_token'],application_type:'web',...extra})});return {status:r.status,body:await r.json()}};
 const authorize=(clientId,redirect=STABLE)=>fetch(AS+'/auth?'+new URLSearchParams({client_id:clientId,response_type:'code',redirect_uri:redirect,scope:SCOPES.join(' '),resource:ORIGIN,code_challenge:'x'.repeat(43),code_challenge_method:'S256',state:'s'}),{redirect:'manual'});
