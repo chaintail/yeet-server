@@ -196,3 +196,32 @@ test('after the email was confirmed on the YEET page: the notice drops the cache
  const sync=withCardAccount({...of,wait:false})(()=>{throw Error('TRADE_NOT_FOUND')});
  await assert.rejects(sync(null,{}),/TRADE_NOT_FOUND/);
 });
+
+test('the trade page hint rides on the basket and trade answers as card_hint, from the same Privy read; execute and submit add only the hint',async()=>{
+ const {hintFor,methodsOf}=await import('./account-login.mjs');
+ const {deriveLinkKey,verifyLinkToken}=await import('#shared/link-token.mjs');
+ const key=deriveLinkKey('c'.repeat(40));
+ const users={'did:privy:e':{id:'did:privy:e',linked_accounts:[{type:'email',address:'luke@chaintail.xyz'}]},'did:privy:g':{id:'did:privy:g',linked_accounts:[{type:'google_oauth',email:'gina@gmail.example'},{type:'apple_oauth',email:null}]}};
+ const dids={'yeet-privy-eeeeeeeeeeeeeeeeeeeeee':'did:privy:e','yeet-privy-gggggggggggggggggggggg':'did:privy:g'};
+ let calls=0;
+ const lookup=createAccountLogin({api:{app:async(_m,p)=>{calls++;const u=users[p.split('/').pop()];if(!u)throw Error('down');return u}}});
+ const of={lookup:()=>lookup,didOf:ctx=>dids[ctx.accountId],hint:(ctx,facts)=>hintFor(ctx.accountId,facts,{key})};
+ const propose=withCardAccount(of)(async()=>({proposal_id:'p_abcdefghij0123456789'}));
+ const execute=withCardAccount({...of,wait:false,account:false})(async()=>({trade_id:'t_abcdefghij0123456789'}));
+ const e=await propose(null,{accountId:'yeet-privy-eeeeeeeeeeeeeeeeeeeeee'});
+ assert.equal(e.card_account.email,'luke@chaintail.xyz');
+ assert.deepEqual(verifyLinkToken(key,e.card_hint,{purpose:'hint'}).m,['email']);
+ assert.equal(verifyLinkToken(key,e.card_hint,{purpose:'hint'}).a,'yeet-privy-eeeeeeeeeeeeeeeeeeeeee');
+ const g=await propose(null,{accountId:'yeet-privy-gggggggggggggggggggggg'});
+ assert.deepEqual(verifyLinkToken(key,g.card_hint,{purpose:'hint'}).m,['google','apple'],'the methods the Privy user actually has');
+ assert.equal(calls,2);
+ // execute_trade: the facts the basket already read, no new Privy read, and no account facts added to its answer.
+ const x=await execute(null,{accountId:'yeet-privy-gggggggggggggggggggggg'});
+ assert.deepEqual(Object.keys(x).sort(),['card_hint','trade_id']);assert.equal(calls,2);
+ assert.equal(verifyLinkToken(key,x.card_hint,{purpose:'hint'}).a,'yeet-privy-gggggggggggggggggggggg');
+ // No facts (an account Privy did not answer for), or a hint that cannot be made: the answer is unchanged.
+ assert.deepEqual(await propose(null,{accountId:'yeet-privy-unknown'}),{proposal_id:'p_abcdefghij0123456789'});
+ const broken=withCardAccount({...of,hint:()=>{throw Error('no key')}})(async()=>({proposal_id:'p_abcdefghij0123456789'}));
+ assert.equal((await broken(null,{accountId:'yeet-privy-eeeeeeeeeeeeeeeeeeeeee'})).card_hint,undefined);
+ assert.deepEqual(methodsOf(null),[]);
+});

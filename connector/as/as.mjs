@@ -13,7 +13,8 @@ import {
 import { document, credentials, html, expiredAuthorizationBody, promptTitle, providerErrorPage } from "./auth-pages.mjs";
 import express from "express";
 import { providerCsp } from "./provider-csp.mjs";
-import { fundRoutes, privyPageCsp, afterSignIn, nextField } from "./fund-page.mjs";
+import { fundRoutes, privyPageCsp, afterSignIn, nextField, boundNext, FUND_NEXT } from "./fund-page.mjs";
+import { hintReader, expectedReader, mismatchBody, EXPIRED_LINK_LINE } from "./account-bound.mjs";
 import { signRoutes } from "./sign-page.mjs";
 import { ACCOUNT_TITLE, USERNAME_PATH, accountBody, usernameMessage } from "./account-page.mjs";
 import {
@@ -355,6 +356,7 @@ if (PUBLIC) {
   app.use("/reg", limit(20));
   app.use("/auth", limit(60));
   app.use("/sign/api", limit(60));
+  app.use("/fund/api", limit(60));
 }
 // Body parsers run only on this server's own forms; oidc-provider reads its routes' bodies itself.
 const formBody = express.urlencoded({ extended: false, limit: "32kb" });
@@ -397,10 +399,15 @@ function authDocument(res, title, body) {
   );
   return document(title, body, nonce);
 }
-const loginFields = () =>
+// `bound` (a page opened from an account-bound link, account-bound.mjs): only that account's methods, no new
+// account, and a clean start when the person is trying again after coming in as someone else.
+const loginFields = (bound = null, again = false) =>
   process.env.PRIVY_LOGIN === "1"
-    ? '<div id="privy-login"><p role="status">Loading secure sign in…</p></div><script type="module" src="/account/privy-login/login.js"></script>'
+    ? `<div id="privy-login"${bound ? ` data-bound="1" data-methods="${bound.methods.join(",")}"${again ? ' data-again="1"' : ""}` : ""}><p role="status">Loading secure sign in…</p></div><script type="module" src="/account/privy-login/login.js"></script>`
     : credentials();
+// Signed hints on account-bound links (shared/link-token.mjs purpose `hint`): verified here, never trusted from the page.
+const readHint = hintReader((t) => verifyLinkToken(linkKey(), t, { purpose: "hint" }));
+const expectedAccount = expectedReader((route, account) => coreSend(route, account, secret("core-as")));
 // Public values only: the sign-in page needs the app id.
 app.get("/account/identity-config", (_q, r) =>
   process.env.PRIVY_LOGIN === "1"
@@ -529,16 +536,31 @@ async function finishConnect(q, r, d) {
 }
 app.get("/account/login", (q, r) => {
   const next = nextField(q.query.next);
+  // From an account-bound link (the funding page, or the terms page whose own token ran out): the hint rides along.
+  const bound = boundNext(q.query.next) ? readHint(q.query.h) : null;
   const c = randomBytes(24).toString("hex");
   cookie(r, "yeet_login", c, 300);
+  r.set({ "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
   r.type("html").send(
     authDocument(
       r,
       promptTitle("login"),
-      `<form method="POST" data-yeet-prompt="login"><input type="hidden" name="csrf" value="${c}">${next}${loginFields()}${process.env.PRIVY_LOGIN === "1" ? "" : '<button type="submit">Sign in</button>'}</form>`,
+      `<form method="POST" data-yeet-prompt="login"><input type="hidden" name="csrf" value="${c}">${next}${bound ? `<input type="hidden" name="hint" value="${html(bound.token)}">` : ""}${loginFields(bound, q.query.again === "1")}${process.env.PRIVY_LOGIN === "1" ? "" : '<button type="submit">Sign in</button>'}</form>`,
     ),
   );
 });
+function openSession(r, id) {
+  const token = randomBytes(32).toString("base64url");
+  const db = read("sessions.json");
+  db[token] = {
+    id,
+    csrf: randomBytes(24).toString("hex"),
+    expires: Date.now() + 3600000,
+  };
+  write("sessions.json", db);
+  cookie(r, "yeet_session", token);
+  cookie(r, "yeet_login", "", 0);
+}
 app.post("/account/login", formBody, async (q, r) => {
   try {
     const c = q.headers.cookie
@@ -547,19 +569,33 @@ app.post("/account/login", formBody, async (q, r) => {
       .find((x) => x.startsWith("yeet_login="))
       ?.slice(11);
     if (!c || !equal(c, q.body.csrf) || !originOK(q)) return r.sendStatus(403);
+    // The form came from an account-bound link (account-bound.mjs): the person must be the link's account. They are
+    // looked up, never resolved: no account is created here, and none is linked or switched.
+    if (typeof q.body.hint === "string" && q.body.hint) {
+      r.set({ "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
+      const bound = boundNext(q.body.next) ? readHint(q.body.hint) : null;
+      if (!bound) return r.status(400).type("html").send(authDocument(r, promptTitle("login"), `<p class="notice" role="alert">${html(EXPIRED_LINK_LINE)}</p>`));
+      const id = await lookupAccount(q.body);
+      if (id !== bound.account) {
+        const say = await expectedAccount(bound);
+        const retry = `/account/login?next=${q.body.next}&h=${encodeURIComponent(bound.token)}&again=1`;
+        return r.status(403).type("html").send(authDocument(r, promptTitle("login"), mismatchBody({ use: say.use, retry })));
+      }
+      if (!(await eligible(id))) return r.sendStatus(403);
+      // A YEET session of another account in this browser ends here: the person just proved they are this one.
+      const current = session(q);
+      if (current && current.id !== id) {
+        const db = read("sessions.json");
+        delete db[current.token];
+        write("sessions.json", db);
+      }
+      openSession(r, id);
+      return r.redirect(q.body.next === FUND_NEXT ? `/fund?h=${encodeURIComponent(bound.token)}` : afterSignIn(q.body.next));
+    }
     const id = await verifyIdentity(q.body);
     if (!sameOwner(session(q), id) || !(await eligible(id)))
       return r.sendStatus(403);
-    const token = randomBytes(32).toString("base64url");
-    const db = read("sessions.json");
-    db[token] = {
-      id,
-      csrf: randomBytes(24).toString("hex"),
-      expires: Date.now() + 3600000,
-    };
-    write("sessions.json", db);
-    cookie(r, "yeet_session", token);
-    cookie(r, "yeet_login", "", 0);
+    openSession(r, id);
     r.redirect(afterSignIn(q.body.next));
   } catch {
     r.status(401).json({ error: "sign in failed" });
@@ -652,15 +688,17 @@ app.post(USERNAME_PATH, formBody, async (q, r) => {
 });
 // Add funds: a direct USDC transfer on Base or on Solana (address, QR code, wallet links), or USDC on Base by card
 // through Privy funding (Coinbase Onramp). Needs a YEET sign-in session and the Privy sign-in.
-fundRoutes(app, { enabled: () => process.env.PRIVY_LOGIN === "1", session });
+fundRoutes(app, { enabled: () => process.env.PRIVY_LOGIN === "1", session, hint: readHint, expected: expectedAccount, lookup: lookupAccount, originOK });
 // The YEET terms as a first-party page with checkboxes (terms-page.mjs): the same record as yeet_accept_terms.
-termsRoutes(app, { session, originOK, equal, formBody, linkToken: (t) => { try { return verifyLinkToken(linkKey(), t, { purpose: "terms" }); } catch { return null; } }, core: (route, account, body) => coreSend(route, account, secret("core-as"), body), document: authDocument });
+termsRoutes(app, { session, originOK, equal, formBody, hint: readHint, linkToken: (t) => { try { return verifyLinkToken(linkKey(), t, { purpose: "terms" }); } catch { return null; } }, core: (route, account, body) => coreSend(route, account, secret("core-as"), body), document: authDocument });
 // Card signing (sign-page.mjs): the signer script the trade card loads, and the first-party signing page with its two
 // routes. The page's caller is the Privy user signed in on the page, matched to the account already linked to it.
 signRoutes(app, {
   enabled: () => process.env.PRIVY_LOGIN === "1" || (TEST && process.env.DEV_IDENTITY_STUB === "1"),
   appId: () => process.env.PRIVY_APP_ID ?? "",
   methods: loginMethods,
+  hint: readHint,
+  expected: expectedAccount,
   lookup: lookupAccount,
   core: (route, account, body, timeoutMs) => coreSend(route, account, secret("core-as"), body, timeoutMs),
   originOK,

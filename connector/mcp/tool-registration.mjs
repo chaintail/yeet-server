@@ -9,6 +9,9 @@ import {SIGNER_META_KEY,signerMetaFromEnv} from '#shared/signing.mjs';
 import {staleness as processStaleness,staleKey,appRefresh,withRefresh,BUILD_META_KEY} from './refresh.mjs';
 import {refreshGuidance} from './guidance.mjs';
 import {hasScope} from '#scope-catalog';
+import {withLinkToken} from '#shared/link-token.mjs';
+/** The shape of a signed link token (shared/link-token.mjs); the connector only passes it on, it holds no key. */
+const LINK_TOKEN=/^v1\.[A-Za-z0-9_-]{8,300}\.[A-Za-z0-9_-]{43}$/;
 /** Card-only `_meta` key for the connected account (contract x-yeet-meta.account): the device check in the trade card. */
 export const ACCOUNT_META_KEY='yeet/account';
 
@@ -128,7 +131,9 @@ export function createMcpServer({token,callCore,env=process.env,staleness=proces
     const listed=CUT_TO_CONTRACT.has(name)&&schemas.output.properties?new Set(Object.keys(schemas.output.properties)):null;
     // The connected account (user id, email for the device code, wallets) goes to the card only, like the confirm code.
     const account=isObject&&result.card_account&&typeof result.card_account==='object'?result.card_account:undefined;
-    const data=isObject?Object.fromEntries(Object.entries(result).filter(([k])=>k!=='confirm'&&k!=='guidance'&&k!=='card_account'&&(!listed||listed.has(k)))):result;
+    // The signed hint for the trade page link (core account-login.mjs hintFor): card only, on the signer's page address.
+    const hint=isObject&&typeof result.card_hint==='string'&&LINK_TOKEN.test(result.card_hint)?result.card_hint:undefined;
+    const data=isObject?Object.fromEntries(Object.entries(result).filter(([k])=>k!=='confirm'&&k!=='guidance'&&k!=='card_account'&&k!=='card_hint'&&(!listed||listed.has(k)))):result;
     // Agent guidance (guidance.mjs): for the model, in structuredContent (the card ignores it) and in the text it reads.
     const own=isObject?guidanceFor(name,data,ctx):undefined;
     const guidance=tellRefresh&&isObject?withRefresh(refreshGuidance(),own):own;
@@ -137,7 +142,7 @@ export function createMcpServer({token,callCore,env=process.env,staleness=proces
     if(!parsed.success)return toolError({error:'TEMPORARILY_UNAVAILABLE'},ctx);
     const text=TEXT[name]?TEXT[name](result):JSON.stringify(parsed.data);
     // Card only: the server's card build, so a card built from another commit can tell it is stale.
-    const cardMeta={[BUILD_META_KEY]:staleness.build,...(confirm?{[CONFIRM_META_KEY]:confirm}:{}),...(account?{[ACCOUNT_META_KEY]:account}:{}),...(signer&&SIGNER_TOOLS.has(name)?{[SIGNER_META_KEY]:signer}:{})};
+    const cardMeta={[BUILD_META_KEY]:staleness.build,...(confirm?{[CONFIRM_META_KEY]:confirm}:{}),...(account?{[ACCOUNT_META_KEY]:account}:{}),...(signer&&SIGNER_TOOLS.has(name)?{[SIGNER_META_KEY]:hint?{...signer,sign_page_url:withLinkToken(signer.sign_page_url,'h',hint)}:signer}:{})};
     // The one-sentence tools (spin, lucky wheel) carry the guidance as a second text block; JSON text already has it.
     const content=[{type:'text',text},...(TEXT[name]&&parsed.data.guidance?[{type:'text',text:parsed.data.guidance}]:[])];
     return {structuredContent:parsed.data,...(Object.keys(cardMeta).length?{_meta:cardMeta}:{}),content};

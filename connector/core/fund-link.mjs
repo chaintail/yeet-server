@@ -2,6 +2,7 @@
 // The contract's https_url type only takes https links, so a local http origin yields no link and the result carries
 // no fund_url (the card then shows no Add funds button) rather than failing the output check.
 import {AS} from '#shared/common.mjs';
+import {withLinkToken} from '#shared/link-token.mjs';
 
 export const FUND_PATH='/fund';
 /** <origin>/fund when the origin is a plain https origin; null otherwise. */
@@ -21,3 +22,7 @@ export const fundAnswer=(usdc,url=FUND_URL)=>({usdc,presets:[...FUND_PRESETS],..
 export const homeWithFundUrl=(home,url=FUND_URL)=>url&&home?.ready==='needs_funds'?{...home,fund_url:url}:home;
 /** A BALANCE_LOW refusal carries fund_url. */
 export const failureWithFundUrl=(f,url=FUND_URL)=>url&&f?.error==='BALANCE_LOW'?{...f,fund_url:url}:f;
+/** The funding page link for ONE account: <fund_url>?h=<signed hint> (shared/link-token.mjs, account-login.mjs
+ * hintFor). The page then shows only that account's sign-in methods and refuses any other account. No hint: the
+ * plain link. */
+export const fundUrlWithHint=(hint,url=FUND_URL)=>url&&hint?withLinkToken(url,'h',hint):url;

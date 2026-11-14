@@ -12,15 +12,15 @@ import {xpRuntime,p2On,homeXp,homeXpKeys,checkSpinTable} from './xp/xp.mjs';
 import {createAvailability,quoteProbe} from './xp/availability.mjs';
 import {z} from 'zod';
 import {toolSchemas,zodSchema,contract} from '../mcp/tool-contract.mjs';
-import {homeWithFundUrl,failureWithFundUrl,fundAnswer} from './fund-link.mjs';
+import {homeWithFundUrl,failureWithFundUrl,fundAnswer,fundUrlWithHint} from './fund-link.mjs';
 import {versionInfo} from './version.mjs';
 import {overview,totalUsdc,welcomeSuggestions} from './overview.mjs';
 import {winnerOf} from './trade/pnl.mjs';
 import {boardAnswer} from './xp/boards.mjs';
 import {TERMS_VERSION,termsObject,checkAcceptance,termsOpen,termsLinkFor} from './terms.mjs';
-import {linkKey} from '#shared/link-token.mjs';
+import {linkKey,withLinkToken} from '#shared/link-token.mjs';
 import {acceptanceOf,recordAcceptance,referralOf,decideReferral,referralCode} from './terms-store.mjs';
-import {createAccountLogin,withCardAccount} from './account-login.mjs';
+import {createAccountLogin,withCardAccount,hintFor,methodsOf} from './account-login.mjs';
 import {hasScope} from '#scope-catalog';
 // Accounts are created on the first verified sign-in (identity-store.mjs). The identity app is Privy in
 // production and the development stub only under TEST_PROFILE=1 with DEV_IDENTITY_STUB=1.
@@ -156,10 +156,23 @@ app.use((q,r,next)=>{if(q.role==='mcp'){const needed=routeScope(q.method,q.path)
 // terms.accepted false and "review and accept the YEET terms" as its first suggestion) and the terms routes
 // themselves. The sign-in server's own routes (the account page, wallet set-up, the trade page of a trade that already
 // exists) and the operator's are not gated here.
+// ---- Account-bound page links (shared/link-token.mjs purpose `hint`; account-login.mjs hintFor). A link the core
+// hands out for the connected account names that account and the sign-in methods its Privy user has (read from
+// Privy with the app credentials, cached as the card facts are). The pages show only those methods and refuse any
+// other account. No answer from Privy: the link is plain and the page offers the default methods.
+let accountLogin;
+const logins=()=>(accountLogin??=createAccountLogin());
+const signHint=(ctx,facts)=>hintFor(ctx.accountId,facts,{key:pageKey()});
+/** The hint from facts that are already cached, or null. Never waits. */
+function knownHint(accountId){try{const did=didFor(accountId),facts=did?logins().peek(did):null;return facts?hintFor(accountId,facts,{key:pageKey()}):null}catch{return null}}
+/** The account's funding page link (waits for Privy once, 4 s at most; then cached). */
+async function fundLink(accountId){try{const did=didFor(accountId),facts=did?await logins()(did):null;return fundUrlWithHint(facts?hintFor(accountId,facts,{key:pageKey()}):null)}catch{return fundUrlWithHint(null)}}
 // The key the page links are signed with (shared/link-token.mjs: derived from core-as). Without it the links are plain.
 const pageKey=()=>{try{return linkKey()}catch{return null}};
 // terms.page_url is this account's own link: the terms page opens on the statements and Accept with no sign-in.
-const withTermsLink=(terms,accountId)=>terms.page_url?{...terms,page_url:termsLinkFor(accountId,{pageUrl:terms.page_url,key:pageKey()})}:terms;
+// It also carries the account's sign-in hint when the methods are already known (never waiting for Privy), so a
+// link that has expired still offers the right methods.
+const withTermsLink=(terms,accountId)=>terms.page_url?{...terms,page_url:withLinkToken(termsLinkFor(accountId,{pageUrl:terms.page_url,key:pageKey()}),'h',knownHint(accountId))}:terms;
 const termsOf=accountId=>withTermsLink(termsObject(acceptanceOf(accountId,TERMS_VERSION)),accountId);
 app.use((q,r,next)=>{
  if(q.role!=='mcp'||termsOpen(q.method,q.path))return next();
@@ -228,20 +241,20 @@ function trade(tool,fn){
   if(!args.success)return r.status(400).json(failure('INVALID_ARGUMENT'));
   try{r.json(await fn(await tradeEngine(),ctx,args.data,q))}
   catch(e){
-   if(e?.name==='TradeError'){console.error(JSON.stringify({event:'trade_refused',route:q.route?.path,code:e.code,detail:String(e.detail??'').slice(0,200)}));return r.status(CODE_STATUS[e.code]??409).json(failureWithFundUrl(withUserMessage(failure(e.code),e)))}
+   if(e?.name==='TradeError'){console.error(JSON.stringify({event:'trade_refused',route:q.route?.path,code:e.code,detail:String(e.detail??'').slice(0,200)}));return r.status(CODE_STATUS[e.code]??409).json(failureWithFundUrl(withUserMessage(failure(e.code),e),e.code==='BALANCE_LOW'?await fundLink(ctx.accountId):undefined))}
    console.error(JSON.stringify({event:'trade_route_failed',route:q.route?.path,error:String(e?.message??e).slice(0,200)}));
    unavailable(r);
   }
  };
 }
 app.get('/home',trade('yeet_home',async(e,ctx)=>{
- const home=homeWithFundUrl(await e.home(ctx));
+ const raw=await e.home(ctx);
+ const home=homeWithFundUrl(raw,raw?.ready==='needs_funds'?await fundLink(ctx.accountId):undefined);
  if(!p2On())return home;
  return {...home,xp:xpSafe('home',()=>homeXp(xpRuntime().summary(ctx.accountId),HOME_XP_KEYS),null),recent_wins:xpSafe('wins',()=>xpRuntime().recentWins(),[])};
 }));
 // yeet_overview (overview.mjs): the entry answer. The portfolio read, the XP summary and the cost basis each fail soft
 // (their fields are null); only the wallets and readiness (e.home) can refuse the call.
-let accountLogin;
 async function overviewFor(e,ctx,{card=false}={}){
  const [home,bag]=await Promise.all([e.home(ctx),e.portfolio(ctx).catch(()=>null)]);
  const xp=p2On()?xpSafe('overview',()=>xpRuntime().summary(ctx.accountId),null):null;
@@ -249,19 +262,20 @@ async function overviewFor(e,ctx,{card=false}={}){
  const view=overview({home,bag,xp,winner,username:boardName(ctx.accountId),wheel:p2On(),board:p2On(),terms:termsOf(ctx.accountId),referral:referralOf(ctx.accountId)});
  if(!card)return view;
  // Card only (the connector moves it to _meta["yeet/account"]): who the connected account is, for the device check.
- accountLogin??=createAccountLogin();
- const did=didFor(ctx.accountId),login=await accountLogin(did);
+ const did=didFor(ctx.accountId),login=await logins()(did);
  const wallets=[home.wallets?.base?.address,home.wallets?.solana?.address].filter(a=>typeof a==='string');
  return {...view,card_account:{user:did??null,email:login?.email??null,masked:login?.masked??null,google:login?.google===true,apple:login?.apple===true,wallets}};
 }
 // The basket card meets the first trade on a device: its answers (yeet_propose, skeet_propose, yeet_quote) carry the
 // card-only account facts too (account-login.mjs withCardAccount). No facts from Privy: the answer is unchanged.
-const basketCard=withCardAccount({lookup:()=>(accountLogin??=createAccountLogin()),didOf:ctx=>didFor(ctx.accountId)});
+const basketCard=withCardAccount({lookup:logins,didOf:ctx=>didFor(ctx.accountId),hint:signHint});
+// execute_trade and submit_trade_signature: only the trade page hint, from facts already known (the basket read them).
+const hintOnly=withCardAccount({lookup:logins,didOf:ctx=>didFor(ctx.accountId),hint:signHint,wait:false,account:false});
 app.get('/overview',trade('yeet_overview',(e,ctx)=>overviewFor(e,ctx,{card:true})));
 // yeet_fund: the funding card. All USDC as one number (read fresh: the card asks again after the funding page).
 app.get('/fund',trade('yeet_fund',async(e,ctx)=>{
  const home=await e.home(ctx),f=home.funding;
- return fundAnswer(f?totalUsdc(f.base_usdc,f.solana_usdc):totalUsdc(home.wallets?.base?.usdc));
+ return fundAnswer(f?totalUsdc(f.base_usdc,f.solana_usdc):totalUsdc(home.wallets?.base?.usdc),await fundLink(ctx.accountId));
 }));
 // lucky_id (optional): the caller's own lucky wheel, spun today, else INVALID_ARGUMENT. The proposal is linked to it;
 // the bonus is decided when the trade settles (lucky.settle), since yeet_quote can still change coins and amount.
@@ -276,12 +290,12 @@ app.post('/proposals',trade('yeet_propose',basketCard(async(e,ctx,a)=>{
 })));
 app.post('/proposals/skeet',trade('skeet_propose',basketCard((e,ctx,a)=>e.skeet(ctx,a))));
 app.post('/proposals/:id/quote',trade(null,basketCard((e,ctx,_a,q)=>{const a=inputs.yeet_quote.safeParse({...q.body,proposal_id:q.params.id});if(!a.success)throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});return e.quote(ctx,a.data)})));
-app.post('/trades',trade('execute_trade',(e,ctx,a)=>e.execute(ctx,a)));
+app.post('/trades',trade('execute_trade',hintOnly((e,ctx,a)=>e.execute(ctx,a))));
 // submit_trade_signature: bytes the person's own wallet signed for one leg (pipeline.submit checks and sponsors them).
-app.post('/trades/:id/signature',trade(null,(e,ctx,_a,q)=>{const a=inputs.submit_trade_signature.safeParse({...q.body,trade_id:q.params.id});if(!a.success)throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});return e.submit(ctx,a.data)}));
+app.post('/trades/:id/signature',trade(null,hintOnly((e,ctx,_a,q)=>{const a=inputs.submit_trade_signature.safeParse({...q.body,trade_id:q.params.id});if(!a.success)throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});return e.submit(ctx,a.data)})));
 // trade_status carries the card-only account facts as well, but only the ones already known (it never waits for
 // Privy): a card that follows a trade finished on the YEET page then sees the email the person confirmed there.
-const statusCard=withCardAccount({lookup:()=>(accountLogin??=createAccountLogin()),didOf:ctx=>didFor(ctx.accountId),wait:false});
+const statusCard=withCardAccount({lookup:logins,didOf:ctx=>didFor(ctx.accountId),wait:false,hint:signHint});
 app.get('/trades/:id',trade(null,statusCard((e,ctx,_a,q)=>{
  const view=e.status(ctx,q.params.id);
  if(!p2On())return view;
@@ -319,6 +333,15 @@ app.post('/sign/account/login-refresh',(q,r)=>{
  const did=didFor(q.subject);
  if(did)accountLogin?.forget(did);
  r.json({ok:true});
+});
+/** What a page tells a person who came in with ANOTHER account (as/account-bound.mjs): the sign-in methods of the
+ * account the link names (`x-yeet-subject`, from a verified hint) and the masked address behind each. Read from
+ * Privy; `known: false` when it did not answer. Sign-in server only. */
+app.get('/account/sign-in',async(q,r)=>{
+ if(q.role!=='as')return r.sendStatus(403);
+ let facts=null;
+ try{const did=didFor(q.subject);facts=did?await logins()(did):null}catch{facts=null}
+ r.json(facts?{known:true,methods:methodsOf(facts),labels:facts.labels??{}}:{known:false,methods:[],labels:{}});
 });
 // Leaderboard and daily spin (P2): answered only with YEET_P2=1, otherwise a typed retryable failure.
 function xpRoute(tool,fn){

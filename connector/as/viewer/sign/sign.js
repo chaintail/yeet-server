@@ -34,7 +34,7 @@ function kept() {
   for (const s of stores()) {
     try {
       const v = JSON.parse(s.getItem(RETURN_KEY) ?? 'null');
-      if (v && TRADE_ID.test(v.trade_id ?? '') && Date.now() - Number(v.at) < RETURN_FOR_MS) return {tradeId: v.trade_id, back: chatgpt(v.back)};
+      if (v && TRADE_ID.test(v.trade_id ?? '') && Date.now() - Number(v.at) < RETURN_FOR_MS) return {tradeId: v.trade_id, back: chatgpt(v.back), hint: HINT.test(v.hint ?? '') ? v.hint : '', methods: v.methods};
     } catch { /* not ours */ }
   }
   return null;
@@ -42,13 +42,16 @@ function kept() {
 const METHOD_IDS = ['google', 'apple', 'email'];
 /** The sign-in methods the server offers on this page (data-methods); with none named, Google and Apple. */
 const methodsOf = (text) => { const given = String(text ?? '').split(','); const ids = METHOD_IDS.filter((m) => given.includes(m)); return ids.length ? ids : ['google', 'apple']; };
-const cfg = {appId: root.dataset.appId || '', tradeId: root.dataset.tradeId || '', back: root.dataset.back || '', methods: methodsOf(root.dataset.methods)};
+/** The shape of the signed hint a card's link carries (?h=). The server checks it; the page only carries it along. */
+const HINT = /^v1\.[A-Za-z0-9_-]{8,300}\.[A-Za-z0-9_-]{43}$/;
+const cfg = {appId: root.dataset.appId || '', tradeId: root.dataset.tradeId || '', back: root.dataset.back || '', methods: methodsOf(root.dataset.methods), hint: HINT.test(root.dataset.hint || '') ? root.dataset.hint : ''};
 const query = new URLSearchParams(location.search);
 const fromProvider = query.has('privy_oauth_code') || query.has('privy_oauth_state');
-if (!cfg.tradeId) { const k = kept(); if (k) { cfg.tradeId = k.tradeId; cfg.back = cfg.back || k.back; } }
-const keep = () => { for (const s of stores()) { try { s.setItem(RETURN_KEY, JSON.stringify({trade_id: cfg.tradeId, back: cfg.back, at: Date.now()})); } catch { /* the address still names the trade */ } } };
+// Back from Google or Apple on the bare address: the trade, the way back, the hint and its methods as this tab kept them.
+if (!cfg.tradeId) { const k = kept(); if (k) { cfg.tradeId = k.tradeId; cfg.back = cfg.back || k.back; if (k.hint) { cfg.hint = k.hint; cfg.methods = methodsOf(String(k.methods ?? '')); } } }
+const keep = () => { for (const s of stores()) { try { s.setItem(RETURN_KEY, JSON.stringify({trade_id: cfg.tradeId, back: cfg.back, hint: cfg.hint, methods: cfg.methods.join(','), at: Date.now()})); } catch { /* the address still names the trade */ } } };
 const forget = () => { for (const s of stores()) { try { s.removeItem(RETURN_KEY); } catch { /* nothing kept */ } } };
-const tradeUrl = () => `/sign?trade_id=${encodeURIComponent(cfg.tradeId)}${cfg.back ? `&redirectUrl=${encodeURIComponent(cfg.back)}` : ''}`;
+const tradeUrl = () => `/sign?trade_id=${encodeURIComponent(cfg.tradeId)}${cfg.hint ? `&h=${encodeURIComponent(cfg.hint)}` : ''}${cfg.back ? `&redirectUrl=${encodeURIComponent(cfg.back)}` : ''}`;
 
 function show(...nodes) { body.replaceChildren(...nodes.filter(Boolean), ...(cfg.back ? [backLink()] : [])); }
 function backLink() { const a = el('a', 'back', 'Back to ChatGPT'); a.href = cfg.back; a.rel = 'noopener'; return a; }
@@ -221,8 +224,10 @@ function draw(s) {
   if (s.view === 'loading') return show(line('Getting your trade…'));
   if (s.view === 'unavailable') return show(line(s.message, 'bad'));
   if (s.view === 'mismatch') {
-    const other = el('button', 'quiet', 'Use another account'); other.id = 'sign-other'; other.onclick = () => flow.useAnother();
-    return show(line(s.message, 'bad'), s.who ? line(`You’re here as ${s.who}.`) : null, other);
+    // `bound`: the link was made for one account and this is another. The right method is named; one button to retry.
+    const other = el('button', s.bound ? '' : 'quiet', s.bound ? 'Try again' : 'Use another account'); other.id = 'sign-other'; other.onclick = () => flow.useAnother();
+    const use = s.use ? line(s.use) : null; if (use) use.id = 'sign-use';
+    return show(line(s.message, 'bad'), use, s.who ? line(`You’re here as ${s.who}.`) : null, other);
   }
   if (s.view === 'nothing') return show(...tradeRows(s), line(s.message, s.kind), linkedLine(s));
   if (s.view === 'ready' || s.view === 'sending') {
@@ -249,7 +254,7 @@ async function main() {
     let j = null; try { j = await r.json(); } catch { /* no body */ }
     return {ok: r.ok, status: r.status, body: j};
   };
-  flow = createSignFlow({signer, post, wr: {privyRpcBodies, signedFromWallets}, tradeId: cfg.tradeId, onChange: draw});
+  flow = createSignFlow({signer, post, wr: {privyRpcBodies, signedFromWallets}, tradeId: cfg.tradeId, hint: cfg.hint, onChange: draw});
   // Back from Google or Apple: the sign-in step finishes what it started (it reads the answer in the address), then
   // the page reloads on the trade's own address.
   if (fromProvider) { shown = 'signin'; return showSignIn(null); }

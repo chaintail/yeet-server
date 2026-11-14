@@ -8,6 +8,7 @@
 // Apple account is NOT such an account (Privy's documentation describes no merging by address and no server call that
 // links an email without a code), so for those accounts `email` is null and the trade finishes on the YEET page.
 import {createPrivyApi,privyConfig} from './trade/privy-api.mjs';
+import {mintLinkToken,HINT_LINK_TTL_S} from '#shared/link-token.mjs';
 /** l•••@c•••.xyz: the first letter of the name and of the domain, the last label kept. */
 export function maskEmail(email){
  const m=typeof email==='string'?/^([^\s@])[^\s@]*@([^\s@.])[^\s@]*\.([^\s@.]+)$/.exec(email):null;
@@ -18,6 +19,26 @@ export function loginFacts(user){
  const accounts=Array.isArray(user?.linked_accounts)?user.linked_accounts:[];
  const email=accounts.find(a=>a?.type==='email'&&typeof a.address==='string'&&/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.address))?.address??null;
  return {user:typeof user?.id==='string'?user.id:null,email,masked:maskEmail(email),google:accounts.some(a=>a?.type==='google_oauth'),apple:accounts.some(a=>a?.type==='apple_oauth')};
+}
+/** The sign-in methods a Privy user actually has, in page order (google, apple, email), from loginFacts. */
+export const methodsOf=facts=>facts?[...(facts.google?['google']:[]),...(facts.apple?['apple']:[]),...(facts.email?['email']:[])]:[];
+/** The masked address behind each method ({google, apple, email}, each l•••@c•••.xyz or null): what a page shows a
+ * person who came in with another account, so they know which of their own to use. */
+export function signInLabels(user){
+ const accounts=Array.isArray(user?.linked_accounts)?user.linked_accounts:[];
+ const of=(type,field)=>maskEmail(accounts.find(a=>a?.type===type)?.[field]);
+ return {google:of('google_oauth','email'),apple:of('apple_oauth','email'),email:of('email','address')};
+}
+/**
+ * The signed hint an account-bound page link carries (shared/link-token.mjs, purpose `hint`): the account id and the
+ * methods its Privy user has. The funding and trade pages then show only those methods and refuse any other account.
+ * Null when the methods are not known (Privy did not answer) or there is no key: the link is then plain and the page
+ * offers the default methods.
+ */
+export function hintFor(accountId,facts,{key,now=Date.now()}={}){
+ const m=methodsOf(facts);
+ if(!key||!m.length)return null;
+ try{return mintLinkToken(key,{purpose:'hint',account:accountId,ttl:HINT_LINK_TTL_S,claims:{m},now})}catch{return null}
 }
 // An account WITH an email login keeps it (a person may link at most one email, Privy linking-accounts): 10 minutes.
 // An account without one can gain it on the YEET page (the optional "confirm your email once" step after a Google or
@@ -40,7 +61,9 @@ export function createAccountLogin({env=process.env,fetch=globalThis.fetch,api,n
   const hit=fresh(did);
   if(hit)return hit;
   try{
-   const value=loginFacts(await client.app('GET',`/v1/users/${did}`));
+   const user=await client.app('GET',`/v1/users/${did}`);
+   // `labels` (signInLabels) rides beside the facts for the pages; the card's facts are picked field by field.
+   const value=Object.assign(loginFacts(user),{labels:signInLabels(user)});
    cache.set(did,{at:now(),value});if(cache.size>MAX)cache.delete(cache.keys().next().value);
    return value;
   }catch{return null}
@@ -68,16 +91,24 @@ export function createAccountLogin({env=process.env,fetch=globalThis.fetch,api,n
  * already known are added (lookup.peek), so the answer never waits for Privy. That is how a card that is following a
  * trade learns that the person confirmed their email on the YEET page meanwhile: the page's notice drops the cached
  * facts, the next status answer starts a fresh read, and the one after it carries the email.
+ *
+ * `hint: (ctx, facts) => token or null` adds `card_hint`: the signed hint for the trade page link (hintFor). The
+ * connector puts it on the card-only signer's page address; the model never reads it. `account: false` adds only the
+ * hint (execute_trade and submit_trade_signature: their card already holds the account facts).
  */
-export function withCardAccount({lookup,didOf,wait=true}){
+export function withCardAccount({lookup,didOf,wait=true,hint=null,account:withAccount=true}){
  const facts=async ctx=>{
   try{
    const did=didOf(ctx),login=did?(wait?await lookup()(did):lookup().peek(did)):null;
-   return login?{user:did,email:login.email,masked:login.masked,google:login.google===true,apple:login.apple===true,wallets:[]}:null;
+   if(!login)return null;
+   let token=null;
+   try{token=hint?hint(ctx,login):null}catch{token=null}
+   return {account:withAccount?{user:did,email:login.email,masked:login.masked,google:login.google===true,apple:login.apple===true,wallets:[]}:null,hint:typeof token==='string'?token:null};
   }catch{return null}
  };
  return fn=>async(e,ctx,a,q)=>{
-  const reading=facts(ctx),out=await fn(e,ctx,a,q),account=await reading;
-  return account&&out&&typeof out==='object'&&!Array.isArray(out)?{...out,card_account:account}:out;
+  const reading=facts(ctx),out=await fn(e,ctx,a,q),known=await reading;
+  if(!known||!out||typeof out!=='object'||Array.isArray(out))return out;
+  return {...out,...(known.account?{card_account:known.account}:{}),...(known.hint?{card_hint:known.hint}:{})};
  };
 }

@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { PrivyProvider, usePrivy, useUser } from "@privy-io/react-auth";
+import { PrivyProvider, usePrivy, useUser, useLoginWithOAuth } from "@privy-io/react-auth";
 import { privyConfig } from "./privy-app.jsx";
-import { NO_METHOD_LINE } from "./login-methods.js";
+import { NO_METHOD_LINE, oauthRefusal } from "./login-methods.js";
 import { ChooseMethod, useEnabledMethods } from "./choose-method.jsx";
 import {
   CHAINS,
@@ -252,16 +252,84 @@ function SignIn({ config }) {
   );
 }
 
+/**
+ * The sign-in page opened from an account-bound link (as/account-bound.mjs; the funding page, or the terms page
+ * whose own token ran out). The server put that account's methods on the page (data-methods). Differences from the
+ * plain sign-in, all on purpose:
+ *   - nothing is created (signup off) and no wallet set-up is asked for: this page only lets an existing account in;
+ *   - once Privy knows the person, the form is posted at once; the SERVER compares who that is with the link's
+ *     account and refuses anyone else. Nothing here decides that;
+ *   - `again`: the person came in as another account and pressed Try again. The Privy session of that other account
+ *     is ended first, once (never on the way back from Google or Apple), so the methods show again.
+ */
+function BoundSignIn({ offered, again }) {
+  const { ready, authenticated, getAccessToken, logout } = usePrivy();
+  const methods = useEnabledMethods(offered);
+  const { loading, state } = useLoginWithOAuth();
+  const refusal = state?.status === "error" ? oauthRefusal(state.error?.privyErrorCode) : "";
+  const [cleared, setCleared] = useState(!again);
+  const [error, setError] = useState("");
+  const [seen, setSeen] = useState(false);
+  const sent = useRef(false);
+  useEffect(() => {
+    if (!ready || cleared) return;
+    // Drop the flag from the address first: a reload or a provider return must not end the new session again.
+    try {
+      const u = new URL(location.href);
+      u.searchParams.delete("again");
+      history.replaceState(null, "", u);
+    } catch {
+      /* the flag stays; the provider-return check below still holds */
+    }
+    (authenticated ? logout() : Promise.resolve()).catch(() => {}).finally(() => setCleared(true));
+  }, [ready, cleared, authenticated, logout]);
+  useEffect(() => {
+    if (!ready || !cleared || !authenticated || sent.current) return;
+    sent.current = true;
+    submitSession(getAccessToken).catch(() => {
+      sent.current = false;
+      setError("That could not continue. Please try again.");
+    });
+  }, [ready, cleared, authenticated, getAccessToken]);
+  const screen = !ready || !cleared ? "loading" : authenticated ? "finish" : methods === null ? "loading" : !methods.length ? "none" : "methods";
+  return (
+    <Swap id={screen}>
+      {screen === "loading" ? (
+        LOADING
+      ) : screen === "finish" ? (
+        <p role={error ? "alert" : "status"} className={error ? "notice" : undefined}>
+          {words(error || "That’s you. One moment…")}
+        </p>
+      ) : screen === "none" ? (
+        <p role="status">{words(NO_METHOD_LINE)}</p>
+      ) : (
+        <ChooseMethod
+          methods={methods}
+          signup={false}
+          intro="Use the account you connected to ChatGPT with."
+          pageNotice={loading || seen ? "" : refusal}
+          onStart={() => setSeen(true)}
+        />
+      )}
+    </Swap>
+  );
+}
+
 try {
   const response = await fetch("/account/identity-config", {
     credentials: "same-origin",
   });
   if (!response.ok) throw Error();
   const config = await response.json();
-  createRoot(document.getElementById("privy-login")).render(
+  const host = document.getElementById("privy-login");
+  const query = new URLSearchParams(location.search);
+  const fromProvider = query.has("privy_oauth_code") || query.has("privy_oauth_state");
+  createRoot(host).render(
     <PrivyProvider appId={config.appId} config={privyConfig()}>
-      {document.getElementById("privy-login").dataset.mode === "logout" ? (
+      {host.dataset.mode === "logout" ? (
         <EndSession />
+      ) : host.dataset.bound === "1" ? (
+        <BoundSignIn offered={host.dataset.methods} again={host.dataset.again === "1" && !fromProvider} />
       ) : (
         <SignIn config={config} />
       )}

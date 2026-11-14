@@ -6,11 +6,12 @@
 // Privy client (window.YeetSigner, the vendored yeet-signer.js), then submit_trade_signature. The wallet never sends;
 // YEET adds the network fee and sends. The card follows trade_status meanwhile.
 //
-// createSignFlow({signer, post, wr, tradeId, onChange, startMs, wait}) -> {begin, approve, useAnother, linkSend,
+// createSignFlow({signer, post, wr, tradeId, hint, onChange, startMs, wait}) -> {begin, approve, useAnother, linkSend,
 //   linkConfirm, linkSkip, state}
 //   signer   window.YeetSigner.create(...): session, accessToken, wallets, rpc, logout, sendCode, linkEmail
 //   post     (path, body) -> {ok, status, body}: POST /sign/api/<path> on this origin
 //   wr       {privyRpcBodies, signedFromWallets} from /sign/wallet-request.mjs
+//   hint     the signed hint of the link the page was opened from ('' when none); sent back with every call
 //   onChange (state) after every change
 //
 // state.view:
@@ -28,7 +29,8 @@
 //            nothing is remembered, so the next visit of the page offers it again)
 //   email    the address the code goes to; `fixed`: it is the one Google or Apple gave and is shown, not typed;
 //            `relay`: it is an Apple private relay address (shown, editable, with a line saying what happens)
-//   mismatch     the session here is another account than the trade's (`who`: masked), or the trade does not exist
+//   mismatch     the session here is another account than the trade's (`who`: masked), or the trade does not exist.
+//                `bound`: the page's link was made for one account and this is another (`use`: the right method)
 //   unavailable  a refusal or an outage, with its `message`
 export const UNSUPPORTED_7702 = 'unsupported';
 export const SENT = new Set(['signing', 'awaiting_gas', 'sent']);
@@ -93,9 +95,9 @@ export function linkProblem(e) {
   return null;
 }
 
-export function createSignFlow({signer, post, wr, tradeId, onChange = () => {}, startMs = 20000, wait = (ms) => new Promise((r) => setTimeout(r, ms))}) {
+export function createSignFlow({signer, post, wr, tradeId, hint = '', onChange = () => {}, startMs = 20000, wait = (ms) => new Promise((r) => setTimeout(r, ms))}) {
   const {privyRpcBodies, signedFromWallets} = wr;
-  const st = {view: 'starting', why: null, message: null, kind: '', who: null, trade: null, local: {}, failed: false, sent: false, canRetry: true, link: null};
+  const st = {view: 'starting', why: null, message: null, kind: '', who: null, use: null, bound: false, trade: null, local: {}, failed: false, sent: false, canRetry: true, link: null};
   let person = null, trade = null, busy = false;
   const local = new Map(); // leg -> send_status as this page last saw it
   const snapshot = () => ({...st, trade, local: Object.fromEntries(local), person, link: st.link ? {...st.link} : null});
@@ -105,8 +107,8 @@ export function createSignFlow({signer, post, wr, tradeId, onChange = () => {}, 
   async function api(path, extra) {
     const token = await signer.accessToken();
     if (!token) { const e = Error('signed out'); e.status = 401; throw e; }
-    const r = await post(path, {trade_id: tradeId, privy_access_token: token, ...extra});
-    if (!r.ok) { const e = Error(r.body?.message || 'refused'); e.status = r.status; e.code = r.body?.code; throw e; }
+    const r = await post(path, {trade_id: tradeId, privy_access_token: token, ...(hint ? {hint} : {}), ...extra});
+    if (!r.ok) { const e = Error(r.body?.message || 'refused'); e.status = r.status; e.code = r.body?.code; e.use = typeof r.body?.use === 'string' ? r.body.use : null; throw e; }
     return r.body;
   }
 
@@ -129,6 +131,8 @@ export function createSignFlow({signer, post, wr, tradeId, onChange = () => {}, 
     try { trade = await api('requests'); }
     catch (e) {
       if (e.status === 401) { await signer.logout().catch(() => {}); person = null; return set({view: 'signin', why: 'expired'}); }
+      // The link was made for another account than the one here: the server's line, the right method, try again.
+      if (e.code === 'ACCOUNT_MISMATCH') return set({view: 'mismatch', message: e.message, kind: 'bad', who: person?.label ?? null, use: e.use, bound: true});
       if (e.status === 404) return set({view: 'mismatch', message: e.message, kind: 'bad', who: person?.label ?? null});
       return set({view: 'unavailable', message: e.status === 403 ? e.message : COPY.unreachable, kind: 'bad'});
     }
@@ -216,7 +220,7 @@ export function createSignFlow({signer, post, wr, tradeId, onChange = () => {}, 
   async function useAnother() {
     await signer.logout().catch(() => {});
     person = null; trade = null; local.clear();
-    set({view: 'signin', why: null, message: null, kind: '', who: null});
+    set({view: 'signin', why: null, message: null, kind: '', who: null, use: null, bound: false});
   }
 
   // ---- The optional email step (Privy: an email can be linked to the signed-in user with a code; one per user) ----

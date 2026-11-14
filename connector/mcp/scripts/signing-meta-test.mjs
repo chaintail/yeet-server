@@ -162,3 +162,33 @@ test('trade_status with the account facts (the person confirmed an email on the 
   assert.deepEqual(r.structuredContent,before.structuredContent);assert.deepEqual(r.content,before.content);
  }finally{await plain.close();await client.close();await server.close()}
 });
+
+test('the trade page hint (core card_hint): on the card-only signer page address, never in what the model reads; a malformed one is dropped',async()=>{
+ const hint=`v1.${Buffer.from(JSON.stringify({m:['google'],p:'hint',a:'yeet-privy-ginaAAAAAAAAAAAAAAAAA',e:1900000000})).toString('base64url')}.${'A'.repeat(43)}`;
+ const withHint=h=>createMcpServer({token:{scope:allScopes.join(' ')},callCore:async route=>{
+  const base=route==='/proposals'||route==='/proposals/skeet'||/\/quote$/.test(route)?{...proposal,confirm}:await core(route);
+  return {...base,card_hint:h};
+ },env:ENV});
+ const open=async server=>{const client=new Client({name:'hint-meta',version:'1'});const [a,b]=InMemoryTransport.createLinkedPair();await server.connect(a);await client.connect(b);return {client,close:async()=>{await client.close();await server.close()}}};
+ const good=await open(withHint(hint));
+ try{
+  for(const name of SIGNER_TOOLS){
+   const r=await good.client.callTool({name,arguments:CALLS[name]});
+   assert.equal(r.isError,undefined,`${name}: ${JSON.stringify(r.content)}`);
+   assert.equal(r._meta[SIGNER_META_KEY].sign_page_url,`${ORIGIN}/sign?h=${hint}`,name);
+   // The card adds the trade to it (yeet-win basket: page + (page.includes('?') ? '&' : '?') + 'trade_id=...').
+   assert.match(r._meta[SIGNER_META_KEY].sign_page_url,/^https:\/\/[^\s]{1,500}$/,name);
+   assert.equal(r._meta[SIGNER_META_KEY].script_url,`${ORIGIN}${asset.path}`,name);
+   assert.doesNotMatch(JSON.stringify([r.structuredContent,r.content]),/card_hint|v1\.ey/,`${name}: the hint never reaches the model`);
+  }
+ }finally{await good.close()}
+ for(const bad of ['not-a-token','v1.abc.def" onload="x',42,`${hint} `,'https://evil.example/']){
+  const s=await open(withHint(bad));
+  try{
+   const r=await s.client.callTool({name:'yeet_propose',arguments:CALLS.yeet_propose});
+   assert.equal(r.isError,undefined,JSON.stringify(r.content));
+   assert.equal(r._meta[SIGNER_META_KEY].sign_page_url,`${ORIGIN}/sign`,String(bad));
+   assert.doesNotMatch(JSON.stringify(r),/card_hint/);
+  }finally{await s.close()}
+ }
+});

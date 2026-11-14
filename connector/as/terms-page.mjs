@@ -44,7 +44,10 @@ export function termsLinkBody({token,terms,error=''}){
 export const TERMS_DONE='<p class="lead">Done. You accepted the YEET terms.</p><p>Go back to ChatGPT and carry on.</p>';
 /** session(q): the YEET sign-in session; core(route, account, body): the core as the sign-in server; document(res,title,body). */
 /** linkToken(text): the claims of a valid `terms` link token ({a: account id, v: version}) or null. */
-export function termsRoutes(app,{session,originOK,core,document,equal=(a,b)=>typeof a==='string'&&a===b,formBody,linkToken=()=>null}){
+export function termsRoutes(app,{session,originOK,core,document,equal=(a,b)=>typeof a==='string'&&a===b,formBody,linkToken=()=>null,hint=()=>null}){
+ // No valid token and no session: the sign-in page. A signed hint on the link (?h=, as/account-bound.mjs) rides
+ // along, so that page offers the account's own methods and lets nobody else in.
+ const signIn=q=>{const bound=hint(q.query?.h);return `/account/login?next=${TERMS_NEXT}${bound?`&h=${encodeURIComponent(bound.token)}`:''}`};
  // The token's account, only while the token is good AND names the version the core now asks for.
  const linked=async value=>{
   const claims=typeof value==='string'&&value?linkToken(value):null;
@@ -60,7 +63,7 @@ export function termsRoutes(app,{session,originOK,core,document,equal=(a,b)=>typ
   const link=await linked(q.query.t);
   if(link)return r.type('html').send(document(r,TERMS_TITLE,termsLinkBody({token:q.query.t,terms:link.terms})));
   const s=session(q);
-  if(!s)return r.redirect(303,`/account/login?next=${TERMS_NEXT}`);
+  if(!s)return r.redirect(303,signIn(q));
   const terms=await read(s.id);
   if(!terms)return r.status(503).type('html').send(document(r,TERMS_TITLE,'<p>The terms could not be loaded just now. Try again in a moment.</p>'));
   r.type('html').send(document(r,TERMS_TITLE,termsBody({csrf:s.csrf,terms})));

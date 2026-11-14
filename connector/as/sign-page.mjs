@@ -30,6 +30,8 @@
 //      exactly when the person signed in with the same Privy user;
 //   3. core answers only for a trade of that account and an attempt of that account (pipeline owned(),
 //      attempt.account_id) and accepts only the bytes of its own sign request for that account's wallet.
+//   0. when the page was opened from a link minted for one account (?h=<signed hint>, as/account-bound.mjs), the
+//      account from step 2 must be that account, or the call is refused (409 ACCOUNT_MISMATCH) before step 3.
 // The page itself signs only the server-issued requests it gets back, and only with the embedded wallet whose address
 // equals the request's `wallet`. Requests must come from this origin (exact Origin header).
 import {readFileSync} from "node:fs";
@@ -38,6 +40,7 @@ import express from "express";
 import {html} from "./auth-pages.mjs";
 import {privyPageCsp} from "./fund-page.mjs";
 import {DEFAULT_LOGIN_METHODS, knownMethods} from "./login-methods.mjs";
+import {MISMATCH_CODE, MISMATCH_LINE} from "./account-bound.mjs";
 import {APP_ID, PRIVY_API, SIGN_PAGE_PATH, SIGNER_PATH_PREFIX, signerAsset} from "#shared/signing.mjs";
 
 const TRADE_ID = /^t_[a-z0-9]{20}$/;
@@ -73,8 +76,10 @@ export function returnUrl(value) {
   } catch { return null; }
 }
 
-export function signPageHtml({appId, tradeId, asset, back, nonce, methods = DEFAULT_LOGIN_METHODS}) {
+export function signPageHtml({appId, tradeId, asset, back, nonce, methods = DEFAULT_LOGIN_METHODS, hint = ""}) {
   const data = [
+    // The card's link was minted for one account (as/account-bound.mjs): the page sends this back with every call.
+    ["hint", hint],
     // The sign-in methods this page offers a browser with no session (YEET_LOGIN_METHODS; as/login-methods.mjs).
     ["methods", knownMethods(methods).join(",")],
     ["app-id", appId && APP_ID.test(appId) ? appId : ""],
@@ -94,8 +99,10 @@ export function signPageHtml({appId, tradeId, asset, back, nonce, methods = DEFA
  *   originOK(req)        exact Origin of this server
  *   asset                signerAsset() (null when the signer is not vendored)
  *   methods()            the sign-in methods the page offers with no session (YEET_LOGIN_METHODS)
+ *   hint(text)           a valid signed hint -> {token, account, methods}, else null (account-bound.mjs hintReader)
+ *   expected(hint)       -> {message, use}: what to tell a person who is not the hint's account
  */
-export function signRoutes(app, {enabled, appId, lookup, core, originOK, asset = signerAsset(), methods = () => [...DEFAULT_LOGIN_METHODS]}) {
+export function signRoutes(app, {enabled, appId, lookup, core, originOK, asset = signerAsset(), methods = () => [...DEFAULT_LOGIN_METHODS], hint = () => null, expected = async () => ({message: MISMATCH_LINE, use: null})}) {
   app.get(`${SIGNER_PATH_PREFIX}.js`, (_q, r) => {
     if (!asset) return r.sendStatus(404);
     r.set({...SCRIPT_HEADERS, "Cache-Control": SHORT_CACHE, ETag: `"${asset.hash}"`}).send(asset.bytes);
@@ -120,7 +127,9 @@ export function signRoutes(app, {enabled, appId, lookup, core, originOK, asset =
       "X-Content-Type-Options": "nosniff",
     });
     const id = enabled() ? appId() : "";
-    r.type("html").send(signPageHtml({appId: id, tradeId, asset: id ? asset : null, back: returnUrl(q.query.redirectUrl), nonce, methods: methods()}));
+    // A link minted for one account (?h=): only that account's sign-in methods. Otherwise the default ones.
+    const bound = hint(q.query.h);
+    r.type("html").send(signPageHtml({appId: id, tradeId, asset: id ? asset : null, back: returnUrl(q.query.redirectUrl), nonce, methods: bound ? bound.methods : methods(), hint: bound ? bound.token : ""}));
   });
 
   const json = express.json({limit: "64kb"});
@@ -137,6 +146,15 @@ export function signRoutes(app, {enabled, appId, lookup, core, originOK, asset =
     let account;
     try { account = await lookup({privy_access_token: b.privy_access_token, identity_token: b.identity_token}); }
     catch { fail(r, 401, "SIGN_IN_REQUIRED", "Your session here ended. Confirm it’s you again."); return null; }
+    // The page was opened from a link for ONE account (as/account-bound.mjs). Whoever is here must be that account:
+    // another one, or a Privy user with no YEET account, is refused before any trade is looked at. Nothing is
+    // created, linked or switched. A hint that no longer verifies is no hint; the trade's own check below still holds.
+    const bound = hint(b.hint);
+    if (bound && account !== bound.account) {
+      const say = await expected(bound).catch(() => ({message: MISMATCH_LINE, use: null}));
+      r.status(409).json({code: MISMATCH_CODE, message: say.message, use: say.use ?? null});
+      return null;
+    }
     if (!account) { fail(r, 404, "TRADE_NOT_FOUND", NOT_YOURS); return null; }
     return account;
   }

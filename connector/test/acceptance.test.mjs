@@ -471,6 +471,110 @@ test('terms in the chat, end to end: gated until accepted, the overview answers,
  assert.equal(b.error,'TERMS_REQUIRED');
 });
 
+test('the account\'s terms link, end to end: the core signs it, the page accepts with no sign-in, and only for that account',async()=>{
+ const {TERMS_VERSION,REQUIRED_IDS}=await import('../core/terms.mjs');
+ const {acceptanceOf}=await import('../core/terms-store.mjs');
+ const tok=await signIn({identity:'DEV:did:privy:acceptance-terms-link',terms:false});
+ const other=await signIn({identity:'DEV:did:privy:acceptance-terms-other',terms:false});
+ const call=async(name,t=tok)=>(await (await rpc({jsonrpc:'2.0',id:41,method:'tools/call',params:{name,arguments:{}}},t.access_token)).json()).result;
+ const terms=(await call('yeet_terms')).structuredContent.terms;
+ assert.equal(terms.accepted,false);
+ assert.match(terms.page_url,/^https:\/\/chatgpt\.yeet\.win\/account\/terms\?t=v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/);
+ assert.ok(terms.page_url.length<=508);
+ const t=new URL(terms.page_url).searchParams.get('t');
+ const claims=JSON.parse(Buffer.from(t.split('.')[1],'base64url'));
+ assert.equal(claims.p,'terms');assert.equal(claims.v,TERMS_VERSION);assert.match(claims.a,/^yeet-privy-/);
+ const now=Math.floor(Date.now()/1000);assert.ok(claims.e>now+590&&claims.e<=now+600,'10 minutes');
+ // The refusal of a gated tool carries the same account's link; another account's link names another account.
+ const gated=JSON.parse((await call('yeet_home')).content[0].text);
+ assert.equal(gated.error,'TERMS_REQUIRED');
+ assert.equal(JSON.parse(Buffer.from(new URL(gated.terms.page_url).searchParams.get('t').split('.')[1],'base64url')).a,claims.a);
+ const theirs=new URL((await call('yeet_terms',other)).structuredContent.terms.page_url).searchParams.get('t');
+ const otherAccount=JSON.parse(Buffer.from(theirs.split('.')[1],'base64url')).a;
+ assert.notEqual(otherAccount,claims.a);
+ // The page, with no cookie at all: the statements and Accept.
+ const page=await fetch(AS+'/account/terms?t='+t,{redirect:'manual'});
+ assert.equal(page.status,200);assert.equal(page.headers.get('set-cookie'),null);
+ const html=await page.text();
+ assert.match(html,/<button type="submit">Accept<\/button>/);assert.match(html,/You are at least 18/);
+ // Their payload under our signature, and our payload cut short: the sign-in page, nothing recorded.
+ const forged=`v1.${theirs.split('.')[1]}.${t.split('.')[2]}`;
+ for(const bad of [forged,t.slice(0,-1),'']){
+  const r=await fetch(AS+'/account/terms?t='+bad,{redirect:'manual'});
+  assert.equal(r.status,303);assert.equal(r.headers.get('location'),'/account/login?next=terms');
+  const p=await fetch(AS+'/account/terms',{method:'POST',redirect:'manual',headers:{origin:ORIGIN,'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({t:bad,version:TERMS_VERSION})});
+  assert.notEqual(p.status,200);
+ }
+ assert.equal(acceptanceOf(claims.a,TERMS_VERSION),null);assert.equal(acceptanceOf(otherAccount,TERMS_VERSION),null);
+ // Accept: recorded for the token's account, source page, through the link; the other account is untouched.
+ const done=await fetch(AS+'/account/terms',{method:'POST',redirect:'manual',headers:{origin:ORIGIN,'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({t,version:TERMS_VERSION})});
+ assert.equal(done.status,200);assert.equal(done.headers.get('set-cookie'),null,'no session comes with it');
+ assert.match(await done.text(),/Done\. You accepted the YEET terms\.<\/p><p>Go back to ChatGPT/);
+ const row=acceptanceOf(claims.a,TERMS_VERSION);
+ assert.equal(row.source,'page');assert.equal(row.client_id,'terms-link');assert.deepEqual(row.statements,[...REQUIRED_IDS]);
+ assert.equal(acceptanceOf(otherAccount,TERMS_VERSION),null);
+ // Reuse: the first acceptance stands.
+ const again=await fetch(AS+'/account/terms',{method:'POST',redirect:'manual',headers:{origin:ORIGIN,'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({t,version:TERMS_VERSION,agree_product_email:'yes'})});
+ assert.equal(again.status,200);assert.equal(acceptanceOf(claims.a,TERMS_VERSION).accepted_at,row.accepted_at);
+ // ChatGPT sees it at once, and the gate is open for this account only.
+ assert.equal((await call('yeet_terms')).structuredContent.terms.accepted,true);
+ assert.notEqual(JSON.parse((await call('yeet_home')).content[0].text).error,'TERMS_REQUIRED');
+ assert.equal(JSON.parse((await call('yeet_home',other)).content[0].text).error,'TERMS_REQUIRED');
+ // The token is good for nothing else: it is no bearer for the connector and no session for the account page.
+ assert.equal((await rpc({jsonrpc:'2.0',id:1,method:'tools/list'},t)).status,401);
+ const acct=await fetch(AS+'/account/',{redirect:'manual',headers:{cookie:`yeet_session=${t}`}});assert.equal(acct.status,303);
+});
+
+test('a sign-in page opened from an account-bound link lets only that account in and creates nothing',async()=>{
+ const {readFileSync}=await import('node:fs');
+ const {deriveLinkKey,mintLinkToken}=await import('#shared/link-token.mjs');
+ const {accountCount}=await import('../core/identity-store.mjs');
+ const {TERMS_VERSION}=await import('../core/terms.mjs');
+ // An existing account, and its id (from its own terms link).
+ const tok=await signIn({identity:'DEV:did:privy:acceptance-bound',terms:false});
+ const link=(await (await rpc({jsonrpc:'2.0',id:51,method:'tools/call',params:{name:'yeet_terms',arguments:{}}},tok.access_token)).json()).result.structuredContent.terms.page_url;
+ const account=JSON.parse(Buffer.from(new URL(link).searchParams.get('t').split('.')[1],'base64url')).a;
+ const key=deriveLinkKey(readFileSync(join(secrets,'core-as'),'utf8').trim());
+ const hint=mintLinkToken(key,{purpose:'hint',account,ttl:600,claims:{m:['email']}});
+ const open=async(query)=>{const cookies=jar();const r=await fetch(AS+'/account/login?'+query,{headers:{cookie:cookies.header()}});cookies.add(r);const html=await r.text();return {cookies,html,csrf:html.match(/name="csrf" value="([0-9a-f]+)"/)[1]}};
+ const submit=({cookies,csrf},body)=>fetch(AS+'/account/login',{method:'POST',redirect:'manual',headers:{cookie:cookies.header(),origin:ORIGIN,'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf,...body})});
+ let page=await open('next=fund&h='+hint);
+ assert.ok(page.html.includes(`<input type="hidden" name="hint" value="${hint}">`));
+ // A hint that does not verify, or one aimed at a destination it is not for, is not carried.
+ assert.doesNotMatch((await open('next=fund&h='+hint.slice(0,-2)+'AA')).html,/name="hint"/);
+ assert.doesNotMatch((await open('h='+hint)).html,/name="hint"/);
+ await token();
+ const before=accountCount();
+ // Someone who has no YEET account at all, and another existing account: refused, and nothing is created.
+ for(const identity of ['DEV:did:privy:acceptance-bound-stranger','DEV:did:privy:acceptance-alice']){
+  page=await open('next=fund&h='+hint);
+  const r=await submit(page,{next:'fund',hint,identity_token:identity});
+  assert.equal(r.status,403,identity);
+  assert.ok(!r.headers.getSetCookie().some(c=>c.startsWith('yeet_session=')&&!c.startsWith('yeet_session=;')),'no session for the wrong account');
+  const html=await r.text();
+  assert.match(html,/This is a different YEET account than the one in your ChatGPT\./);
+  assert.match(html,/Use the email you joined YEET with\./);
+  assert.ok(html.includes(`href="/account/login?next=fund&amp;h=${hint}&amp;again=1">Try again</a>`));
+ }
+ assert.equal(accountCount(),before,'no account was created from the bound page');
+ // The right account comes in and lands on its own funding page link.
+ page=await open('next=fund&h='+hint);
+ let r=await submit(page,{next:'fund',hint,identity_token:'DEV:did:privy:acceptance-bound'});
+ assert.equal(r.status,302);assert.equal(r.headers.get('location'),`/fund?h=${hint}`);
+ assert.ok(r.headers.getSetCookie().some(c=>/^yeet_session=[A-Za-z0-9_-]{20,}/.test(c)));
+ page=await open('next=terms&h='+hint);
+ r=await submit(page,{next:'terms',hint,identity_token:'DEV:did:privy:acceptance-bound'});
+ assert.equal(r.status,302);assert.equal(r.headers.get('location'),'/account/terms');
+ // A hint that stopped verifying between the page and the form: refused, never treated as a plain sign-in.
+ page=await open('next=fund&h='+hint);
+ for(const bad of [hint.slice(0,-2)+'AA',mintLinkToken(key,{purpose:'terms',account,ttl:600,claims:{v:TERMS_VERSION,m:['email']}}),mintLinkToken(key,{purpose:'hint',account,ttl:1,claims:{m:['email']},now:Date.now()-5000})]){
+  page=await open('next=fund&h='+hint);
+  r=await submit(page,{next:'fund',hint:bad,identity_token:'DEV:did:privy:acceptance-bound-stranger-2'});
+  assert.equal(r.status,400);assert.match(await r.text(),/This link is too old to use\. Go back to ChatGPT and open it again\./);
+ }
+ assert.equal(accountCount(),before);
+});
+
 test('scopes end to end: discovery advertises yeet:prepare only; a client that still asks for yeet:trade gets a token that reaches the same tools',async()=>{
  const meta=await (await fetch(AS+'/.well-known/oauth-authorization-server',{headers:{host:new URL(ORIGIN).host}})).json();
  assert.ok(meta.scopes_supported.includes('yeet:prepare'));

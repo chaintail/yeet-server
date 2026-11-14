@@ -21,11 +21,48 @@ import { qrCode, qrPath } from "./qr.js";
 import { Swap } from "./screen.jsx";
 import { words } from "./brand-words.jsx";
 
-const SIGN_IN = "/account/login?next=fund";
+// The link this page was opened from may carry a signed hint for ONE account (as/account-bound.mjs): the server put
+// it on the page, and it rides along to the sign-in page and to the account check.
+const HINT = document.getElementById("yeet-fund")?.dataset.hint || "";
+const SIGN_IN = `/account/login?next=fund${HINT ? `&h=${encodeURIComponent(HINT)}` : ""}`;
+const CHECK_FAILED = "YEET could not check your account just now. Nothing was changed.";
+
+/**
+ * Asks the server whether the Privy user in this browser is the account this page is for (POST /fund/api/check).
+ * -> {status: "ok"} | {status: "mismatch", message, use} | {status: "signin"} | {status: "error"}
+ * The page shows a wallet address only after "ok": money sent to another account's address would be lost to the
+ * person's own.
+ */
+export async function checkAccount({ getAccessToken, hint = HINT, post = fetch }) {
+  try {
+    const token = await getAccessToken();
+    if (!token) return { status: "signin" };
+    const r = await post("/fund/api/check", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ privy_access_token: token, ...(hint ? { hint } : {}) }),
+    });
+    if (r.ok) return { status: "ok" };
+    let body = null;
+    try {
+      body = await r.json();
+    } catch {
+      /* no body */
+    }
+    if (r.status === 409 && body?.code === "ACCOUNT_MISMATCH") return { status: "mismatch", message: String(body.message ?? ""), use: typeof body.use === "string" ? body.use : "" };
+    if (r.status === 401) return { status: "signin" };
+    return { status: "error" };
+  } catch {
+    return { status: "error" };
+  }
+}
 const WALLET_NAMES = { rainbow: "Rainbow", coinbase: "Coinbase Wallet", phantom: "Phantom", solflare: "Solflare" };
 
 function Fund({ readers }) {
-  const { ready, authenticated, user } = usePrivy();
+  const { ready, authenticated, user, getAccessToken, logout } = usePrivy();
+  const [check, setCheck] = useState({ status: "checking" });
+  const [attempt, setAttempt] = useState(0);
   const wallets = embeddedWallets(user);
   const addresses = {
     base: validAddress("base", wallets.base?.address) ? wallets.base.address : null,
@@ -34,11 +71,53 @@ function Fund({ readers }) {
   useEffect(() => {
     if (ready && !authenticated) location.assign(SIGN_IN);
   }, [ready, authenticated]);
-  const screen = !ready || !authenticated ? "loading" : addresses.base ? "fund" : "waiting";
+  // Before any address shows: the server says whether who is here is the account this page is for.
+  useEffect(() => {
+    if (!ready || !authenticated) return;
+    let live = true;
+    setCheck({ status: "checking" });
+    checkAccount({ getAccessToken }).then((out) => {
+      if (!live) return;
+      if (out.status === "signin") return location.assign(SIGN_IN);
+      setCheck(out);
+    });
+    return () => {
+      live = false;
+    };
+  }, [ready, authenticated, getAccessToken, attempt]);
+  /** Another account is here: end its Privy session and offer the right account's methods. */
+  async function tryAgain() {
+    try {
+      await logout();
+    } catch {
+      /* the sign-in page ends it */
+    }
+    location.assign(`${SIGN_IN}${HINT ? "&again=1" : ""}`);
+  }
+  const screen = !ready || !authenticated || check.status === "checking" ? "loading" : check.status === "mismatch" ? "mismatch" : check.status !== "ok" ? "error" : addresses.base ? "fund" : "waiting";
   return (
     <Swap id={screen}>
       {screen === "loading" ? (
         <p role="status">{words("Loading your YEET wallet…")}</p>
+      ) : screen === "mismatch" ? (
+        <>
+          <p role="alert" className="notice">
+            {words(check.message || "This is a different YEET account than the one in your ChatGPT.")}
+          </p>
+          {check.use ? <p className="lead">{check.use}</p> : null}
+          <button type="button" onClick={tryAgain}>
+            Try again
+          </button>
+        </>
+      ) : screen === "error" ? (
+        <>
+          <p role="alert" className="notice">
+            {words(CHECK_FAILED)}
+          </p>
+          <button type="button" onClick={() => setAttempt((n) => n + 1)}>
+            Try again
+          </button>
+        </>
       ) : screen === "waiting" ? (
         <p role="status">{words("Your YEET wallets are still being set up. Reload this page in a moment.")}</p>
       ) : (
