@@ -9,7 +9,7 @@ import {z} from 'zod';
 import {createMcpServer,registeredTools,howText} from '../tool-registration.mjs';
 import {contract,zodSchema} from '../tool-contract.mjs';
 import {COPY} from '../guidance.mjs';
-import {instructions} from '../instructions.mjs';
+import {instructions,instructionsFor} from '../instructions.mjs';
 import {allScopes} from '#scope-catalog';
 import {howItWorks,SECTIONS,EXPORT_URL} from '../../core/how-it-works.mjs';
 import {termsOpen} from '../../core/terms.mjs';
@@ -53,7 +53,7 @@ test('the answer: who holds the keys, what the server can and cannot do, the exp
   const by=Object.fromEntries(h.sections.map(s=>[s.id,s]));
   assert.deepEqual(h.sections.map(s=>s.id),['keys','server_can','server_cannot','wallet','export','export_warning','risk']);
   assert.match(by.keys.text,/non-custodial/);assert.match(by.keys.text,/YEET never holds it/);
-  assert.match(by.server_cannot.text,/holds no key and has no way into your wallet/);
+  assert.match(by.server_cannot.text,/holds no key to your wallet and has no way into it/);
   assert.match(by.server_cannot.text,/cannot send a trade by itself/);
   assert.match(by.server_cannot.text,/YEET takes no fee/);
   assert.match(by.wallet.text,/do not deposit large sums/);
@@ -76,7 +76,10 @@ test('the words: no sign wording in the guidance, the export warning is always w
  assert.match(g,/advanced feature/);assert.match(g,/YEET/);
  assert.ok(g.length<=500);
  for(const s of SECTIONS)assert.doesNotMatch(s.text,/guaranteed returns|profit|safe investment/i,s.id);
- assert.match(instructions,/YEET/);
+ // Off (the default): the instructions never name the tool. On: one line, right after the winning line.
+ assert.doesNotMatch(instructions,/yeet_how_it_works/);
+ assert.equal(instructionsFor({YEET_HOW_IT_WORKS:'0'}),instructions);
+ assert.match(instructionsFor({YEET_HOW_IT_WORKS:'1'}),/YEET/);
  assert.match(instructions,/YEET/);
 });
 

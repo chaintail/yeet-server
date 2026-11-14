@@ -3,7 +3,7 @@ import {z} from 'zod';
 import {toolError} from './errors.mjs';
 import {toolSchemas,toolSpecs,zodSchema,registrationInput,META_KEYS} from './tool-contract.mjs';
 import {registerWidgets,toolMeta,CONFIRM_META_KEY} from './widgets.mjs';
-import {instructions} from './instructions.mjs';
+import {instructionsFor} from './instructions.mjs';
 import {guidanceFor} from './guidance.mjs';
 import {SIGNER_META_KEY,signerMetaFromEnv} from '#shared/signing.mjs';
 import {staleness as processStaleness,staleKey,appRefresh,withRefresh,BUILD_META_KEY,TOOLS_VERSIONS,classifyToolsVersion,loggedVersion} from './refresh.mjs';
@@ -158,7 +158,7 @@ for(const t of TOOLS)if(!t.route)throw Error(`No core route for contract tool ${
 export const SIGNER_TOOLS=new Set(['yeet_propose','yeet_quote','skeet_propose','execute_trade','submit_trade_signature','trade_status']);
 /** toolsVersions: {current, past} (refresh.mjs TOOLS_VERSIONS, the contract's); log: one JSON line per event. */
 export function createMcpServer({token,callCore,env=process.env,staleness=processStaleness,toolsVersions=TOOLS_VERSIONS,log=line=>console.error(line)}) {
- const server=new McpServer({name:'yeet',version:'0.2.0'},{instructions});
+ const server=new McpServer({name:'yeet',version:'0.2.0'},{instructions:instructionsFor(env)});
  // Signing set up here (https RESOURCE, PRIVY_APP_ID, vendored signer): the signing cards declare the signing domains
  // and the trade results tell the card where the signer and the signing page are. Otherwise both stay off.
  const signer=signerMetaFromEnv(env);
