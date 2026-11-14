@@ -173,6 +173,8 @@ export const COPY=Object.freeze({
   PARTS_EMPTY:"YEET errors.PARTS_EMPTY.",
   WALLET_NOT_READY:"YEET errors.WALLET_NOT_READY.",
   REAUTH_REQUIRED:"YEET errors.REAUTH_REQUIRED.",
+
+  APP_OUTDATED:"YEET errors.APP_OUTDATED: {url} {steps}.",
   USERNAME_TAKEN:"YEET errors.USERNAME_TAKEN.",
   USERNAME_NOT_ALLOWED:"YEET errors.USERNAME_NOT_ALLOWED.",
  },
@@ -333,6 +335,7 @@ export function refusalGuidance(code,message,ctx,{terms,reason,tool,now=Date.now
  const e=COPY.errors;
  if(code==='TEMPORARILY_UNAVAILABLE')return typeof tool==='string'&&!MAY_SEND.has(tool)?e.TEMPORARILY_UNAVAILABLE_no_send:e.TEMPORARILY_UNAVAILABLE;
  if(code==='TERMS_REQUIRED')return termsGuidance(terms,reason);
+ if(code==='APP_OUTDATED')return fill(e.APP_OUTDATED,{url:APP.manage_url,steps:APP.refresh_steps});
  if(code==='LIMIT_EXCEEDED'){
   const tier=typeof message==='string'?message.match(/\bas a (Noob|Winner|VIP)\b/)?.[1]:undefined;
   const kind=typeof message!=='string'?undefined:/\bper-trade limit\b/.test(message)?'trade':/\bdaily limit\b/.test(message)?'daily':undefined;

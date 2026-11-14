@@ -451,7 +451,8 @@ test('a registered client that never completes an authorization expires after 1 
 test('terms in the chat, end to end: gated until accepted, the overview answers, a missing statement and an old version are refused, then everything works',async()=>{
  const {TERMS_VERSION,REQUIRED_IDS,STATEMENTS}=await import('../core/terms.mjs');
  const tok=await signIn({identity:'DEV:did:privy:acceptance-terms',terms:false});
- const call=async(name,args={})=>(await (await rpc({jsonrpc:'2.0',id:31,method:'tools/call',params:{name,arguments:args}},tok.access_token)).json()).result;
+ const TOOLS_VERSION=(await import('../mcp/tool-contract.mjs')).contract['x-yeet-app'].tools_version;   // the model copies it from the schema
+ const call=async(name,args={})=>(await (await rpc({jsonrpc:'2.0',id:31,method:'tools/call',params:{name,arguments:name==='yeet_overview'?{app_version:TOOLS_VERSION,...args}:args}},tok.access_token)).json()).result;
  const refused=r=>{assert.equal(r.isError,true);return JSON.parse(r.content[0].text)};
  // Every tool that does something for the person is refused with the terms; nothing reaches the engine.
  for(const [name,args] of [['yeet_home',{}],['yeet_coins',{}],['yeet_portfolio',{}],['yeet_fund',{}],['yeet_referral',{}],['trade_status',{trade_id:'t_abcdefghij0123456789'}],

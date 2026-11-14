@@ -282,7 +282,8 @@
             "TEMPORARILY_UNAVAILABLE",
             "USERNAME_TAKEN",
             "USERNAME_NOT_ALLOWED",
-            "TERMS_REQUIRED"
+            "TERMS_REQUIRED",
+            "APP_OUTDATED"
           ]
         },
         "message": {
@@ -313,12 +314,34 @@
             "pattern": "^[a-z0-9_]{1,40}$"
           },
           "description": "With TERMS_REQUIRED from yeet_accept_terms: required statements that were not confirmed."
+        },
+        "app_refresh": {
+          "$ref": "#/$defs/app_refresh",
+          "description": "With APP_OUTDATED: where the person refreshes YEET in ChatGPT and how."
         }
       },
       "required": [
         "error",
         "message",
         "retryable"
+      ],
+      "additionalProperties": false
+    },
+    "app_refresh": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "$ref": "#/$defs/https_url"
+        },
+        "steps": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "url",
+        "steps"
       ],
       "additionalProperties": false
     },
@@ -870,6 +893,97 @@
       "additionalProperties": false,
       "description": "A Base basket as one Calibur batch (EIP-7702): the person signs the batch, plus the authorization when one is set. YEET's gas wallet sends it and pays the fee."
     },
+    "near_intent_payload": {
+      "type": "object",
+      "properties": {
+        "standard": {
+          "const": "raw_ed25519"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "description": "The exact text the wallet approves: one token_diff of what the person gives and the least they receive."
+        },
+        "message_base64": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 21336,
+          "description": "base64 of the UTF-8 bytes of message: the bytes the wallet approves, unchanged."
+        },
+        "signer_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "The ledger account of the wallet: the 32 bytes of its address, in hex."
+        },
+        "verifying_contract": {
+          "const": "intents.near"
+        },
+        "deadline": {
+          "$ref": "#/$defs/time"
+        },
+        "gives": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "properties": {
+              "token_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "amount_raw": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]{0,77})$"
+              }
+            },
+            "required": [
+              "token_id",
+              "amount_raw"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "receives": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "properties": {
+              "token_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "min_raw": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]{0,77})$"
+              }
+            },
+            "required": [
+              "token_id",
+              "min_raw"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "standard",
+        "message",
+        "message_base64",
+        "signer_id",
+        "verifying_contract",
+        "deadline",
+        "gives",
+        "receives"
+      ],
+      "additionalProperties": false,
+      "description": "A ledger trade: one message for the NEAR Intents ledger that the person approves with their Solana key. No transaction: the wallet sends nothing and there is no network fee."
+    },
     "sign_request": {
       "type": "object",
       "properties": {
@@ -888,7 +1002,8 @@
           "enum": [
             "solana_tx",
             "evm_tx",
-            "evm_7702"
+            "evm_7702",
+            "near_intent"
           ]
         },
         "chain": {
@@ -913,6 +1028,9 @@
             },
             {
               "$ref": "#/$defs/evm_7702_payload"
+            },
+            {
+              "$ref": "#/$defs/near_intent_payload"
             }
           ]
         },
@@ -1632,23 +1750,8 @@
           }
         },
         "app_refresh": {
-          "type": "object",
-          "description": "Present when the person’s YEET app in ChatGPT is out of date: where they refresh it and how.",
-          "properties": {
-            "url": {
-              "$ref": "#/$defs/https_url"
-            },
-            "steps": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
-            }
-          },
-          "required": [
-            "url",
-            "steps"
-          ],
-          "additionalProperties": false
+          "$ref": "#/$defs/app_refresh",
+          "description": "Present when the person’s YEET app in ChatGPT is out of date: where they refresh it and how."
         },
         "guidance": {
           "$ref": "#/$defs/guidance"
@@ -1688,11 +1791,20 @@
       "inputSchema": {
         "type": "object",
         "properties": {
+          "app_version": {
+            "type": "string",
+            "enum": [
+              "tools-3"
+            ],
+            "description": "The tools version this tool list was built for."
+          },
           "card_build": {
             "$ref": "#/$defs/card_build"
           }
         },
-        "required": [],
+        "required": [
+          "app_version"
+        ],
         "additionalProperties": false
       },
       "outputSchema": {
@@ -1712,7 +1824,8 @@
         "INVALID_ARGUMENT",
         "REAUTH_REQUIRED",
         "TEMPORARILY_UNAVAILABLE",
-        "WALLET_NOT_READY"
+        "WALLET_NOT_READY",
+        "APP_OUTDATED"
       ]
     },
     "yeet_terms": {
@@ -2498,7 +2611,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 2048,
-            "description": "base64 (Solana), 0x02 hex (Base evm_tx), 0x + 65-byte batch signature [+ 65-byte authorization signature] (Base evm_7702), or `unsupported`."
+            "description": "base64 (Solana), 0x02 hex (Base evm_tx), 0x + 65-byte batch signature [+ 65-byte authorization signature] (Base evm_7702), base64 of the 64-byte signature (near_intent), or `unsupported`."
           },
           "card_build": {
             "$ref": "#/$defs/card_build"
@@ -3800,7 +3913,10 @@
   "x-yeet-app": {
     "manage_url": "https://chatgpt.com/plugins",
     "refresh_label": "Refresh YEET in ChatGPT",
-    "refresh_steps": "open YEET there, select Refresh, then start a new chat"
+    "refresh_steps": "open YEET there, select Refresh, then start a new chat",
+    "tools_version": "tools-3",
+    "tools_versions_past": [],
+    "tools_hash": "0b5c12071afc0c1d2e12694e571a5a56de47d9d33cf54137771dd6d2e872d0ad"
   },
   "x-yeet-spin": {
     "base_xp": 5,
@@ -3908,6 +4024,11 @@
     "TERMS_REQUIRED": {
       "title": "Accept the YEET terms",
       "message": "Accept the YEET terms in the chat to continue.",
+      "retryable": false
+    },
+    "APP_OUTDATED": {
+      "title": "Update YEET",
+      "message": "Your YEET in ChatGPT is out of date. Refresh it, then start a new chat.",
       "retryable": false
     }
   }

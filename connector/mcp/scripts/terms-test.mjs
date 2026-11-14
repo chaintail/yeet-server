@@ -24,7 +24,8 @@ async function connect(callCore,{scope=allScopes.join(' '),meta}={}){
  const client=new Client({name:'terms-test',version:'1'});
  const [a,b]=InMemoryTransport.createLinkedPair();
  await server.connect(a);await client.connect(b);
- return {client,close:async()=>{await client.close();await server.close()},call:(name,args={})=>client.callTool({name,arguments:args,...(meta?{_meta:meta}:{})})};
+ // The model's own entry call carries the current tools version, as its schema tells it to.
+ return {client,close:async()=>{await client.close();await server.close()},call:(name,args={})=>client.callTool({name,arguments:name==='yeet_overview'?{app_version:contract['x-yeet-app'].tools_version,...args}:args,...(meta?{_meta:meta}:{})})};
 }
 const refuse=(extra={})=>{throw {error:'TERMS_REQUIRED',terms:due(),...extra}};
 

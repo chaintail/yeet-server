@@ -1,12 +1,12 @@
 import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {z} from 'zod';
 import {toolError} from './errors.mjs';
-import {toolSchemas,toolSpecs,zodSchema} from './tool-contract.mjs';
+import {toolSchemas,toolSpecs,zodSchema,registrationInput} from './tool-contract.mjs';
 import {registerWidgets,toolMeta,CONFIRM_META_KEY} from './widgets.mjs';
 import {instructions} from './instructions.mjs';
 import {guidanceFor} from './guidance.mjs';
 import {SIGNER_META_KEY,signerMetaFromEnv} from '#shared/signing.mjs';
-import {staleness as processStaleness,staleKey,appRefresh,withRefresh,BUILD_META_KEY} from './refresh.mjs';
+import {staleness as processStaleness,staleKey,appRefresh,withRefresh,BUILD_META_KEY,TOOLS_VERSIONS,classifyToolsVersion,loggedVersion} from './refresh.mjs';
 import {refreshGuidance} from './guidance.mjs';
 import {hasScope} from '#scope-catalog';
 import {withLinkToken} from '#shared/link-token.mjs';
@@ -106,7 +106,8 @@ for(const t of TOOLS)if(!t.route)throw Error(`No core route for contract tool ${
 /** Results that carry `_meta['yeet/signer']` (CARD-SIGNING.md section 2.3a): the overview (its card checks the device
  * sign-in and shows the sign-in when needed), the proposals the card trades from and the trade answers it follows. Card-only, like the confirm code; never in structuredContent or content. */
 export const SIGNER_TOOLS=new Set(['yeet_propose','yeet_quote','skeet_propose','execute_trade','submit_trade_signature','trade_status']);
-export function createMcpServer({token,callCore,env=process.env,staleness=processStaleness}) {
+/** toolsVersions: {current, past} (refresh.mjs TOOLS_VERSIONS, the contract's); log: one JSON line per event. */
+export function createMcpServer({token,callCore,env=process.env,staleness=processStaleness,toolsVersions=TOOLS_VERSIONS,log=line=>console.error(line)}) {
  const server=new McpServer({name:'yeet',version:'0.2.0'},{instructions});
  // Signing set up here (https RESOURCE, PRIVY_APP_ID, vendored signer): the signing cards declare the signing domains
  // and the trade results tell the card where the signer and the signing page are. Otherwise both stay off.
@@ -118,16 +119,34 @@ export function createMcpServer({token,callCore,env=process.env,staleness=proces
  for(const tool of registeredTools(env)){
   const {name,scope}=tool,schemas=toolSchemas[name],route=ROUTES[name];
   const output=zodSchema(z,schemas.output);
-  server.registerTool(name,{title:tool.title,description:tool.description,inputSchema:zodSchema(z,schemas.input),outputSchema:output,
+  const versioned=Object.hasOwn(schemas.advertisedInput.properties??{},'app_version');
+  server.registerTool(name,{title:tool.title,description:tool.description,inputSchema:registrationInput(z,name),outputSchema:output,
    annotations:tool.annotations,_meta:{...meta(scope),...toolMeta(name)}},async(input,extra)=>{
    const granted=token.scope?.split(' ')??[];
    // An old scope name counts as its current one (yeet:trade is yeet:prepare).
    if(!hasScope(granted,scope))return toolError({error:'REAUTH_REQUIRED'},ctx,{tool:name});
    // card_build (refresh.mjs): which card build made this call. Never sent on to core. A call without it on a tool the
    // model can see is the model's own call: its result is where the model is told about a stale app, once.
-   const {card_build:cardBuild,...args}=input??{};
+   const {card_build:cardBuild,app_version:appVersion,...args}=input??{};
    const key=staleKey(token,extra?._meta);
    staleness.note(key,{cardBuild,cardOnly:!tool.visible});
+   // app_version (refresh.mjs classifyToolsVersion): which tool list the model's own entry call comes from. A card's
+   // call carries its build instead and is not judged here. Never sent on to core.
+   if(versioned&&cardBuild===undefined){
+    const version=classifyToolsVersion(appVersion,toolsVersions);
+    if(version!=='current')log(JSON.stringify({event:'tools_version',tool:name,class:version,value:loggedVersion(appVersion),current:toolsVersions.current}));
+    if(version==='outdated'){
+     // A list this server advertised before: nothing is loaded. The model is told to say they refresh YEET and start a
+     // new chat; the welcome card shows "Update YEET" (an error result: the text, no structuredContent). The card's
+     // build rides along so that a card from an older build marks itself too.
+     staleness.mark(key,{told:true});
+     const refused=toolError({error:'APP_OUTDATED'},ctx,{tool:name});
+     return {...refused,_meta:{...refused._meta,[BUILD_META_KEY]:staleness.build}};
+    }
+    // No value, not a version, or one this server never advertised: never refused. The overview answers as always and
+    // carries the soft refresh hint (once per conversation, below).
+    if(version!=='current')staleness.mark(key);
+   }
    const tellRefresh=tool.visible&&cardBuild===undefined&&staleness.take(key);
    try{
     const session=typeof extra?._meta?.['openai/session']==='string'?extra._meta['openai/session'].slice(0,200):undefined;

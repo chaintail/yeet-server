@@ -214,7 +214,9 @@ test('YEET_P2=1 end to end: home -> spin -> leaderboard, then a settled trade sh
  assert.ok(!JSON.stringify(fund.structuredContent).match(/0x|Base|Solana|wallet/));
 
  // yeet_overview, the entry tool: the person in one answer, USDC as one number, no wallet or network, the follow-ups.
- const o=await alice.call('yeet_overview');
+ // The model copies app_version from the tool's schema (the contract's tools version).
+ const toolsVersion=JSON.parse(readFileSync(new URL('../../vendor/yeet-win/contracts/yeet-tools.json',import.meta.url),'utf8'))['x-yeet-app'].tools_version;
+ const o=await alice.call('yeet_overview',{app_version:toolsVersion});
  assert.equal(o.isError,undefined,JSON.stringify(o.content));
  const ov=o.structuredContent;
  assert.equal(ov.username,handle(alice.sub));assert.equal(ov.xp,total);assert.equal(ov.streak_days,1);assert.equal(ov.checkin_open,false);

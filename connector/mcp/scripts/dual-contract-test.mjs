@@ -41,7 +41,7 @@ test('shared pieces follow plan 2.1',()=>{
 test('the error enum and x-yeet-errors catalogue agree; every code has a card; retryable codes as the contract says',async()=>{
  const {TOOL_ERRORS}=await import('#contracts/errors');
  const codes=contract.$defs.failure.properties.error.enum;
- assert.deepEqual(codes,['INVALID_ARGUMENT','COIN_NOT_SUPPORTED','PARTS_EMPTY','AMOUNT_TOO_SMALL','COST_TOO_HIGH','LIMIT_EXCEEDED','BALANCE_LOW','WALLET_NOT_READY','CONFIRMATION_REQUIRED','REQUOTE_REQUIRED','TRADING_PAUSED','REAUTH_REQUIRED','TEMPORARILY_UNAVAILABLE','USERNAME_TAKEN','USERNAME_NOT_ALLOWED','TERMS_REQUIRED']);
+ assert.deepEqual(codes,['INVALID_ARGUMENT','COIN_NOT_SUPPORTED','PARTS_EMPTY','AMOUNT_TOO_SMALL','COST_TOO_HIGH','LIMIT_EXCEEDED','BALANCE_LOW','WALLET_NOT_READY','CONFIRMATION_REQUIRED','REQUOTE_REQUIRED','TRADING_PAUSED','REAUTH_REQUIRED','TEMPORARILY_UNAVAILABLE','USERNAME_TAKEN','USERNAME_NOT_ALLOWED','TERMS_REQUIRED','APP_OUTDATED']);
  assert.deepEqual(Object.keys(TOOL_ERRORS).sort(),[...codes].sort());
  for(const code of codes){
   const result=JSON.parse(toolError({error:code}).content[0].text);

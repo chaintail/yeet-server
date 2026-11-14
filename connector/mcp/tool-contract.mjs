@@ -35,8 +35,26 @@ export function zodSchema(z,schema){
  }else throw Error('Unsupported contract schema');
  return s.description?out.describe(s.description):out;
 }
-/** Every contract tool, P0 to P2: {input, output} with all references resolved. */
-export const toolSchemas=Object.fromEntries(Object.entries(contract.tools).map(([name,t])=>[name,{input:resolveSchema(t.inputSchema),output:resolveSchema(t.outputSchema)}]));
+/** Input properties that are advertised strictly and read permissively. `app_version` (yeet_overview): tools/list
+ * shows the contract's schema, one allowed value and required, so the model copies it; at run time the call must reach
+ * the handler whatever it carries (a call from an older tool list has an older value or none, and the handler is
+ * where that is answered: refresh.mjs classifyToolsVersion). The value never goes on to core. */
+export const ADVERTISED_ONLY=Object.freeze(['app_version']);
+const withoutAdvertisedOnly=s=>ADVERTISED_ONLY.some(k=>Object.hasOwn(s.properties??{},k))
+ ?{...s,properties:Object.fromEntries(Object.entries(s.properties).filter(([k])=>!ADVERTISED_ONLY.includes(k))),required:(s.required??[]).filter(k=>!ADVERTISED_ONLY.includes(k))}:s;
+/** Every contract tool, P0 to P2, with all references resolved: `input` is what a call is checked against at run time
+ * (here and in core), `advertisedInput` what tools/list shows (the contract's own), `output` the result. They differ
+ * only by the ADVERTISED_ONLY properties. */
+export const toolSchemas=Object.fromEntries(Object.entries(contract.tools).map(([name,t])=>{const advertisedInput=resolveSchema(t.inputSchema);return [name,{input:withoutAdvertisedOnly(advertisedInput),advertisedInput,output:resolveSchema(t.outputSchema)}]}));
+/** The input schema a tool is registered with: the run-time schema, plus each ADVERTISED_ONLY property accepted in any
+ * form or absent, and listed in tools/list as the contract's schema (zod's own hook for a schema's JSON form). */
+export function registrationInput(z,name){
+ const s=toolSchemas[name],base=zodSchema(z,s.input);
+ if(s.input===s.advertisedInput)return base;
+ const loose=base.extend(Object.fromEntries(ADVERTISED_ONLY.filter(k=>Object.hasOwn(s.advertisedInput.properties,k)).map(k=>[k,z.unknown().optional()])));
+ loose._zod.toJSONSchema=()=>structuredClone(s.advertisedInput);
+ return loose;
+}
 /** The contract's per-tool metadata (priority, title, description, invocation status lines, annotations, scope, card, visible, widgetAccessible, resultMeta). */
 export const toolSpecs=Object.freeze(Object.fromEntries(Object.entries(contract.tools).map(([name,t])=>[name,Object.freeze({name,priority:t.priority,title:t.title,description:t.description,invocation:t.invocation,annotations:t.annotations,scope:t.scope,card:t.card,visible:t.visible,widgetAccessible:t.widgetAccessible,confirm:!!t.resultMeta?.[contract['x-yeet-meta'].confirm],errors:t.errors})])));
 export const CARDS=Object.freeze(contract['x-yeet-cards']);

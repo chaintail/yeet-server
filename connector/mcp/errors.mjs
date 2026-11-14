@@ -1,7 +1,8 @@
 import {advertisedScopes} from '#scope-catalog';
 import {normalize,toolMessage,isRetryable} from '#contracts/errors';
 import {refusalGuidance} from './guidance.mjs';
-import {META_KEYS} from './tool-contract.mjs';
+import {META_KEYS,contract} from './tool-contract.mjs';
+const APP=contract['x-yeet-app'];
 /** ctx: as in guidance.mjs (the registered tool names); without it the guidance assumes every tool is there.
  * tool: the tool that failed, when known (an outage of a tool that can never send a trade may say nothing was traded). */
 export function toolError(value,ctx,{tool}={}){
@@ -16,6 +17,8 @@ export function toolError(value,ctx,{tool}={}){
  // Agent guidance for the model (guidance.mjs); the card reads only error, message and fund_url.
  // TERMS_REQUIRED: the current terms (statements with their links, where to accept), and from yeet_accept_terms the
  // required statements that were not confirmed.
+ // APP_OUTDATED: where they refresh the app and how (contract $defs.failure app_refresh, from x-yeet-app).
+ if(code==='APP_OUTDATED')data.app_refresh={url:APP.manage_url,steps:APP.refresh_steps};
  const terms=code==='TERMS_REQUIRED'&&value?.terms&&typeof value.terms==='object'?value.terms:null;
  if(terms){data.terms=terms;if(Array.isArray(value.missing)&&value.missing.length)data.missing=value.missing.filter(x=>typeof x==='string').slice(0,12)}
  const guidance=refusalGuidance(code,data.message,ctx,{terms,reason:value?.reason,tool});
