@@ -505,7 +505,7 @@ test('terms in the chat, end to end: gated until accepted, the overview answers,
   ['yeet_propose',{request_id:'11111111-1111-4111-8111-111111111111',amount_usdc:'20',legs:[{symbol:'WIF',parts:10}]}],['execute_trade',{proposal_id:'p_abcdefghij0123456789',revision:1,confirm:'a'.repeat(43)}]]){
   const b=refused(await call(name,args));
   assert.equal(b.error,'TERMS_REQUIRED',name+': '+JSON.stringify(b).slice(0,160));assert.equal(b.terms.accepted,false);assert.equal(b.terms.version,TERMS_VERSION);
-  assert.deepEqual(b.terms.statements.map(s=>s.id),STATEMENTS.map(s=>s.id));assert.match(b.guidance,/YEET/);assert.doesNotMatch(b.guidance,/unlock|device|6-digit/i);
+  assert.deepEqual(b.terms.statements.map(s=>s.id),STATEMENTS.map(s=>s.id));assert.match(b.guidance,/YEET/);assert.doesNotMatch(b.guidance,/all of them/);assert.doesNotMatch(b.guidance,/unlock|device|6-digit/i);
  }
  // The overview and the terms themselves answer.
  // (This fixture account has no wallets, so the overview itself answers WALLET_NOT_READY: the point here is that the
@@ -580,7 +580,12 @@ test('the account\'s terms link, end to end: the core signs it, the page accepts
  const html=await page.text();
  assert.match(html,/<button type="submit">Accept<\/button>/);assert.match(html,/I am at least 18\./);
  assert.match(claims.j,/^[A-Za-z0-9_-]{16,32}$/,'the token has its own id (single use)');
- assert.doesNotMatch(html,/type="checkbox"|agree_product_email/,'the optional opt-in is not on the bearer page');
+ assert.doesNotMatch(html,/agree_product_email/,'the optional opt-in is not on the bearer page');
+ // A checkbox for every required statement, none ticked (owner, 2026-11-14: never one accept-all).
+ for(const id of REQUIRED_IDS)assert.ok(html.includes(`<input type="checkbox" name="agree_${id}" value="yes" required>`),id);
+ assert.equal(html.match(/type="checkbox"/g).length,REQUIRED_IDS.length);
+ // Accept with no box ticked: nothing is recorded.
+ assert.equal((await fetch(AS+'/account/terms',{method:'POST',redirect:'manual',headers:{origin:ORIGIN,'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({t,version:TERMS_VERSION})})).status,400);
  // Their payload under our signature, our token cut short, an empty one: the expired state. Nothing is recorded,
  // and the page never falls back to a sign-in or a session.
  const forged=`v1.${theirs.split('.')[1]}.${t.split('.')[2]}`;
@@ -594,7 +599,7 @@ test('the account\'s terms link, end to end: the core signs it, the page accepts
  assert.equal(acceptanceOf(claims.a,TERMS_VERSION),null);assert.equal(acceptanceOf(otherAccount,TERMS_VERSION),null);
  // Accept, with the opt-in slipped into the form: recorded for the token's account, source terms-link, the
  // required statements only; the other account is untouched.
- const done=await post({t,version:TERMS_VERSION,agree_product_email:'yes'});
+ const done=await post({t,version:TERMS_VERSION,...Object.fromEntries(REQUIRED_IDS.map(id=>[`agree_${id}`,'yes'])),agree_product_email:'yes'});
  assert.equal(done.status,200);assert.equal(done.headers.get('set-cookie'),null,'no session comes with it');
  assert.match(await done.text(),/Done\. You accepted the YEET terms\.<\/p><p>Go back to ChatGPT/);
  const row=acceptanceOf(claims.a,TERMS_VERSION);

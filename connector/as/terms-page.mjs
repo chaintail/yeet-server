@@ -1,5 +1,5 @@
-// The YEET terms as a first-party page at /account/terms: every statement of the current version with its link and a
-// checkbox, one Accept button. It records the SAME versioned acceptance as yeet_accept_terms (core terms_acceptances,
+// The YEET terms as a first-party page at /account/terms: every statement of the current version with its link and its
+// own checkbox; Accept is enabled only once every required box is ticked. It records the SAME versioned acceptance as yeet_accept_terms (core terms_acceptances,
 // source 'page'). Structure after Folio's consent screen (chaintail/stock-app ConsentScreen.kt / ConsentText.kt): each
 // line names what the person agrees to and links the document; the required boxes gate the button; one optional
 // product-email line that is never ticked for the person; the server checks again.
@@ -9,8 +9,8 @@
 //
 // The account's own link (docs/TERMS-IN-CHAT.md "The link that needs no sign-in"). The link the core gives ChatGPT
 // is /account/terms?t=<token>: a signed token (shared/link-token.mjs) for purpose `terms`, bound to the account and
-// the terms version, good for 10 minutes. With a valid one this page shows the statements, each with its link, and
-// ONE Accept button at once, records the acceptance for that account (source `terms-link`: the required statements
+// the terms version, good for 10 minutes. With a valid one this page shows the required statements, each with its own
+// checkbox and its link, and Accept once every box is ticked, records the acceptance for that account (source `terms-link`: the required statements
 // only, never the optional product-email choice) and ends on "go back to ChatGPT". The token does nothing else: this
 // page sets no cookie and opens no session for it, and no other route reads it. It is used once: the core marks its
 // id with the acceptance, and a second Accept with it records nothing ("You already accepted"). An expired or altered
@@ -36,17 +36,21 @@ export function termsBody({csrf,terms,error=''}){
  }).join('');
  return `<form method="POST" data-yeet-agreements><input type="hidden" name="csrf" value="${html(csrf)}"><input type="hidden" name="version" value="${html(terms.version)}"><p class="lead">Open each link, then agree.</p><fieldset class="agreements"><legend>Version ${html(terms.version)}</legend>${rows}</fieldset>${NO_GUARANTEE}${error?`<p class="notice" role="alert">${html(error)}</p>`:''}<button type="submit">Accept</button></form><script type="module" src="/account/consent.js"></script>`;
 }
-/** The page for a valid link token: the REQUIRED statements as plain lines with their links and one Accept button.
- * The optional product-email line is not here: the link is a bearer, so it records only what using YEET needs. That
- * choice stays in the chat (yeet_accept_terms) or on this page for a signed-in person. */
+/** The page for a valid link token: each REQUIRED statement with its own checkbox (unticked) and its link; Accept stays
+ * disabled until every box is ticked (consent.js) and the server records only the boxes that came back ticked (owner,
+ * 2026-11-14: a checkbox for every item, never one accept-all). The optional product-email line is not here: the link
+ * is a bearer, so it records only what using YEET needs. That choice stays in the chat (yeet_accept_terms) or on this
+ * page for a signed-in person. */
 export function termsLinkBody({token,terms,error=''}){
  if(terms.accepted)return TERMS_DONE;
  const rows=terms.statements.filter(s=>s.required).map(s=>{
   const url=safeUrl(s.url),read=url?` <a href="${html(url)}" target="_blank" rel="noopener noreferrer">Read</a>`:'';
-  return `<p class="statement"><span>${html(s.text)}${read}</span></p>`;
+  return `<label><input type="checkbox" name="agree_${html(s.id)}" value="yes" required> <span>${html(s.text)}${read}</span></label>`;
  }).join('');
- return `<form method="POST" action="${TERMS_PATH}" data-yeet-terms-link><input type="hidden" name="t" value="${html(token)}"><input type="hidden" name="version" value="${html(terms.version)}"><p class="lead">Accept once to use YEET in ChatGPT.</p><fieldset class="agreements"><legend>By accepting, you confirm each line.</legend>${rows}</fieldset>${NO_GUARANTEE}${error?`<p class="notice" role="alert">${html(error)}</p>`:''}<button type="submit">Accept</button></form>`;
+ return `<form method="POST" action="${TERMS_PATH}" data-yeet-agreements data-yeet-terms-link><input type="hidden" name="t" value="${html(token)}"><input type="hidden" name="version" value="${html(terms.version)}"><p class="lead">Tick each line to use YEET in ChatGPT.</p><fieldset class="agreements"><legend>Open each link, then agree.</legend>${rows}</fieldset>${NO_GUARANTEE}${error?`<p class="notice" role="alert">${html(error)}</p>`:''}<button type="submit">Accept</button></form><script type="module" src="/account/consent.js"></script>`;
 }
+/** The statement ids a form came back with ticked (agree_<id>=yes). */
+const ticked=body=>Object.entries(body??{}).filter(([k,v])=>k.startsWith('agree_')&&v==='yes').map(([k])=>k.slice(6)).filter(id=>/^[a-z0-9_]{1,40}$/.test(id));
 /** The end of the link path. Nothing else is on the page: there is no session here to go on with. */
 export const TERMS_DONE='<p class="lead">Done. You accepted the YEET terms.</p><p>Go back to ChatGPT and carry on.</p>';
 /** The link was already used and the terms are accepted: the same end, said as it is. */
@@ -101,7 +105,12 @@ export function termsRoutes(app,{session,originOK,core,document,equal=(a,b)=>typ
    const link=await linked(q.body.t);
    // Expired while the page was open, or altered: the expired state. Never the session this browser may hold.
    if(!link)return expired(r);
-   const confirmed=link.terms.statements.filter(s=>s.required).map(s=>s.id);
+   // Only the required lines the person ticked themselves; the core refuses unless every one is there.
+   const required=new Set(link.terms.statements.filter(s=>s.required).map(s=>s.id));
+   const confirmed=ticked(q.body).filter(id=>required.has(id));
+   // Accepted already (this link was used, or another way): nothing to record, the harmless end.
+   if(link.terms.accepted)return r.type('html').send(document(r,TERMS_TITLE,TERMS_ALREADY));
+   if(confirmed.length<required.size)return r.status(400).type('html').send(document(r,TERMS_TITLE,termsLinkBody({token:q.body.t,terms:link.terms,error:'Agree to each line to continue.'})));
    let status=503,body=null;
    try{({status,body}=await core('/terms/accept',link.account,{version:String(q.body.version??''),confirmed,via:'link',token_id:link.id}))}catch{}
    if(status===200)return r.type('html').send(document(r,TERMS_TITLE,TERMS_DONE));
@@ -113,7 +122,7 @@ export function termsRoutes(app,{session,originOK,core,document,equal=(a,b)=>typ
   const s=session(q);
   if(!s)return r.redirect(303,`/account/login?next=${TERMS_NEXT}`);
   if(!equal(q.body?.csrf,s.csrf)||!originOK(q))return r.sendStatus(403);
-  const confirmed=Object.entries(q.body??{}).filter(([k,v])=>k.startsWith('agree_')&&v==='yes').map(([k])=>k.slice(6)).filter(id=>/^[a-z0-9_]{1,40}$/.test(id));
+  const confirmed=ticked(q.body);
   let status=503,body=null;
   try{({status,body}=await core('/terms/accept',s.id,{version:String(q.body?.version??''),confirmed,source:'page'}))}catch{}
   if(status===200)return r.redirect(303,TERMS_PATH);

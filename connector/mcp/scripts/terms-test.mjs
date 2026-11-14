@@ -114,14 +114,21 @@ test("YEET text.",async()=>{
 
 test('the guidance: show every statement with its link, accept only on the person’s own words, never for them; page mode sends them to the page',()=>{
  const g=COPY.terms.due_chat;
- assert.match(g,/has not accepted the current YEET terms/);assert.match(g,/YEET/);
- assert.match(g,/YEET/);
- assert.match(g,/YEET/);
+ assert.match(g,/has not accepted the current YEET terms/);
+ // Owner, 2026-11-14: a checkbox for every item, never one button that accepts all of them.
+ for(const t of [g,COPY.yeet_overview.terms_chat]){
+  assert.match(t,/YEET/);
+  assert.match(t,/YEET/);
+  assert.match(t,/YEET/);
+  assert.doesNotMatch(t,/all of them/);
+ }
+ assert.match(COPY.terms.missing,/YEET/);
  // The stale-app case (the tool is not in the model's list): refresh and say it again, never "it cannot be saved".
  assert.match(g,/YEET/);
  assert.match(termsGuidance(due()),/they refresh YEET at https:\/\/chatgpt\.com\/plugins and say it again/);
  assert.match(instructions,/YEET/);
  assert.match(instructions,/YEET/);
+ assert.doesNotMatch(instructions,/all of them/);
  // No text a person could be handed carries a raw id list or the version string.
  for(const t of [g,COPY.terms.missing,COPY.terms.version,COPY.terms.recorded,COPY.yeet_overview.terms_chat])assert.doesNotMatch(t,/2026-11-1[345]|near_intents|eligibility|no_advice/);
  assert.equal(termsGuidance(due('page')),COPY.terms.due_page);
@@ -139,7 +146,7 @@ test('yeet_overview is not gated: it answers with terms.accepted false, the term
   assert.equal(d.terms.accepted,false);assert.equal(d.terms.version,TERMS_VERSION);assert.equal(d.terms.statements.length,STATEMENTS.length);
   assert.deepEqual(d.suggestions[0],{id:'terms',label:'Review and accept the YEET terms',say:'Show me the YEET terms'});
   assert.equal(d.referral_open,false,'the win code waits for the terms');
-  assert.match(d.guidance,/YEET/);assert.match(d.guidance,/each with its link/);
+  assert.match(d.guidance,/YEET/);assert.match(d.guidance,/YEET/);
   // The connected account is for the card only: never in what the model reads.
   assert.deepEqual(r._meta[ACCOUNT_META_KEY],{user:'did:privy:a',email:'luke@chaintail.xyz',masked:'l•••@c•••.xyz',google:false,apple:false,wallets:['0xabc']});
   assert.doesNotMatch(JSON.stringify([r.structuredContent,r.content]),/chaintail|did:privy|card_account/);

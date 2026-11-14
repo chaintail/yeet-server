@@ -62,6 +62,8 @@ const mint = (extra = {}) => mintLinkToken(key, { purpose: "terms", account: A, 
 const hintFor = (account, extra = {}) => mintLinkToken(key, { purpose: "hint", account, ttl: 600, claims: { m: ["google"] }, ...extra });
 const url = (params) => `${ORIGIN}/account/terms${Object.keys(params).length ? `?${new URLSearchParams(params)}` : ""}`;
 const get = (params = {}, cookie) => fetch(url(params), { redirect: "manual", headers: cookie ? { cookie } : {} });
+// Every required box ticked, as the person sends the form once each line is agreed to.
+const TICKED = Object.fromEntries(REQUIRED_IDS.map((id) => [`agree_${id}`, "yes"]));
 const post = (fields, { origin = ORIGIN, cookie } = {}) =>
   fetch(`${ORIGIN}/account/terms`, { method: "POST", redirect: "manual", headers: { "content-type": "application/x-www-form-urlencoded", ...(origin ? { origin } : {}), ...(cookie ? { cookie } : {}) }, body: new URLSearchParams(fields) });
 const isExpired = async (r, why) => { assert.equal(r.status, 410, why); const page = await r.text(); assert.ok(page.includes(EXPIRED_LINK_LINE), why); assert.doesNotMatch(page, /<form|<button|csrf|agree_/, why); };
@@ -82,18 +84,25 @@ test("the core's link carries a terms token for that account and version, with i
   assert.equal(termsLinkFor(A, { pageUrl: null, key }), null);
 });
 
-test("a valid link: the required statements with their links and one Accept button, at once, with no sign-in and no session", async () => {
+test("a valid link: each required statement with its own unticked checkbox and its link, one Accept gated by them, with no sign-in and no session", async () => {
   const t = mint(), r = await get({ t });
   assert.equal(r.status, 200);
   assert.equal(r.headers.get("set-cookie"), null, "the link opens no session");
   assert.equal(r.headers.get("cache-control"), "no-store");
   assert.equal(r.headers.get("referrer-policy"), "no-referrer", "the token never rides on a click to a linked document");
   const page = await r.text();
-  for (const s of STATEMENTS.filter((x) => x.required)) { assert.ok(page.includes(s.text.replace(/'/g, "&#39;")), s.id); assert.ok(page.includes(`href="${s.url}"`), `${s.id} link`); }
+  for (const s of STATEMENTS.filter((x) => x.required)) {
+    assert.ok(page.includes(s.text.replace(/'/g, "&#39;")), s.id); assert.ok(page.includes(`href="${s.url}"`), `${s.id} link`);
+    // Owner, 2026-11-14: a checkbox for every item, never one accept-all. A real labelled box, unticked, required.
+    assert.ok(page.includes(`<label><input type="checkbox" name="agree_${s.id}" value="yes" required> <span>`), `${s.id} checkbox`);
+  }
+  assert.equal(page.match(/type="checkbox"/g).length, REQUIRED_IDS.length);
+  assert.doesNotMatch(page, /checked/);
   assert.equal(page.match(/<button/g).length, 1);
   assert.match(page, /<button type="submit">Accept<\/button>/);
+  assert.match(page, /data-yeet-agreements/); assert.match(page, /<script type="module" src="\/account\/consent\.js"><\/script>/);
   // The optional product-email choice is not on the bearer page at all.
-  assert.doesNotMatch(page, /type="checkbox"|agree_|product emails|optional/i);
+  assert.doesNotMatch(page, /agree_product_email|product emails|optional/i);
   assert.ok(page.includes(`name="t" value="${t}"`));
   assert.doesNotMatch(page, /sign in|password|privy-login/i);
   assert.equal(acceptanceOf(A, TERMS_VERSION), null, "looking records nothing");
@@ -106,7 +115,7 @@ test("Accept records ONLY the required statements for the token's account, sourc
   assert.equal((await post({ t, version: TERMS_VERSION }, { origin: null })).status, 403);
   assert.equal(acceptanceOf(A, TERMS_VERSION), null);
   // Whoever holds the link adds the opt-in and an id the page never showed: neither is recorded.
-  const r = await post({ t, version: TERMS_VERSION, agree_product_email: "yes", agree_admin: "yes" });
+  const r = await post({ t, version: TERMS_VERSION, ...TICKED, agree_product_email: "yes", agree_admin: "yes" });
   assert.equal(r.status, 200);
   assert.equal(r.headers.get("set-cookie"), null);
   const page = await r.text();
@@ -122,12 +131,28 @@ test("Accept records ONLY the required statements for the token's account, sourc
   assert.match(sent.body.token_id, /^[A-Za-z0-9_-]{16,32}$/);
 });
 
+test("one box left unticked, or none: nothing is recorded, the token is not spent, and the page asks for each line", async () => {
+  const C = "yeet-privy-CCCCCCCCCCCCCCCCCCCCCC";
+  const before = calls.filter((c) => c.route === "/terms/accept").length;
+  for (const fields of [{}, Object.fromEntries(Object.entries(TICKED).slice(1)), { agree_all: "yes" }, { ...Object.fromEntries(Object.entries(TICKED).slice(1)), [`agree_${REQUIRED_IDS[0]}`]: "no" }]) {
+    const id = tokenId(), t = mint({ account: C, claims: { v: TERMS_VERSION, j: id } });
+    const r = await post({ t, version: TERMS_VERSION, ...fields });
+    assert.equal(r.status, 400, JSON.stringify(fields));
+    const page = await r.text();
+    assert.match(page, /Agree to each line to continue\./);
+    assert.equal(page.match(/type="checkbox"/g).length, REQUIRED_IDS.length, "the boxes again");
+    assert.equal(useTermsLink(id, C), true, "a refused acceptance did not spend the token");
+  }
+  assert.equal(calls.filter((c) => c.route === "/terms/accept").length, before, "the core was never asked");
+  assert.equal(acceptanceOf(C, TERMS_VERSION), null);
+});
+
 test("single use: a second Accept with the same token records nothing and reads as already accepted", async () => {
   const first = acceptanceOf(A, TERMS_VERSION);
   const used = calls.findLast((c) => c.route === "/terms/accept").body.token_id;
   // The same token again (minted with the id that was just used).
   const again = mint({ claims: { v: TERMS_VERSION, j: used } });
-  const r = await post({ t: again, version: TERMS_VERSION });
+  const r = await post({ t: again, version: TERMS_VERSION, ...TICKED });
   assert.equal(r.status, 200);
   assert.ok((await r.text()).includes(TERMS_ALREADY));
   assert.deepEqual(acceptanceOf(A, TERMS_VERSION), first, "the first acceptance stands, untouched");
@@ -137,7 +162,7 @@ test("single use: a second Accept with the same token records nothing and reads 
   assert.equal(page.status, 200); assert.ok((await page.text()).includes(TERMS_DONE));
   // A used token for an account whose terms are NOT accepted (it was spent elsewhere) is simply expired.
   assert.equal(useTermsLink("spentid000000001", B), true);
-  await isExpired(await post({ t: mint({ account: B, claims: { v: TERMS_VERSION, j: "spentid000000001" } }), version: TERMS_VERSION }), "a spent token");
+  await isExpired(await post({ t: mint({ account: B, claims: { v: TERMS_VERSION, j: "spentid000000001" } }), version: TERMS_VERSION, ...TICKED }), "a spent token");
   assert.equal(acceptanceOf(B, TERMS_VERSION), null);
   // A token with no id at all is no token.
   await isExpired(await get({ t: mint({ account: B, claims: { v: TERMS_VERSION } }) }), "no id");
@@ -198,7 +223,7 @@ test("an expired token with a hint: the fallback honours the hint. Only the hint
 });
 
 test("the link names the account: a signed-in browser of another account accepts for the link's account, never its own", async () => {
-  const r = await post({ t: mint({ account: B }), version: TERMS_VERSION }, { cookie: "yeet_session=a" });
+  const r = await post({ t: mint({ account: B }), version: TERMS_VERSION, ...TICKED }, { cookie: "yeet_session=a" });
   assert.equal(r.status, 200);
   assert.equal(acceptanceOf(B, TERMS_VERSION).source, "terms-link");
 });
@@ -212,7 +237,7 @@ test("the terms changed while the page was open: nothing is recorded and the tok
     await isExpired(await get({ t }), "old version");
     const id = tokenId();
     const stale = mint({ account: C, claims: { v: "2027-01-01", j: id } });
-    const r = await post({ t: stale, version: TERMS_VERSION });
+    const r = await post({ t: stale, version: TERMS_VERSION, ...TICKED });
     assert.equal(r.status, 400);
     assert.match(await r.text(), /These terms changed\. Go back to ChatGPT/);
     assert.equal(acceptanceOf(C, TERMS_VERSION), null);

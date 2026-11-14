@@ -18,7 +18,9 @@ import {contract,applyDescriptions,DESCRIPTIONS_URL} from '../tool-contract.mjs'
 import {CONTRACT_URL} from '#contracts/errors';
 import {allScopes} from '#scope-catalog';
 
-const FULL={p2:'87305e6815ef1d4b2d2b622b231de4739c0af53e93b8b6b0edbb18d40c010268',default:'b5c1e3c7570b426406b086f3d80de2de9b54dabb0faddd2a0e53a73ba3987325',how_it_works:'741e5f1b3188e6b99492eb476cca8ffd9e65897e1fc5b2814752c92fdc56694c'};
+
+
+const FULL={p2:'e1110ee4405d8f58afea27bb86b32df9dc2b5e33dfbf79d7e7d22792e306ac8d',default:'08f3976c34a0ff6b8140eb97c85a1644d0215cba045b046ebc5493b64611f721',how_it_works:'c72fbfaf0e7d1962d8f654eb84bf3546cb8160a3acf8b63bfb60d3dface379ee'};
 const overlay=JSON.parse(readFileSync(DESCRIPTIONS_URL,'utf8')).contract;
 const vendored=()=>JSON.parse(readFileSync(CONTRACT_URL,'utf8'));
 const at=(o,pointer)=>pointer.split('/').slice(1).map(k=>k.replace(/~1/g,'/').replace(/~0/g,'~')).reduce((x,k)=>x?.[k],o);
