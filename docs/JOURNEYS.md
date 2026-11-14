@@ -68,6 +68,8 @@ context update (`ui/update-model-context`; widget state `modelContent`), once pe
 | USDC arrived (Add funds card, either view) | yes | `YEET card: $25.00 of USDC arrived in their YEET account. They now have $28.20 to YEET with.` |
 | Device sign-in, lucky wheel landed, stale card | context only | |
 
+(This passage quotes ChatGPT-facing wording that is not part of this repository.)
+
 The card keeps its own short message for every refusal. Not enough USDC for a basket: the YEET button is shut and the
 reason stands under it.
 

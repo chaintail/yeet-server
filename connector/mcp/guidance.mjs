@@ -124,6 +124,10 @@ export const COPY=Object.freeze({
   open:"YEET yeet_checkin.open.",
   done:"YEET yeet_checkin.done: {days} {s}.",
  },
+
+ streak:{
+  reminder:"YEET streak.reminder: {streak_days}.",
+ },
  daily_spin:{
   set:"YEET daily_spin.set: {xp_won} {coin} {bonus}.",
   stamp:"YEET daily_spin.stamp: {coin} {filled} {slots} {xp_won}.",
@@ -271,6 +275,8 @@ function portfolio(r){
  if(r.base?.usdc===null)return c.usdc_unread;
  return positive(r.base?.usdc)?fill(c.usdc_only,{usdc:r.base.usdc}):c.empty;
 }
+
+const reminder=days=>Number.isInteger(days)&&days>=2?fill(COPY.streak.reminder,{streak_days:days}):'';
 function spin(r,ctx){
  const c=COPY.daily_spin,s=r.stamp;
  const head=!s?fill(c.xp_only,r)
@@ -278,7 +284,7 @@ function spin(r,ctx){
   :fill(c.stamp,{coin:s.coin,filled:s.filled,slots:s.slots,xp_won:r.xp_won});
  const left=r.spins_available??0;
 
- return join(head,left>0?fill(c.more_spins,{left,s:plural(left)}):hasLucky(ctx)&&r.spin_reason!=='trade_bonus'?c.lucky:c.done);
+ return join(head,left>0?fill(c.more_spins,{left,s:plural(left)}):hasLucky(ctx)&&r.spin_reason!=='trade_bonus'?c.lucky:c.done,left>0?'':reminder(r.streak_days));
 }
 function lucky(r){
  const c=COPY.lucky,l=r?.lucky;
@@ -319,7 +325,7 @@ const BY_TOOL={
   return Number.isInteger(r.me?.rank)?fill(c.ranked,{rank:r.me.rank,xp:r.me.xp}):c.unranked;
  },
  yeet_fund:r=>r.method==='crypto'?COPY.yeet_fund.crypto:r.method==='card'?COPY.yeet_fund.card:COPY.yeet_fund.choose,
- yeet_checkin:r=>{const c=r.checkin??{},left=Number.isInteger(c.spins_available)?c.spins_available:c.spin_available?1:0;return left>0?COPY.yeet_checkin.open:fill(COPY.yeet_checkin.done,{days:c.streak_days,s:plural(c.streak_days)})},
+ yeet_checkin:r=>{const c=r.checkin??{},left=Number.isInteger(c.spins_available)?c.spins_available:c.spin_available?1:0;return left>0?COPY.yeet_checkin.open:join(fill(COPY.yeet_checkin.done,{days:c.streak_days,s:plural(c.streak_days)}),reminder(c.streak_days))},
  daily_spin:spin,
  yeet_set_username:r=>fill(COPY.yeet_set_username.set,{username:r.username}),
  yeet_profile:()=>COPY.yeet_set_username.profile,

@@ -118,8 +118,28 @@ test('yeet_fund: by method (both choices, the deposit address, the card payment)
 
 test('yeet_checkin: a spin waiting, or done for today with the streak',()=>{
  assert.equal(g('yeet_checkin',{checkin:{total:5,streak_days:1,spin_available:true,spins_available:1}}),COPY.yeet_checkin.open);
- assert.equal(g('yeet_checkin',{checkin:{total:9,streak_days:4,spin_available:false,spins_available:0}}),"YEET text.");
+ assert.ok(g('yeet_checkin',{checkin:{total:9,streak_days:4,spin_available:false,spins_available:0}}).startsWith("YEET text."));
+ assert.equal(g('yeet_checkin',{checkin:{total:9,streak_days:1,spin_available:false,spins_available:0}}),"YEET text.");
  assert.match(g('yeet_checkin',{checkin:{total:9,streak_days:1,spin_available:false}}),/their streak is 1 day:/);
+});
+
+
+test('streak reminder: offered after a daily spin and on a done check-in at a streak of 2 or more; never at 0 or 1, never while a spin is left',()=>{
+ const REMIND=n=>`YEET REMIND: ${n}.`;
+ for(const n of [2,5]){
+  assert.equal(g('daily_spin',spin({streak_days:n})),`Name the BONK stamp: 3 of 7 on their BONK card, plus 30 XP. YEET daily_spin.lucky. ${REMIND(n)}`);
+  assert.equal(g('yeet_checkin',{checkin:{total:9,streak_days:n,spin_available:false,spins_available:0}}),`YEET text: ${n} ${REMIND(n)}.`);
+ }
+ for(const n of [0,1]){
+  assert.doesNotMatch(g('daily_spin',spin({streak_days:n})),/reminder/);
+  assert.doesNotMatch(g('yeet_checkin',{checkin:{total:9,streak_days:n,spin_available:false,spins_available:0}}),/reminder/);
+ }
+ // A spin still waiting comes first: the reminder rides on the last spin of the day, and never on an open check-in.
+ assert.doesNotMatch(g('daily_spin',spin({streak_days:5,spins_available:1})),/reminder/);
+ assert.equal(g('yeet_checkin',{checkin:{total:9,streak_days:5,spin_available:true,spins_available:1}}),COPY.yeet_checkin.open);
+ // The longest spin guidance with the reminder still fits the rules (three sentences, 500 characters): g() checks it.
+ const longest=g('daily_spin',spin({streak_days:365,stamp:{coin:'MELANIA',count_after:7,slots:7,card:1,filled:7,set_completed:true},set_bonus_xp:50}));
+ assert.ok(longest.endsWith(REMIND(365))&&longest.length<=500,String(longest.length));
 });
 
 test('funding is described for both networks: no string says USDC can only be added or held on Base',()=>{

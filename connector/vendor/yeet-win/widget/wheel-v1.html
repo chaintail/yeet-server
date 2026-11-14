@@ -1111,7 +1111,7 @@ return {logic,createWheelCard};
 })(window); // src/wheel-card.js: the daily wheel (views home and wheel) and the lucky wheel (view lucky)
 const SIGNING=(()=>null)(null);   // src/trade-signing.js over src/vendor/wallet-request.mjs
 const signerCfg={"app_id":null,"script":null,"page":null};  // {app_id,script,page}: build-time; a result's _meta['yeet/signer'] overrides
-const BUILD="a179e4becfbec6bff8b648d97701c6f208aae085";     // the yeet-win commit this template was built from; null for a local build
+const BUILD="49a1318ca11f09d8c731fbfcbbeef90e554645aa";     // the yeet-win commit this template was built from; null for a local build
 const APP={"manage_url":"https://chatgpt.com/plugins","refresh_label":"Refresh YEET in ChatGPT","refresh_steps":"open YEET there, select Refresh, then start a new chat"};         // {manage_url,refresh_label,refresh_steps}: where the person refreshes the app in ChatGPT
 const CONFIRM_KEY='yeet/confirm',SIGNER_KEY='yeet/signer',BUILD_KEY='yeet/build',FAILURE_KEY='yeet/failure';
 const POLL_MS=5000,POLL_MAX=360,SKEW_MS=2000,MAX_PARTS=99,AMOUNT_MAX=25,MORE_USDC='5';
@@ -1715,7 +1715,8 @@ function tellSpin(d){
  const s=d.stamp&&safeSymbol(d.stamp.coin)?d.stamp:null,left=Number.isInteger(d.spins_available)?d.spins_available:0;
  const stamp=s?` and a ${s.coin} stamp, ${s.filled} of ${s.slots} on their ${s.coin} card${s.set_completed?` (the set is complete${d.set_bonus_xp>0?`, ${d.set_bonus_xp} bonus XP`:''})`:''}`:'';
  const extra=left>0?`${left} extra spin${left===1?'':'s'} earned and waiting${d.extra_spin_reason==='streak_milestone'?' (streak milestone)':d.extra_spin_reason==='trade_bonus'?' (bonus from their YEET)':''}`:'no extra spin';
- tell('spin',`spin:${d.next_spin_at}:${d.total}`,`Daily check-in done. The wheel${s?` landed on ${s.coin}:`:' paid'} ${d.xp_won} XP${stamp}. Streak: ${d.streak_days} day${d.streak_days===1?'':'s'}; ${extra}; ${Number(d.total).toLocaleString('en-US')} XP in all.`);
+ const remind=Number.isInteger(d.streak_days)&&d.streak_days>=2&&left===0?` Today's spins are done.`:'';
+ tell('spin',`spin:${d.next_spin_at}:${d.total}`,`Daily check-in done. The wheel${s?` landed on ${s.coin}:`:' paid'} ${d.xp_won} XP${stamp}. Streak: ${d.streak_days} day${d.streak_days===1?'':'s'}; ${extra}; ${Number(d.total).toLocaleString('en-US')} XP in all.${remind}`);
 }
 /** The wheel card for what the card holds now: the home xp block, today's last spin, a lucky wheel. */
 function wheelSection(xp){
