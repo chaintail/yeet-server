@@ -26,7 +26,7 @@ const CURRENT=contract['x-yeet-app'].tools_version;
 /** The model's own entry call carries the current tools version, as its schema tells it to (`raw` sends args as given). */
 const asModel=(name,args)=>name==='yeet_overview'&&!Object.hasOwn(args,'card_build')?{app_version:CURRENT,...args}:args;
 async function connect({staleness=createStaleness(),sub='yeet-privy-refresh',routes=[],toolsVersions,logs=[]}={}){
- const server=createMcpServer({token:{scope:allScopes.join(' '),sub},callCore:async(route,body)=>{routes.push([route,body]);return core(route)},env:{YEET_P2:'1'},staleness,log:l=>logs.push(JSON.parse(l)),...(toolsVersions?{toolsVersions}:{})});
+ const server=createMcpServer({token:{scope:allScopes.join(' '),sub},callCore:async(route,body)=>{routes.push([route,body]);return core(route)},env:{YEET_P2:'1',YEET_HOW_IT_WORKS:'1'},staleness,log:l=>logs.push(JSON.parse(l)),...(toolsVersions?{toolsVersions}:{})});
  const client=new Client({name:'refresh-test',version:'1'});
  const [a,b]=InMemoryTransport.createLinkedPair();
  await server.connect(a);await client.connect(b);

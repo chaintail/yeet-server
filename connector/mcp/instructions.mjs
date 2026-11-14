@@ -19,6 +19,8 @@ export const instructions = [
  "YEET LINES.20.",
  "YEET LINES.23.",
  "YEET LINES.24.",
+ "YEET LINES.25.",
+ "YEET instructions.18.",
  "YEET LINES.26.",
  "YEET LINES.27.",
 ].join(' ');

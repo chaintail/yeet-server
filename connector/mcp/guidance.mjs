@@ -14,6 +14,10 @@ export const COPY=Object.freeze({
   accepted:"YEET terms.accepted.",
   recorded:"YEET terms.recorded.",
  },
+
+ how_it_works:{
+  answer:"YEET how_it_works.answer.",
+ },
  referral:{
   open:"YEET referral.open.",
   applied:"YEET referral.applied: {code}.",
@@ -337,6 +341,7 @@ const BY_TOOL={
  yeet_overview:overviewGuidance,
  yeet_terms:r=>r.terms?.accepted?COPY.terms.accepted:termsGuidance(r.terms),
  yeet_accept_terms:()=>COPY.terms.recorded,
+ yeet_how_it_works:()=>COPY.how_it_works.answer,
  yeet_referral:r=>r.status==='applied'?fill(COPY.referral.applied,{code:r.code}):r.status==='skipped'?COPY.referral.skipped:COPY.referral.open,
  apply_referral:r=>r.status==='applied'?fill(COPY.referral.applied,{code:r.code}):COPY.referral.skipped,
  yeet_home:home,

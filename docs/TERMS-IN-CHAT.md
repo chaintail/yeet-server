@@ -40,7 +40,7 @@ What each removed screen did, and where that lives now:
 
 ## 2. The terms are accepted in the chat
 
-`connector/core/terms.mjs` holds the version (`TERMS_VERSION`, now `2026-11-13`) and the statements. Edit them there.
+`connector/core/terms.mjs` holds the version (`TERMS_VERSION`, now `2026-11-14`) and the statements. Edit them there.
 The structure is Folio's consent flow (chaintail/stock-app `origin/main`: `apps/server/src/consent.ts`,
 `apps/android/app/src/main/java/io/tryfolio/android/ui/consent/ConsentText.kt` and `ConsentScreen.kt`,
 `apps/android/app/src/main/java/io/tryfolio/android/data/ConsentGate.kt`): one version constant, a list of lines each
@@ -49,11 +49,12 @@ a new version is a new acceptance, the money routes answer a typed refusal until
 
 | id | Statement | Link | Required |
 |---|---|---|---|
+| `risk` | You understand meme coin trading is extremely risky, meme coins can go to zero, and you will never trade more than you are willing to lose. | https://yeet.win/terms#section-7 | yes |
 | `age` | You are at least 18 and allowed to use YEET where you live. | https://yeet.win/terms#section-2 | yes |
 | `wallet` | You agree to a YEET wallet created and secured by Privy, which only you control. | https://privy.io/user-terms-of-service | yes |
 | `near_intents` | You understand your trades are routed through NEAR Intents. | https://yeet.win/terms#section-9 | yes |
-| `risk` | You understand meme coins can go to zero and you can lose everything you put in. | https://yeet.win/terms#section-7 | yes |
 | `no_advice` | You understand nothing in YEET or from ChatGPT is financial advice. | https://yeet.win/terms#section-4 | yes |
+| `xp` | I understand XP has no monetary value. | https://yeet.win/terms#section-10a | yes |
 | `terms` | You agree to the YEET Terms and Conditions. | https://yeet.win/terms | yes |
 | `privacy` | You agree to the YEET Privacy Policy. | https://yeet.win/privacy | yes |
 | `product_email` | Send me YEET product emails. | https://yeet.win/privacy#section-3 | no |
@@ -121,3 +122,23 @@ referral programme behind the code: it is stored.
 ## 5 to 7. The device check and the sign-in methods
 
 These sections are not part of this repository.
+
+## Version 2026-11-14 (owner asks of 2026-11-14)
+
+- The risk statement comes first, as the risk line now opens the terms page (yeet-win `apps/landing/terms`).
+- A new required statement, `xp`, in the owner's words: "I understand XP has no monetary value.", linked to terms
+  section 10A (XP has no current value, it only tracks long-term experience, limits rise with XP to protect new users).
+- New terms sections: 5A (YEET does not control your funds; Privy embedded non-custodial wallet; do not deposit large
+  sums; key export at https://home.privy.io/), 7A (beta, code not audited, zero guarantees), 10A (XP).
+- "*winning is not guaranteed." under the statements on `/account/terms`, on every card about winning, on the landing
+  pages and in the server instructions.
+- Raising the version asks every account again through the normal flow (`TERMS_REQUIRED`); there is no code for
+  accounts that accepted `2026-11-13`.
+- `core/terms.test.mjs` checks the anchors against `YEET_WIN_DIR` (default the sibling `yeet-win-wt-int`); a checkout
+  whose terms page carries another `data-terms-version` is skipped.
+
+## yeet_how_it_works
+
+Read-only, `yeet:read`, no card, no parameters; open before the terms are accepted (core `GET /how-it-works`, in
+`TERMS_OPEN`). Registered only with `YEET_HOW_IT_WORKS=1` (default off, `mcp/tool-registration.mjs` `OPT_IN`). The
+shape is the public contract's `$defs.how_it_works`; the words are `connector/core/how-it-works.mjs` only.

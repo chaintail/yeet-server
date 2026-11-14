@@ -65,7 +65,8 @@ test('tools/list: P0 and P1 tools with the contract annotations, scopes, cards a
   // yeet_accept_terms is the model's own call and no card may make it.
   assert.equal(by.yeet_accept_terms._meta['openai/widgetAccessible'],false);assert.deepEqual(by.yeet_accept_terms.annotations,{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false});
   for(const n of LISTED.filter(n=>n!=='execute_trade'&&n!=='submit_trade_signature'&&n!=='apply_referral')){assert.equal(by[n]._meta['openai/visibility'],undefined,n);assert.deepEqual(by[n]._meta.ui.visibility,['model','app'],n)}
-  assert.deepEqual(TOOLS.map(t=>t.name).sort(),[...LISTED,...P2].sort());
+  // yeet_how_it_works is in the contract and registered only with YEET_HOW_IT_WORKS=1 (OPT_IN).
+ assert.deepEqual(TOOLS.map(t=>t.name).sort(),[...LISTED,...P2,'yeet_how_it_works'].sort());
  }finally{await close()}
  const p2=createMcpServer({token:{scope:''},callCore:async()=>({}),env:{YEET_P2:'1'}});
  const c2=new Client({name:'p2',version:'1'});const [a,b]=InMemoryTransport.createLinkedPair();await p2.connect(a);await c2.connect(b);

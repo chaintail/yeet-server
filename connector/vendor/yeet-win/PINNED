@@ -1,6 +1,6 @@
 repo: chaintail/yeet-win
-branch: feat/deposit-3-steps
-commit: c671cc59f542825e7e0704b98995737fb538929f
+branch: feat/terms-xp
+commit: 2961065568b2f01861dfe7e1c64d51aed07654c0
 built: router (tsc 7.0.2), widget (node build.mjs), signer (scripts/build-signer.mjs, esbuild 0.28.2, @privy-io/js-sdk-core 0.79.5, sha256 a4affb0c76ce)
 files:
   contracts/yeet-tools.json

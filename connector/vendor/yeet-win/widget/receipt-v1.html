@@ -356,6 +356,7 @@ html[data-theme=light]{background:#fff}
 .lb .mv{font:700 11px var(--mono);color:var(--mint);margin-left:6px}
 .fine{margin:12px 2px 0;font-size:12.5px;color:var(--yc-mute);display:flex;gap:6px;align-items:center}
 .fine svg{width:14px;height:14px}
+.fine.no-guarantee{font-size:11px;margin-top:8px;opacity:.85}
 .ok-line{display:flex;align-items:center;gap:8px;margin-top:10px;font:700 14px var(--mono);color:var(--mint)}
 .ok-line svg{width:16px;height:16px}
 
@@ -863,7 +864,7 @@ function signedFromWallet(req,answer){
 
 return {privyRpcBody,privyRpcBodies,checkBatch,checkIntent,reactSdkArgs,signedFromWallet,signedFromWallets};})());   // src/trade-signing.js over src/vendor/wallet-request.mjs
 const signerCfg={"app_id":null,"script":null,"page":null};  // {app_id,script,page}: build-time; a result's _meta['yeet/signer'] overrides
-const BUILD="c671cc59f542825e7e0704b98995737fb538929f";     // the yeet-win commit this template was built from; null for a local build
+const BUILD="2961065568b2f01861dfe7e1c64d51aed07654c0";     // the yeet-win commit this template was built from; null for a local build
 const APP={"manage_url":"https://chatgpt.com/plugins","refresh_label":"Refresh YEET in ChatGPT","refresh_steps":"open YEET there, select Refresh, then start a new chat"};         // {manage_url,refresh_label,refresh_steps}: where the person refreshes the app in ChatGPT
 const CONFIRM_KEY='yeet/confirm',SIGNER_KEY='yeet/signer',BUILD_KEY='yeet/build',FAILURE_KEY='yeet/failure';
 const POLL_MS=5000,POLL_MAX=360,SKEW_MS=2000,MAX_PARTS=99,AMOUNT_MAX=25,MORE_USDC='5';
@@ -1559,6 +1560,9 @@ function refreshLine(){
  p.append(document.createTextNode('YEET was updated. '),a);return p;
 }
 function noteLine(text){const n=el('p','next note',text);n.setAttribute('role','status');return mark(n,'note',true)}
+/** The footnote on every card that talks about winning (the wheel, XP, the boards, the win code, a win). Small type. */
+const NO_GUARANTEE='*winning is not guaranteed.';
+function noGuarantee(){const p=mark(el('p','fine no-guarantee',NO_GUARANTEE),'no-guarantee',true);p.dataset.role='no-guarantee';return p}
 function alertBox(title,text,key){const b=mark(el('div','yc-alert'),key);b.setAttribute('role','alert');b.append(el('strong',null,title),el('span',null,text));return b}
 /** A number that pulses when it changes (Marlin's .num). */
 const num=(cls,text,k)=>{const n=el('span',`num${cls?` ${cls}`:''}`,text);if(k)mark(n,k,true);return n};
@@ -1631,7 +1635,7 @@ function shareScene(){
   const t=c.data,skeet=t.direction==='skeet';
   const coins=skeet?(Array.isArray(t.legs)?t.legs:[]).filter(l=>l?.status==='SUCCESS').map(l=>safeSymbol(l.symbol)).filter(Boolean)
    :(Array.isArray(t.received)?t.received:[]).map(r=>safeSymbol(r?.symbol)).filter(Boolean);
-  return coins.length?{lines:skeet?['Cashed','out.']:['I got a','win.'],coins}:null;
+  return coins.length?{lines:skeet?['Cashed','out.']:['I got a','win.'],coins,fine:!skeet}:null;
  }
  if(c.kind==='portfolio'){
   const coins=(Array.isArray(c.data.solana?.holdings)?c.data.solana.holdings:[]).map(h=>safeSymbol(h?.symbol)).filter(Boolean);
@@ -1664,6 +1668,7 @@ function paintShare(cv,scene){
  const U=setLine(TYPE.wide,'yeet.win',-34,true),uk=.034,pw=U.w*uk+52,px=W-72-pw,py=488,ph=64;
  const pill=(x,y,w,h,fill)=>{const q=h/2;ctx.beginPath();ctx.moveTo(x+q,y);ctx.lineTo(x+w-q,y);ctx.arc(x+w-q,y+q,q,-Math.PI/2,Math.PI/2);ctx.lineTo(x+q,y+h);ctx.arc(x+q,y+q,q,Math.PI/2,Math.PI*1.5);ctx.closePath();ctx.fillStyle=fill;ctx.fill()};
  pill(px-5,py-5,pw+10,ph+10,'#0F1240');pill(px,py,pw,ph,'#FFE03A');outline(U.d,px+26,py+ph/2-TYPE.em*uk*.56,uk,'#0F1240');
+ if(scene.fine){ctx.fillStyle='rgba(244,245,255,.72)';ctx.font='600 20px ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif';ctx.textAlign='left';ctx.textBaseline='alphabetic';ctx.fillText(NO_GUARANTEE,72,606)}
  return true;
 }
 async function sendPicture(mode,cv){
