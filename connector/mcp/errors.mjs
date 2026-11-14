@@ -8,7 +8,8 @@ export function toolError(value,ctx,{tool}={}){
  const code=normalize(value?.error);
  // LIMIT_EXCEEDED: the core's sentence with the person's tier, limits and amount left today (trade/limits.mjs).
  // BALANCE_LOW: the core's sentence with the person's USDC on Base and on Solana (pipeline/funding.mjs).
- const own=(code==='LIMIT_EXCEEDED'||code==='BALANCE_LOW')&&typeof value?.message==='string'&&value.message.length>=1&&value.message.length<=500?value.message:null;
+ // AMOUNT_TOO_SMALL: only a SELL under the sell minimum has its own sentence (trade/limits.mjs skeetTooSmall).
+ const own=(code==='LIMIT_EXCEEDED'||code==='BALANCE_LOW'||code==='AMOUNT_TOO_SMALL')&&typeof value?.message==='string'&&value.message.length>=1&&value.message.length<=500?value.message:null;
  const data={error:code,message:own??toolMessage(code),retryable:isRetryable(code)};
  // BALANCE_LOW: where the person adds USDC (contract $defs.failure fund_url, https only); the card shows Add funds.
  if(code==='BALANCE_LOW'&&typeof value?.fund_url==='string'&&/^https:\/\/[^\s]{1,500}$/.test(value.fund_url))data.fund_url=value.fund_url;

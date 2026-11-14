@@ -164,6 +164,8 @@ export const COPY=Object.freeze({
   TEMPORARILY_UNAVAILABLE_no_send:"YEET errors.TEMPORARILY_UNAVAILABLE_no_send.",
   COST_TOO_HIGH:"YEET errors.COST_TOO_HIGH.",
   AMOUNT_TOO_SMALL:"YEET errors.AMOUNT_TOO_SMALL.",
+
+  AMOUNT_TOO_SMALL_sell:"YEET errors.AMOUNT_TOO_SMALL_sell.",
   CONFIRMATION_REQUIRED:"YEET errors.CONFIRMATION_REQUIRED.",
   REQUOTE_REQUIRED:"YEET errors.REQUOTE_REQUIRED.",
   COIN_NOT_SUPPORTED:"YEET errors.COIN_NOT_SUPPORTED.",
@@ -340,5 +342,6 @@ export function refusalGuidance(code,message,ctx,{terms,reason,tool,now=Date.now
  }
  if(code==='TRADING_PAUSED'&&!hasWheel(ctx))return e.TRADING_PAUSED_no_wheel;
  if(code==='BALANCE_LOW'&&typeof message==='string'&&/you can trade up to/.test(message))return e.BALANCE_LOW_usdc;
+ if(code==='AMOUNT_TOO_SMALL'&&typeof message==='string'&&/too small to sell right now/.test(message))return e.AMOUNT_TOO_SMALL_sell;
  return e[code];
 }

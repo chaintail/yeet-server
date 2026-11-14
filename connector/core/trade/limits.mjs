@@ -1,5 +1,8 @@
 // Server-side trade limits (port plan 2.3 item 4 and risk 3). Every refusal is one catalogue code.
-//   YEET_MIN_LEG_USDC    minimum USDC per coin (default 3)         -> AMOUNT_TOO_SMALL
+//   YEET_MIN_LEG_USDC    minimum USDC per coin of a BUY (default 3) -> AMOUNT_TOO_SMALL
+//   YEET_MIN_SKEET_USDC  minimum USDC a SELL brings in per coin (default 0.5) -> AMOUNT_TOO_SMALL with its own
+//                        sentence. Separate from the buy minimum on purpose: a coin bought at the 3 USDC minimum is
+//                        worth less than 3 after costs, and must still be sellable. Used by skeetPlan only.
 //   BUY caps by XP tier (TIER_DEFAULTS below; per trade and per UTC day)  -> LIMIT_EXCEEDED
 //   YEET_MAX_TRADE_USDC / YEET_DAILY_CAP_USDC  optional global ceilings over every tier (default: the VIP caps).
 //                        Set to the old 25 / 50 they would clamp Winner and VIP: leave them unset in production.
@@ -67,6 +70,7 @@ export function limitsFromEnv(env=process.env){
  const tiers=tiersFromEnv(env);
  return Object.freeze({
   minLegRaw:usdcEnv(env,'YEET_MIN_LEG_USDC','3'),
+  minSkeetRaw:usdcEnv(env,'YEET_MIN_SKEET_USDC','0.5'),
   tiers,
   // Optional global ceilings (the old flat caps): when set they also clamp every tier (capsFor).
   maxTradeRaw:usdcEnv(env,'YEET_MAX_TRADE_USDC',fmt(big(tiers.map(t=>t.maxTradeRaw)))),
@@ -137,4 +141,13 @@ export function checkDaily(db,limits,accountId,ms,addRaw,xp){
 export function recordSpend(db,accountId,ms,addRaw){
  const day=utcDay(ms),prior=spentToday(db,accountId,ms);
  db.prepare('INSERT INTO daily_spend(account_id,day,usdc_raw) VALUES(?,?,?) ON CONFLICT(account_id,day) DO UPDATE SET usdc_raw=excluded.usdc_raw').run(accountId,day,(prior+addRaw).toString());
+}
+
+/** AMOUNT_TOO_SMALL for a SELL, in product voice (contract failure.message): the coins whose sale would bring in less
+ * than the sell minimum, the minimum itself, and what works. `small`: [{symbol, percent}] of those coins. Selling all
+ * of it is offered only when some of them was asked for in part. */
+export function skeetTooSmall(limits,small){
+ const names=small.map(l=>l.symbol),what=names.length===1?names[0]:`${names.slice(0,-1).join(', ')} and ${names.at(-1)}`;
+ const all=small.every(l=>l.percent===100);
+ return `That much ${what} is too small to sell right now: a sale has to bring in at least ${fmt(limits.minSkeetRaw)} USDC per coin. ${all?'Add to the position first, then sell.':'Sell 100% of it, or add to the position first.'}`;
 }
