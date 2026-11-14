@@ -64,7 +64,9 @@ import {
   port,
   TEST,
   PUBLIC,
+  BetaFull,
 } from "#shared/common.mjs";
+import { betaFullRoutes, betaFullHref, BETA_FULL_LINE } from "./beta-full.mjs";
 import { issuableScopes } from "./scopes.mjs";
 import { loginMethods } from "./login-methods.mjs";
 import { signupEmailStep, signupEmailRoutes, stepReader, stepGuard, stepAccount, StepChanged, changedBody, STEP_PATH } from "./signup-email.mjs";
@@ -409,14 +411,26 @@ function authDocument(res, title, body) {
 // `bound` (a page opened from an account-bound link, account-bound.mjs): only that account's methods and no new
 // account. The page's own address carries the hint; Google and Apple come back to the bare /account/login (a fixed
 // address, as Privy's allowed redirect list needs) and the page goes on from what the tab kept (login/bound-return.js).
-const loginFields = (bound = null) =>
+// `full` (a page where a new person may sign up): the "beta is full" page for this entry path (beta-full.mjs). The
+// bundle goes there when Privy refuses a new person (sign-up off while the beta is full, or Privy's own user limit).
+const loginFields = (bound = null, full = null) =>
   process.env.PRIVY_LOGIN === "1"
-    ? `<div id="privy-login"${bound ? ` data-bound="1" data-methods="${bound.methods.join(",")}"` : ""}><p role="status">Loading secure sign in…</p></div><script type="module" src="/account/privy-login/login.js"></script>`
+    ? `<div id="privy-login"${bound ? ` data-bound="1" data-methods="${bound.methods.join(",")}"` : ""}${!bound && full ? ` data-full="${html(betaFullHref(full))}"` : ""}><p role="status">Loading secure sign in…</p></div><script type="module" src="/account/privy-login/login.js"></script>`
     : credentials();
 // Signed hints on account-bound links (shared/link-token.mjs purpose `hint`): verified here, never trusted from the page.
 const readHint = hintReader((t) => verifyLinkToken(LINK_KEY, t, { purpose: "hint" }));
 // Public values only: the sign-in page needs the app id.
-app.get("/account/identity-config", (_q, r) =>
+// Whether a new person may sign up now (core /signup: false while the limited beta is full). When the core cannot
+// say, the page stays as it always was; the core's own check at /identity/resolve still creates no account then.
+async function signupOpen() {
+  try {
+    const { status, body } = await coreSend("/signup", "", secret("core-as"), undefined, 2000);
+    return !(status === 200 && body?.signup === false);
+  } catch {
+    return true;
+  }
+}
+app.get("/account/identity-config", async (_q, r) =>
   process.env.PRIVY_LOGIN === "1"
     ? r.set("Cache-Control", "no-store").json({
         // Decision (b): no signer id is published; the page never attaches a YEET signer to a wallet.
@@ -425,6 +439,8 @@ app.get("/account/identity-config", (_q, r) =>
         methods: loginMethods(),
         // The email step right after a Google or Apple sign-in (YEET_SIGNUP_EMAIL_STEP, signup-email.mjs).
         emailStep: signupEmailStep(),
+        // false while the limited beta is full (YEET_BETA_USER_CAP): Privy signs in existing users only.
+        signup: await signupOpen(),
       })
     : r.sendStatus(404),
 );
@@ -582,7 +598,7 @@ app.get("/account/login", (q, r) => {
     authDocument(
       r,
       promptTitle("login"),
-      `<form method="POST" data-yeet-prompt="login"><input type="hidden" name="csrf" value="${c}">${next}${loginFields()}${process.env.PRIVY_LOGIN === "1" ? "" : '<button type="submit">Sign in</button>'}</form>`,
+      `<form method="POST" data-yeet-prompt="login"><input type="hidden" name="csrf" value="${c}">${next}${loginFields(null, { source: "web" })}${process.env.PRIVY_LOGIN === "1" ? "" : '<button type="submit">Sign in</button>'}</form>`,
     ),
   );
 });
@@ -660,6 +676,7 @@ app.post("/account/login", formBody, async (q, r) => {
     r.redirect(afterSignIn(q.body.next));
   } catch (e) {
     if (e instanceof StepChanged) return stepChangedPage(r, promptTitle("login"));
+    if (e instanceof BetaFull) return sendBetaFull(r, { source: "web" });
     r.status(401).json({ error: "sign in failed" });
   }
 });
@@ -673,7 +690,9 @@ app.post("/account/wallets", express.json({ limit: "32kb" }), async (q, r) => {
   let id;
   try {
     id = await verifyIdentity(q.body ?? {});
-  } catch {
+  } catch (e) {
+    // A new person while the beta is full: no account, so no wallet either. The page goes to the "beta is full" page.
+    if (e instanceof BetaFull) return r.status(403).json({ code: "BETA_FULL", message: BETA_FULL_LINE, url: betaFullHref({ source: "web" }) });
     return r.status(401).json({ code: "SIGN_IN_REQUIRED", message: "Your sign in expired. Please sign in again." });
   }
   if (!(await eligible(id))) return r.status(403).json({ code: "NOT_ELIGIBLE", message: "This account cannot use YEET." });
@@ -757,6 +776,13 @@ fundRoutes(app, {
 });
 // The YEET terms as a first-party page with checkboxes (terms-page.mjs): the same record as yeet_accept_terms.
 termsRoutes(app, { session, originOK, equal, formBody, hint: readHint, linkToken: (t) => { try { return verifyLinkToken(LINK_KEY, t, { purpose: "terms" }); } catch { return null; } }, core: (route, account, body) => coreSend(route, account, secret("core-as"), body), document: authDocument });
+// The "beta is full" page and its waitlist form (beta-full.mjs). Rate limited per client address in every mode.
+const waitlistAllow = rateLimiter({ perClient: 5, global: 100 });
+const sendBetaFull = betaFullRoutes(app, {
+  document: authDocument, cookie, equal, originOK, formBody,
+  core: (body) => coreSend("/waitlist", "", secret("core-as"), body),
+  limit: (q) => waitlistAllow(q.ip ?? "unknown"),
+});
 // Card signing (sign-page.mjs): the signer script the trade card loads, and the first-party signing page with its two
 // routes. The page's caller is the Privy user signed in on the page, matched to the account already linked to it.
 signRoutes(app, {
@@ -828,7 +854,7 @@ app.get("/interaction/:uid", async (q, r, next) => {
     }
     const identity = s && !recoveringAccount(d)
       ? `<input type="hidden" name="session_login" value="yes">`
-      : loginFields();
+      : loginFields(null, { source: "chatgpt", back: `/interaction/${d.uid}` });
     const known = s && !recoveringAccount(d) ? await currentUsername(s.id) : null;
     const action = known ? `Continue as ${html(known.name || known.username || "your YEET account")}` : "Sign in";
     r.type("html").send(
@@ -901,6 +927,9 @@ app.post("/interaction/:uid", formBody, async (q, r, next) => {
     }
     r.sendStatus(400);
   } catch (e) {
+    // A new person while the beta is full: the "beta is full" page, and this authorization stays open for a sign-in
+    // with an account that exists ("Already have an account? Sign in" comes back here).
+    if (e instanceof BetaFull) return sendBetaFull(r, { source: "chatgpt", back: `/interaction/${q.params.uid}` });
     interactionError(e, r, next);
   }
 });

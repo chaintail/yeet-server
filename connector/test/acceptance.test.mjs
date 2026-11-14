@@ -2,7 +2,7 @@
 // process on 127.0.0.1 with throwaway state and service secrets; nothing outside the test's temp directory is touched.
 import test, {after} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,mkdirSync,writeFileSync,rmSync,existsSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomBytes,createHash} from 'node:crypto';
@@ -757,4 +757,154 @@ test('the email step of the connect screen: the note is for one Privy user; a si
  }finally{delete process.env.YEET_SIGNUP_EMAIL_STEP}
  r=await login(ALICE,step+'x');assert.equal(r.status,409);
  assert.equal((await start(ALICE)).status,200);
+});
+
+// ---- The limited beta (YEET_BETA_USER_CAP; core/identity-store.mjs betaFull, as/beta-full.mjs, core/waitlist.mjs).
+/** Runs fn with the beta cap at `cap` (a number, or undefined for unset) and puts the setting back after. */
+async function withBetaCap(cap,fn){
+ const before=process.env.YEET_BETA_USER_CAP;
+ if(cap===undefined)delete process.env.YEET_BETA_USER_CAP;else process.env.YEET_BETA_USER_CAP=String(cap);
+ try{return await fn()}finally{if(before===undefined)delete process.env.YEET_BETA_USER_CAP;else process.env.YEET_BETA_USER_CAP=before}
+}
+/** One connect flow up to the login POST: the answer to signing in with `identity` inside a ChatGPT authorization. */
+async function connectLogin(identity){
+ const cookies=jar();
+ const go=async(url,init={})=>{const x=await fetch(local(url),{redirect:'manual',...init,headers:{cookie:cookies.header(),...init.headers}});cookies.add(x);return x};
+ const auth=new URL(AS+'/auth');
+ auth.search=new URLSearchParams({client_id:'local-chatgpt-fixture',response_type:'code',redirect_uri:'http://127.0.0.1:38314/callback',code_challenge:randomBytes(32).toString('base64url'),code_challenge_method:'S256',scope:SCOPES.join(' '),resource:ORIGIN,state:'s1'});
+ const page=(await go(auth.href)).headers.get('location');
+ const d=await (await go(page)).json();assert.equal(d.prompt,'login');
+ const r=await go(page,{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded',origin:ORIGIN},body:new URLSearchParams({csrf:d.csrf,identity_token:identity})});
+ return {r,uid:new URL(page,ORIGIN).pathname.split('/').pop()};
+}
+/** The web sign-in (/account/login) with `identity`. */
+async function webLogin(identity){
+ const cookies=jar();
+ const x=await fetch(AS+'/account/login');cookies.add(x);
+ const csrf=(await x.text()).match(/name="csrf" value="([0-9a-f]+)"/)[1];
+ return fetch(AS+'/account/login',{method:'POST',redirect:'manual',headers:{cookie:cookies.header(),origin:ORIGIN,'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf,identity_token:identity})});
+}
+const coreAs=(path,body)=>fetch(`http://127.0.0.1:${PORTS.CORE_PORT}${path}`,{method:body?'POST':'GET',headers:{authorization:`Bearer ${readFileSync(join(secrets,'core-as'),'utf8').trim()}`,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
+const BETA_LINE='YEET is in a limited beta and every spot is taken right now. Leave your email and we will tell you when new spots open.';
+
+test('beta cap unset: sign-up is open and a new person gets an account on both entry paths, as before',async()=>{
+ const {accountCount}=await import('../core/identity-store.mjs');
+ await withBetaCap(undefined,async()=>{
+  assert.deepEqual(await (await coreAs('/signup')).json(),{signup:true});
+  const before=accountCount();
+  const {r}=await connectLogin('DEV:did:privy:beta-unset-chatgpt');assert.equal(r.status,303);
+  assert.equal((await webLogin('DEV:did:privy:beta-unset-web')).status,302);
+  assert.equal(accountCount(),before+2);
+ });
+ // A cap above the count changes nothing either.
+ await withBetaCap(accountCount()+5,async()=>{
+  assert.deepEqual(await (await coreAs('/signup')).json(),{signup:true});
+  const before=accountCount();
+  assert.equal((await connectLogin('DEV:did:privy:beta-under-cap')).r.status,303);
+  assert.equal(accountCount(),before+1);
+ });
+});
+
+test('beta cap reached: a new person gets the "beta is full" page on the connect flow and the web sign-in, and no account; existing accounts sign in and trade',async()=>{
+ const {accountCount}=await import('../core/identity-store.mjs');
+ const existing=await token();
+ await withBetaCap(accountCount(),async()=>{
+  assert.deepEqual(await (await coreAs('/signup')).json(),{signup:false});
+  const before=accountCount();
+  // ChatGPT connect flow: the page instead of an account, and the way back into this same authorization.
+  const {r,uid}=await connectLogin('DEV:did:privy:beta-new-chatgpt');
+  assert.equal(r.status,403);assert.match(r.headers.get('content-type'),/text\/html/);
+  const page=await r.text();
+  assert.match(page,/<title>The beta is full<\/title>/);assert.match(page,/<h1 id="page-title" class="display">The beta is full<\/h1>/);
+  assert.ok(page.includes(BETA_LINE));assert.match(page,/<button type="submit">Join the waitlist<\/button>/);
+  assert.match(page,/<input id="waitlist-email" name="email" type="email"/);
+  assert.ok(page.includes(`<p class="hint">Already have an account? <a href="/interaction/${uid}">Sign in</a></p>`));
+  assert.match(page,/name="source" value="chatgpt"/);assert.match(page,/href="\/account\/auth-pages\.css"/);
+  assert.doesNotMatch(page,/\b(demo|mock|sample|placeholder)\b/i);
+  // The web sign-in.
+  const w=await webLogin('DEV:did:privy:beta-new-web');
+  assert.equal(w.status,403);const web=await w.text();
+  assert.ok(web.includes(BETA_LINE));assert.match(web,/name="source" value="web"/);assert.ok(web.includes('<a href="/account/login">Sign in</a>'));
+  // Wallet set-up for a new person: refused with BETA_FULL before any wallet is asked for.
+  const ws=await fetch(AS+'/account/wallets',{method:'POST',headers:{'content-type':'application/json',origin:ORIGIN},body:JSON.stringify({identity_token:'DEV:did:privy:beta-new-wallets'})});
+  assert.equal(ws.status,403);const wb=await ws.json();
+  assert.equal(wb.code,'BETA_FULL');assert.equal(wb.message,BETA_LINE);assert.equal(wb.url,'/account/waitlist?from=web');
+  // The core answers the same to a direct resolve, and nobody was created anywhere.
+  const res=await coreAs('/identity/resolve',{provider:'privy.io',app_id:'dev-identity-stub',did:'did:privy:beta-new-direct'});
+  assert.equal(res.status,403);assert.deepEqual(await res.json(),{error:'BETA_FULL'});
+  assert.equal(accountCount(),before,'no account row for anyone new');
+  // Existing accounts: the web sign-in, a whole new ChatGPT connection, and a tool call on the old token.
+  assert.equal((await webLogin('DEV:did:privy:acceptance-alice')).status,302);
+  const again=await signIn({terms:false});
+  assert.equal(accountCount(),before);
+  for(const tok of [existing,again]){
+   const coins=(await (await rpc({jsonrpc:'2.0',id:70,method:'tools/call',params:{name:'yeet_coins',arguments:{}}},tok.access_token)).json()).result;
+   assert.equal(coins.isError,undefined,JSON.stringify(coins.content));
+  }
+  // Back under the cap (a higher cap): the same new person gets an account.
+  process.env.YEET_BETA_USER_CAP=String(before+1);
+  assert.equal((await connectLogin('DEV:did:privy:beta-new-chatgpt')).r.status,303);
+  assert.equal(accountCount(),before+1);
+ });
+});
+
+test('a tool call with no account behind it while the beta is full: BETA_FULL with the waitlist link, no structuredContent',async()=>{
+ const {accountCount,didFor}=await import('../core/identity-store.mjs');
+ const {DatabaseSync}=await import('node:sqlite');
+ const tok=await signIn({identity:'DEV:did:privy:beta-orphan',terms:false});
+ const me=await (await fetch(AS+'/me',{headers:{authorization:`Bearer ${tok.access_token}`}})).json();
+ assert.equal(didFor(me.sub),'did:privy:beta-orphan');
+ // The account behind the token goes away (the token stays valid): what a ChatGPT person with no account looks like.
+ const db=new DatabaseSync(join(state,'identities.sqlite'),{timeout:2000});
+ for(const sql of ['DELETE FROM identity_links WHERE account_id=?','DELETE FROM usernames WHERE account_id=?','DELETE FROM accounts WHERE id=?'])db.prepare(sql).run(me.sub);
+ db.close();
+ const call=async()=>(await (await rpc({jsonrpc:'2.0',id:71,method:'tools/call',params:{name:'yeet_overview',arguments:{}}},tok.access_token)).json()).result;
+ await withBetaCap(accountCount(),async()=>{
+  const r=await call();
+  assert.equal(r.isError,true);assert.equal(Object.hasOwn(r,'structuredContent'),false);
+  const data=JSON.parse(r.content[0].text);
+  assert.equal(data.error,'BETA_FULL');assert.equal(data.retryable,false);
+  assert.equal(data.waitlist_url,`${ORIGIN}/account/waitlist?from=chatgpt`);
+  assert.match(data.message,/limited beta/);assert.match(data.guidance,/waitlist_url/);
+ });
+ // With the cap unset the same call is refused as it always was (the core's bare 400).
+ await withBetaCap(undefined,async()=>{
+  assert.equal(JSON.parse((await call()).content[0].text).error,'TEMPORARILY_UNAVAILABLE');
+ });
+});
+
+test('the waitlist form: CSRF and origin checked, the email validated, lowercased and kept once, rate limited per address',async()=>{
+ const {waitlistRows}=await import('../core/waitlist.mjs');
+ const open=async(query='?from=chatgpt&back=/interaction/abc')=>{
+  const cookies=jar(),x=await fetch(AS+'/account/waitlist'+query);cookies.add(x);
+  assert.equal(x.status,200);assert.equal(x.headers.get('cache-control'),'no-store');
+  return {cookies,html:await x.text()};
+ };
+ let {cookies,html}=await open();
+ assert.ok(html.includes(BETA_LINE));assert.ok(html.includes('<a href="/interaction/abc">Sign in</a>'));
+ assert.match(cookies.header(),/yeet_waitlist=[0-9a-f]{48}/);
+ // A back link that is not one of the sign-in pages becomes the web sign-in.
+ assert.ok((await open('?from=web&back=https://evil.example/')).html.includes('<a href="/account/login">Sign in</a>'));
+ const csrf=()=>html.match(/name="csrf" value="([0-9a-f]+)"/)[1];
+ const post=(fields,{origin=ORIGIN,c=cookies}={})=>fetch(AS+'/account/waitlist',{method:'POST',headers:{cookie:c.header(),origin,'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf:csrf(),source:'chatgpt',back:'/interaction/abc',...fields})});
+ // 1: joined.
+ let r=await post({email:'  Ada.Lovelace@Example.COM '});assert.equal(r.status,200);
+ let text=await r.text();assert.ok(text.includes('You are on the list. We will email you when a spot opens.'));assert.ok(text.includes('Already have an account?'));
+ // 2: the same address in other letters: the same answer, still one row.
+ ({cookies,html}=await open());
+ r=await post({email:'ada.lovelace@example.com'});assert.equal(r.status,200);
+ assert.deepEqual(waitlistRows().map(x=>[x.email,x.source]),[['ada.lovelace@example.com','chatgpt']]);
+ // 3: not an address: the form again with the line, nothing stored.
+ ({cookies,html}=await open());
+ r=await post({email:'not an email'});assert.equal(r.status,400);
+ text=await r.text();assert.ok(text.includes('Enter your email address, like name@example.com.'));assert.match(text,/aria-invalid="true"/);
+ // 4: another origin: refused.
+ r=await post({email:'grace@example.com'},{origin:'https://evil.example'});assert.equal(r.status,403);
+ assert.equal(waitlistRows().length,1);
+ // 5: from the web sign-in.
+ r=await post({email:'grace@example.com',source:'web'});assert.equal(r.status,200);
+ assert.deepEqual(waitlistRows().map(x=>[x.email,x.source]),[['ada.lovelace@example.com','chatgpt'],['grace@example.com','web']]);
+ // 6: the sixth post from this address within the minute: 429, nothing stored.
+ r=await post({email:'linus@example.com'});assert.equal(r.status,429);assert.equal(r.headers.get('retry-after'),'60');
+ assert.equal(waitlistRows().length,2);
 });

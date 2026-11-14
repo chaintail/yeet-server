@@ -163,6 +163,8 @@ services:
       YEET_MARKET_DATA: ${YEET_MARKET_DATA:-}
       YEET_MAX_COST_BPS: ${YEET_MAX_COST_BPS:-}
       YEET_MAX_ACCOUNTS: ${YEET_MAX_ACCOUNTS:-}
+      # Limited beta: new accounts stop at this many and new people get the "beta is full" page. Unset: no beta cap.
+      YEET_BETA_USER_CAP: ${YEET_BETA_USER_CAP:-}
       YEET_REQUOTE_TOLERANCE_BPS: ${YEET_REQUOTE_TOLERANCE_BPS:-}
       YEET_CODE_MINT_LIMIT: ${YEET_CODE_MINT_LIMIT:-}
       YEET_TRACK_MAX_HOURS: ${YEET_TRACK_MAX_HOURS:-}

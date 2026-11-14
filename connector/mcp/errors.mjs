@@ -20,6 +20,8 @@ export function toolError(value,ctx,{tool}={}){
  // TERMS_REQUIRED: the current terms (statements with their links, where to accept), and from yeet_accept_terms the
  // required statements that were not confirmed.
  // APP_OUTDATED: where they refresh the app and how (contract $defs.failure app_refresh, from x-yeet-app).
+ // BETA_FULL (private code, contracts/errors.mjs): the "beta is full" page with the waitlist form (https only).
+ if(code==='BETA_FULL'&&typeof value?.waitlist_url==='string'&&/^https:\/\/[^\s]{1,500}$/.test(value.waitlist_url))data.waitlist_url=value.waitlist_url;
  if(code==='APP_OUTDATED')data.app_refresh={url:APP.manage_url,steps:APP.refresh_steps};
  const terms=code==='TERMS_REQUIRED'&&value?.terms&&typeof value.terms==='object'?value.terms:null;
  if(terms){data.terms=terms;if(Array.isArray(value.missing)&&value.missing.length)data.missing=value.missing.filter(x=>typeof x==='string').slice(0,12)}
