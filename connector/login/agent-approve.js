@@ -1,4 +1,4 @@
-// The agent approval page (/agent/approve, as/agent-page.mjs), without React: the code the page is for, the calls to
+// The agent approval page (https://mcp.yeet.win/approve, as/agent-page.mjs), without React: the code the page is for, the calls to
 // Privy made with the person's own Privy access token, and which screen the page shows.
 //
 // Privy's OAuth device authorization ("CLI and agent access",
@@ -15,7 +15,7 @@
 // with no query): the code rides along in this tab's sessionStorage for at most CODE_TTL_MS. The page never approves
 // by itself: Approve is always a press, after the person has seen the code.
 
-export const AGENT_PATH = "/agent/approve";
+export const AGENT_PATH = "/approve";
 export const PRIVY_AUTH = "https://auth.privy.io";
 export const CODE_KEY = "yeet-agent-user-code";
 /** Privy's device and user codes live 10 minutes. */

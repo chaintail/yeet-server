@@ -133,6 +133,16 @@ const AGENT_RESOURCE = AGENT_ON ? agentResource() : null;
 /** The class of a provider client (its redirect URIs); null for the internal clients and anything unclassable. */
 if (PUBLIC && AGENT_ON && new URL(AGENT_RESOURCE).protocol !== "https:") throw Error("Invalid public configuration");
 const classOf = (c) => clientClass(c?.redirectUris ?? c?.redirect_uris);
+/** The agent host the approval page is served on. A wrong AGENT_RESOURCE stops the server when either agent switch is on. */
+const AGENT_PAGE_HOST = (() => {
+  try {
+    return new URL(agentResource()).host;
+  } catch (e) {
+    if (AGENT_ON || agentAccess(process.env.YEET_AGENT_ACCESS)) throw e;
+    return null;
+  }
+})();
+if (PUBLIC && agentAccess(process.env.YEET_AGENT_ACCESS) && new URL(agentResource()).protocol !== "https:") throw Error("Invalid public configuration");
 /** The resource a client of this class may get tokens for. */
 const resourceOfClass = (cls) => (AGENT_ON && cls === "agent" ? AGENT_RESOURCE : RESOURCE);
 /** The OAuth refusal of a client asking for the other route's resource: invalid_target, WRONG_ROUTE first in the
@@ -368,6 +378,18 @@ app.use((q, r, next) => {
   next();
 });
 if (process.env.TRUST_PROXY === "1") app.set("trust proxy", 1);
+// Agent approval (agent-page.mjs): the Verification URI of Privy's CLI and agent access, at /approve on the agent host
+// (the host of AGENT_RESOURCE) only. On that host this answers every request (the page, its frame and bundle
+// files, the public identity config; 404 for everything else); on every other host /approve and /agent/approve are 404.
+// The page talks only to Privy, with the person's own token. Off unless YEET_AGENT_ACCESS=on.
+agentRoutes(app, {
+  on: () => agentAccess(process.env.YEET_AGENT_ACCESS),
+  enabled: () => process.env.PRIVY_LOGIN === "1",
+  host: AGENT_PAGE_HOST,
+  identityConfig,
+  viewerDir: fileURLToPath(new URL("./viewer/", import.meta.url)),
+  distDir: fileURLToPath(new URL("../login/dist/", import.meta.url)),
+});
 if (PUBLIC)
   app.use((q, r, next) => {
     if (q.headers.host !== new URL(publicBase).host) return r.sendStatus(421);
@@ -459,8 +481,9 @@ async function signupOpen() {
     return true;
   }
 }
-app.get("/account/identity-config", async (_q, r) =>
-  process.env.PRIVY_LOGIN === "1"
+app.get("/account/identity-config", identityConfig);
+async function identityConfig(_q, r) {
+  return process.env.PRIVY_LOGIN === "1"
     ? r.set("Cache-Control", "no-store").json({
         // Decision (b): no signer id is published; the page never attaches a YEET signer to a wallet.
         appId: process.env.PRIVY_APP_ID,
@@ -471,8 +494,8 @@ app.get("/account/identity-config", async (_q, r) =>
         // false while the limited beta is full (YEET_BETA_USER_CAP): Privy signs in existing users only.
         signup: await signupOpen(),
       })
-    : r.sendStatus(404),
-);
+    : r.sendStatus(404);
+}
 // The email step of the connect screen (signup-email.mjs): the note of who started it, and the checks the sign-in
 // makes with it. The server links nothing and records nothing here.
 const readStep = stepReader(LINK_KEY);
@@ -827,9 +850,7 @@ signRoutes(app, {
   core: (route, account, body, timeoutMs) => coreSend(route, account, secret("core-as"), body, timeoutMs),
   originOK,
 });
-// Agent approval (agent-page.mjs): the Verification URI of Privy's CLI and agent access. The page talks only to Privy,
-// with the person's own token; this server serves the page and nothing else. Off unless YEET_AGENT_ACCESS=on.
-agentRoutes(app, { on: () => agentAccess(process.env.YEET_AGENT_ACCESS), enabled: () => process.env.PRIVY_LOGIN === "1" });
+// Agent approval (agent-page.mjs) is mounted first, above: it owns the agent host.
 // Browsers ask for /favicon.ico on their own; answer with the YEET icon the pages link to.
 const ICON = fs.readFileSync(new URL("./viewer/icon.svg", import.meta.url));
 app.get("/favicon.ico", (_q, r) => r.set("Cache-Control", "public, max-age=86400").type("image/svg+xml").send(ICON));

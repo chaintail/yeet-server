@@ -409,19 +409,31 @@ test('add funds: sign-in carries only the fund return target; /fund is off witho
  assert.equal(r.status,302);assert.equal(r.headers.get('location'),'/fund');
 });
 
-test('agent approval: /agent/approve is off by default, needs YEET_AGENT_ACCESS=on and the Privy sign-in',async()=>{
- const was={a:process.env.YEET_AGENT_ACCESS,p:process.env.PRIVY_LOGIN};
- const status=async()=>(await fetch(AS+'/agent/approve?user_code=ABCD-1234',{redirect:'manual'})).status;
+test('agent approval: /approve on the agent host only, off by default, needs YEET_AGENT_ACCESS=on and the Privy sign-in',async()=>{
+ const {request}=await import('node:http');
+ const AGENT_HOST='mcp.yeet.win',MAIN_HOST=new URL(ORIGIN).host;
+ const get=(host,path)=>new Promise((resolve,reject)=>{const q=request({host:'127.0.0.1',port:PORTS.AS_PORT,path,headers:{host}},r=>{let text='';r.setEncoding('utf8');r.on('data',c=>text+=c);r.on('end',()=>resolve({status:r.statusCode,headers:r.headers,text}))});q.on('error',reject);q.end()});
+ const status=async(host=AGENT_HOST,path='/approve?user_code=ABCD-1234')=>(await get(host,path)).status;
+ const was={a:process.env.YEET_AGENT_ACCESS,p:process.env.PRIVY_LOGIN,i:process.env.PRIVY_APP_ID};
  try{
   delete process.env.YEET_AGENT_ACCESS;assert.equal(await status(),404);
   process.env.YEET_AGENT_ACCESS='on';assert.equal(await status(),404,'no Privy sign-in: off');
-  process.env.PRIVY_LOGIN='1';
-  const r=await fetch(AS+'/agent/approve?user_code=ABCD-1234');
-  assert.equal(r.status,200);assert.equal(r.headers.get('referrer-policy'),'no-referrer');
-  assert.match(await r.text(),/<script type="module" src="\/account\/privy-login\/agent\.js"><\/script>/);
-  process.env.YEET_AGENT_ACCESS='off';assert.equal(await status(),404);
+  process.env.PRIVY_LOGIN='1';process.env.PRIVY_APP_ID='acceptance-app';
+  const r=await get(AGENT_HOST,'/approve?user_code=ABCD-1234');
+  assert.equal(r.status,200);assert.equal(r.headers['referrer-policy'],'no-referrer');assert.equal(r.headers['set-cookie'],undefined);
+  assert.match(r.text,/<script type="module" src="\/account\/privy-login\/agent\.js"><\/script>/);
+  // What the page loads from its own origin, served by the real sign-in server on the agent host.
+  for(const p of ['/account/auth-pages.css','/account/brand/tokens.css','/account/page.js','/account/icon.svg'])assert.equal(await status(AGENT_HOST,p),200,p);
+  const config=await get(AGENT_HOST,'/account/identity-config');
+  assert.equal(config.status,200);assert.equal(JSON.parse(config.text).appId,'acceptance-app');
+  // Nothing else of the sign-in server answers there.
+  for(const p of ['/account/login','/account/','/fund','/sign','/auth','/.well-known/oauth-authorization-server','/account/consent.js','/agent/approve','/'])assert.equal(await status(AGENT_HOST,p),404,p);
+  // The ChatGPT host: no approval page at either address; its own sign-in page as before.
+  for(const p of ['/approve?user_code=ABCD-1234','/agent/approve?user_code=ABCD-1234','/approve','/agent/approve'])assert.equal(await status(MAIN_HOST,p),404,p);
+  assert.equal(await status(MAIN_HOST,'/account/identity-config'),200);
+  process.env.YEET_AGENT_ACCESS='off';assert.equal(await status(),404);assert.equal(await status(AGENT_HOST,'/account/identity-config'),404);
  }finally{
-  for(const [k,v] of [['YEET_AGENT_ACCESS',was.a],['PRIVY_LOGIN',was.p]])if(v===undefined)delete process.env[k];else process.env[k]=v;
+  for(const [k,v] of [['YEET_AGENT_ACCESS',was.a],['PRIVY_LOGIN',was.p],['PRIVY_APP_ID',was.i]])if(v===undefined)delete process.env[k];else process.env[k]=v;
  }
 });
 

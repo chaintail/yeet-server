@@ -12,7 +12,7 @@ RUN npm ci --no-audit --no-fund
 # The whole login folder (node_modules and dist are excluded by Dockerfile.dockerignore), so a new module the
 # bundle imports never needs a Dockerfile change.
 COPY connector/login/ ./
-RUN node build.mjs && test -s dist/login.js && test -s dist/fund.js && test -s dist/sign.js
+RUN node build.mjs && test -s dist/login.js && test -s dist/fund.js && test -s dist/sign.js && test -s dist/agent.js && test -s dist/agent-files.json
 
 FROM node:24-slim
 # The commit this image is built from; GET /version reports it (compose passes YEET_IMAGE_TAG, the short sha).

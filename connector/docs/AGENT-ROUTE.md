@@ -27,7 +27,7 @@ The switch is `YEET_AGENT_OWNER_ACCOUNT=on` (core). It is off by default and nee
 
 In this mode the agent trades the person's OWN ledger account, the one their Privy Solana wallet owns. The agent does not need a key of its own or a budget:
 
-- The person approves the agent once in the browser through Privy's device authorization flow (the `/agent/approve` page, a separate branch). After that the agent obtains each signature from the person's Privy Solana wallet itself (Solana `signMessage` over the message's UTF-8 bytes). That happens between the agent and Privy only: YEET is not on the signing path and sees nothing but the resulting signature.
+- The person approves the agent once in the browser through Privy's device authorization flow (the approval page `https://mcp.yeet.win/approve`, below). After that the agent obtains each signature from the person's Privy Solana wallet itself (Solana `signMessage` over the message's UTF-8 bytes). That happens between the agent and Privy only: YEET is not on the signing path and sees nothing but the resulting signature.
 - One wallet and one portfolio for ChatGPT and the agent.
 
 The path is the ChatGPT card's own path, under the person's account id: the pipeline's proposal, quote, floors, confirm code, execute, nonce, deadline, the ledger route's unsigned `token_diff`, its `raw_ed25519` check against the person's wallet key, simulate, then settle. The person's own caps and gate apply as on the card (tier caps, daily cap, `YEET_LIVE_ACCOUNTS`, the kill switch), plus the agent caps: `YEET_AGENT_MAX_TRADE_USDC` per buy, and `YEET_AGENT_MAX_DAY_USDC` per UTC day per agent connection. The day counts this connection's owner-mode buys (legs not given back as not sent) together with its own key's spend when it has one. The person's ChatGPT trades do not count against the agent.
@@ -98,7 +98,26 @@ Core routes (connector credential and the agent's delegated bearer): `GET /agent
   - The agent endpoint answers a ChatGPT token the same way.
   - The agent endpoint also requires `aud` = the agent resource.
   - Core refuses an agent token on every non-agent route, and a ChatGPT token on `/agent/*`, with 403 WRONG_ROUTE.
-- **Host.** A request whose Host is the agent host reaches only the agent endpoint (PRM, `POST /`) and never the ChatGPT one. `/version` there is 404.
+- **Host.** A request whose Host is the agent host reaches only the agent endpoint (PRM, `POST /`) and the approval page (below), never the ChatGPT one. `/version` there is 404.
+
+## Approval page (`https://mcp.yeet.win/approve`)
+
+The Verification URL of Privy's "CLI and agent access" (OAuth device authorization) is `https://mcp.yeet.win/approve`. The person approves there, never on `chatgpt.yeet.win`. The sign-in server serves the page (`as/agent-page.mjs`, script `login/agent.jsx`), switch `YEET_AGENT_ACCESS=on` plus `PRIVY_LOGIN=1` (otherwise 404). It serves it only when the request Host is the agent host (`new URL(AGENT_RESOURCE).host`, default `mcp.yeet.win`). On that host it answers only these paths, GET and HEAD:
+
+| Path | What |
+|---|---|
+| `/approve` | the page (nonce CSP of the Privy pages, `no-store`, `Referrer-Policy: no-referrer`, COOP same-origin, no cookie) |
+| `/account/icon.svg`, `/account/brand/tokens.css`, `/account/auth-pages.css`, `/account/brand/type-data.js`, `/account/page.js`, `/account/brand/logo.svg` | the page frame (`as/viewer/`) |
+| `/account/identity-config` | the public Privy app id and sign-in methods (the same handler as on `chatgpt.yeet.win`) |
+| `/account/privy-login/<file>` | only the files of the `agent.js` bundle: `login/dist/agent-files.json`, written by `login/build.mjs` from esbuild's metafile. `login.js`, `fund.js`, `sign.js` and their own chunks are 404 |
+
+Every other path and method on the agent host is 404 from the sign-in server, so no session, cookie, form, OAuth or sign-in route of `chatgpt.yeet.win` is reachable from `mcp.yeet.win`. On `chatgpt.yeet.win` (any other host), `/approve` and the old `/agent/approve` are 404.
+
+Origin checks: the page sends nothing to this server except the GETs above. It sets no cookie and reads none. Sign-in, `device_verify`, the grants list and revoke all go from the browser to `https://auth.privy.io` with the person's Privy token. The server's own origin checks (`originOK`, `PUBLIC_BASE_URL`) and cookies stay bound to `chatgpt.yeet.win` and are unchanged: none of those routes answer on the agent host. The CSP is the same as on the other Privy pages, and its `'self'` is then `https://mcp.yeet.win`. The Privy SDK runs at origin `https://mcp.yeet.win`, so its Privy session (browser storage) is separate from the one on `chatgpt.yeet.win`: the person signs in on the page itself. Google and Apple return to `location.origin + /approve` = `https://mcp.yeet.win/approve`.
+
+Privy dashboard (YEET app): allowed domain `https://mcp.yeet.win`; Verification URL `https://mcp.yeet.win/approve`; allowed OAuth redirect URL `https://mcp.yeet.win/approve`.
+
+Not proven: a live sign-in on `https://mcp.yeet.win/approve` (Google, Apple, email) against the real Privy app, and a real `device_verify`. Telegram sign-in on this page would also need `mcp.yeet.win` set as the bot's domain, and the page CSP carries no Telegram source, so do not offer Telegram here.
 
 ## Environment
 
@@ -134,10 +153,20 @@ With the switch on, core needs the ledger route (`YEET_ROUTE=ledger` or `YEET_LE
    	handle @yeet_agent_prm {
    		reverse_proxy 127.0.0.1:38861 { import cf_https_proto }
    	}
+   	# The approval page (YEET_AGENT_ACCESS) and exactly what it loads, on the sign-in server.
+   	@yeet_agent_approve {
+   		method GET HEAD POST
+   		path /approve /account/icon.svg /account/brand/tokens.css /account/auth-pages.css /account/brand/type-data.js /account/page.js /account/brand/logo.svg /account/identity-config /account/privy-login/*
+   	}
+   	handle @yeet_agent_approve {
+   		reverse_proxy 127.0.0.1:38860 { import cf_https_proto }
+   	}
    	respond 404
    }
    ```
-   The connector reads the Host header, so Caddy must pass it through unchanged (the default). OAuth itself stays on the sign-in server's host: the agent PRM names `authorization_servers: [ISSUER]`.
+   The connector and the sign-in server read the Host header, so Caddy must pass it through unchanged (the default). POST is passed but the sign-in server answers it 404 on the agent host.
+
+   OAuth stays on the sign-in server's own host: a client that starts at `https://mcp.yeet.win` gets 401 with `resource_metadata="https://mcp.yeet.win/.well-known/oauth-protected-resource"`, and that document names `authorization_servers: [ISSUER]` (`https://chatgpt.yeet.win`). Its RFC 8414 metadata (`https://chatgpt.yeet.win/.well-known/oauth-authorization-server`) names the same issuer and the authorize, token and registration endpoints on `chatgpt.yeet.win` (test/agent-route.test.mjs checks both). `ISSUER` must therefore be `https://chatgpt.yeet.win` on the mcp service as well.
 3. **Env.** Set `YEET_AGENT_ROUTE=on` (and the caps, if they differ from the defaults) for the as, core and mcp services. `ops/compose.yml` passes them through. Restart all three.
 4. **Smoke test.**
    - `curl https://mcp.yeet.win/.well-known/oauth-protected-resource` names `resource: https://mcp.yeet.win`.
@@ -152,7 +181,7 @@ With the switch on, core needs the ledger route (`YEET_ROUTE=ledger` or `YEET_LE
 - **Token confusion.** The class comes from the redirect URIs, and the resource binding is enforced at authorization, token, introspection, connector and core. A token minted for one endpoint is refused by the other. A ChatGPT look-alike redirect host is class agent, never chatgpt.
 - **One key per connection.** A key already linked to another connection is refused (`AGENT_KEY_TAKEN`). An active key cannot be swapped (`AGENT_KEY_LINKED`): the agent returns the budget first or connects as a new agent. The owner's own wallet key and the solver's key are refused as agent keys.
 - **Replay.** Every message carries a fresh versioned nonce that ends with it. Trades keep the ledger route's attempt rules. A budget or return message is valid for 5 minutes and is simulated alone before it is sent.
-- **Owner mode: Privy's grant is not scoped.** The device-flow approval gives the agent a Privy session that can sign ANY message with the person's Solana wallet. Privy does not limit it to YEET trades, so the agent could sign other things directly with Privy: for example a ledger `transfer` it sends to `intents.near` itself, or a Solana transaction. Our caps and checks bind only the trades sent through this route. They are no bound on what an agent with that grant can do elsewhere. The real bound is the person's trust in the agent and revoking the Privy grant. The approval page (branch feat/agent-verify) should say so to the person.
+- **Owner mode: Privy's grant is not scoped.** The device-flow approval gives the agent a Privy session that can sign ANY message with the person's Solana wallet. Privy does not limit it to YEET trades, so the agent could sign other things directly with Privy: for example a ledger `transfer` it sends to `intents.near` itself, or a Solana transaction. Our caps and checks bind only the trades sent through this route. They are no bound on what an agent with that grant can do elsewhere. The real bound is the person's trust in the agent and revoking the Privy grant. The approval page (`https://mcp.yeet.win/approve`) says the agent can sign with the wallet until revoked (`APPROVE_LINE`).
 - **Owner mode: what this route enforces.**
   - The signature must verify (`raw_ed25519`, over the exact message bytes) against the token subject's own wallet key, read from the wallet directory at submit time. An agent key, another person's wallet, or other bytes are `SIGNATURE_INVALID`.
   - The account is always the token's subject: there is no parameter to name another one.
@@ -165,7 +194,7 @@ With the switch on, core needs the ledger route (`YEET_ROUTE=ledger` or `YEET_LE
 
 ## Not done yet
 
-- Owner mode: the Privy device-flow approval page and the agent's own Privy signing client are not in this branch. The tests use a locally generated key in place of the person's Privy wallet on the fake ledger. No live Privy `signMessage` signature over a ledger message has been checked against this route.
+- Owner mode: the agent's own Privy signing client is not in this repo (the approval page is: `https://mcp.yeet.win/approve`, above). The tests use a locally generated key in place of the person's Privy wallet on the fake ledger. No live Privy `signMessage` signature over a ledger message has been checked against this route.
 - Owner mode: the agent caps are checked in one process (a per-connection lock around check and execute). Two core processes would not share that lock.
 
 - A budget paid with Base-credited USDC: a budget link asks for Solana USDC only.

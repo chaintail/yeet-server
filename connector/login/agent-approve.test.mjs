@@ -27,7 +27,7 @@ function privy(status, body, { raw = false, fail = false } = {}) {
 
 test("the words on the page are the agreed ones", () => {
   assert.equal(APPROVE_LINE, "This lets the agent on your computer sign with your YEET wallet until you revoke it. Only approve a code you started yourself.");
-  assert.equal(AGENT_PATH, "/agent/approve");
+  assert.equal(AGENT_PATH, "/approve");
   assert.equal(PRIVY_AUTH, "https://auth.privy.io");
 });
 

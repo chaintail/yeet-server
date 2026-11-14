@@ -1,4 +1,4 @@
-// The agent approval page (/agent/approve, as/agent-page.mjs; the rules are in agent-approve.js). The person signs
+// The agent approval page (https://mcp.yeet.win/approve, as/agent-page.mjs; the rules are in agent-approve.js). The person signs
 // in with the YEET sign-in methods (choose-method.jsx, the same Privy configuration as every other page: nothing is
 // created here), sees the code their agent printed, and presses Approve or Deny. Under it, "Agents with access":
 // every agent this Privy user approved, each with Revoke. Every call goes to Privy with the person's own token.
@@ -232,7 +232,8 @@ try {
   if (!response.ok) throw Error();
   const config = await response.json();
   createRoot(root).render(
-    // Google and Apple return to the bare page address: Privy's allowed redirect list matches exactly, with no query.
+    // Google and Apple return to the bare page address (https://mcp.yeet.win/approve on the agent host): Privy's allowed
+    // redirect list matches exactly, with no query.
     <PrivyProvider appId={config.appId} config={{ ...privyConfig(), customOAuthRedirectUrl: `${location.origin}${AGENT_PATH}` }}>
       <Approve appId={config.appId} methods={Array.isArray(config.methods) ? config.methods : undefined} />
     </PrivyProvider>,

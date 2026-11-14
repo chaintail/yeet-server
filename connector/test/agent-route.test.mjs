@@ -144,6 +144,12 @@ test('MCP call, both directions: the agent token on the ChatGPT endpoint and the
  // the agent host serves its own metadata and nothing of the ChatGPT endpoint
  const prm=await post(new URL(AGENT).host,'/.well-known/oauth-protected-resource');
  assert.equal(prm.status,200);assert.equal(prm.json.resource,AGENT);
+ // A real MCP client starting at https://mcp.yeet.win is sent to the sign-in server on chatgpt.yeet.win (ISSUER), whose
+ // RFC 8414 metadata names that same issuer (the client checks the two match) and the endpoints it then uses.
+ assert.deepEqual(prm.json.authorization_servers,[ORIGIN]);
+ const asMeta=await new Promise((resolve,reject)=>{const q=request({host:'127.0.0.1',port:PORTS.AS_PORT,path:'/.well-known/oauth-authorization-server',headers:{host:new URL(ORIGIN).host}},r=>{let t='';r.on('data',c=>t+=c);r.on('end',()=>resolve(JSON.parse(t)))});q.on('error',reject);q.end()});
+ assert.equal(asMeta.issuer,prm.json.authorization_servers[0]);
+ for(const k of ['authorization_endpoint','token_endpoint','registration_endpoint'])assert.equal(new URL(asMeta[k]).host,new URL(ORIGIN).host,k); // https in production: TRUST_PROXY and Caddy's X-Forwarded-Proto
  assert.equal((await post(new URL(AGENT).host,'/version')).status,404);
  const unauth=await rpcTo(new URL(AGENT).host)('tools/list');
  assert.equal(unauth.status,401);assert.match(unauth.headers['www-authenticate'],/mcp\.yeet\.win\/\.well-known\/oauth-protected-resource/);
