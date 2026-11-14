@@ -61,7 +61,8 @@ test('the hint: purpose hint, the account id and the methods its Privy user has,
   const now = Date.parse('2026-11-14T12:00:00Z');
   const t = hint(GINA, {now});
   assert.deepEqual(verifyLinkToken(key, t, {purpose: 'hint', now}), {m: ['google'], p: 'hint', a: GINA, e: now / 1000 + HINT_LINK_TTL_S});
-  assert.deepEqual(readHint(hint(EMIL)), {token: hint(EMIL), account: EMIL, methods: ['email']});
+  const emil = hint(EMIL, {now}); // minted once: two mints a second apart differ in their expiry
+  assert.deepEqual(hintReader((x) => verifyLinkToken(key, x, {purpose: 'hint', now}))(emil), {token: emil, account: EMIL, methods: ['email']});
   assert.deepEqual(readHint(hint(BOB)).methods, ['google', 'email'], 'an account with both gets both');
   assert.equal(hintFor(GINA, loginFacts({id: 'did:privy:x', linked_accounts: []}), {key}), null, 'no method known: no hint');
   assert.equal(hintFor(GINA, null, {key}), null, 'Privy did not answer: no hint');
@@ -107,8 +108,9 @@ test('the refusal names the right method with the address masked, and never a fu
 
 test('the trade page: only the methods of the link\'s account; with no valid hint, the default ones', async () => {
   const page = async (h) => (await fetch(`${BASE}/sign?trade_id=${TRADE}${h === undefined ? '' : `&h=${encodeURIComponent(h)}`}`)).text();
-  let html = await page(hint(GINA));
-  assert.equal(pageData(html, 'methods'), 'google'); assert.equal(pageData(html, 'hint'), hint(GINA));
+  const gina = hint(GINA);
+  let html = await page(gina);
+  assert.equal(pageData(html, 'methods'), 'google'); assert.equal(pageData(html, 'hint'), gina);
   html = await page(hint(EMIL));
   assert.equal(pageData(html, 'methods'), 'email', 'an email account sees only email, although email is off by default');
   assert.equal(pageData(await page(hint(BOB)), 'methods'), 'google,email');
