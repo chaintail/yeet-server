@@ -309,7 +309,10 @@ test('limit refusals: which limit, the numbers from the core sentence, what work
 
 test('instructions: why the limits are low, in one line',()=>{
  assert.match(instructions,/YEET/);
- assert.doesNotMatch(instructions,/\bNEAR\b/);
+ // Owner: YEET is a long-term product in beta, never "a hackathon build".
+ const copy=instructions+' '+Object.values(COPY).flatMap(Object.values).join(' ');
+ assert.doesNotMatch(copy,/hackathon (build|project|product|demo|app)|\bdemo\b/i);
+ assert.equal(copy.match(/hackathon/gi).length,1,'only the judging period is named');
 });
 
 test('tool errors carry guidance in the JSON the model reads; the failure shape still validates and the card fields are unchanged',()=>{

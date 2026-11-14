@@ -17,7 +17,7 @@ export const instructions = [
  "YEET LINES.20.",
  "YEET LINES.23.",
  "YEET LINES.24.",
- "YEET instructions.15.",
+ "YEET LINES.26.",
  "YEET LINES.27.",
 ].join(' ');
 export const titles = Object.fromEntries(Object.values(toolSpecs).map(t => [t.name, t.title]));
