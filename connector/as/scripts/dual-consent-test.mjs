@@ -37,7 +37,7 @@ test('all deployed scope list imports use the one catalog; grant recording uses 
 });
 test('the connect page: who is connecting, one true sentence, the session length, Terms and Privacy, Connect and Cancel; nothing else',()=>{
  const source=readFileSync(new URL('../as.mjs',import.meta.url),'utf8');
- assert.match(source,/authDocument\(r, promptTitle\(d\.prompt\.name\), consentForm\(\{/);
+ assert.match(source,/authDocument\(r, promptTitle\(d\.prompt\.name, agent\), consentForm\(\{/);
  const form=consentForm({csrf:'x',name:'Nimble Tapir 88',connectedSeconds:7*86400});
  assert.match(form,/You are connecting as <strong>Nimble Tapir 88<\/strong>\./);
  assert.ok(form.includes(CONNECT_LEAD));

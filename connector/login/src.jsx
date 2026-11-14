@@ -36,6 +36,10 @@ async function toBetaFull(logout) {
   location.assign(betaFullPage(document.getElementById("privy-login")?.dataset.full));
 }
 
+/** The sign-in page was opened for an agent-class client (as.mjs sets data-agent on the host). */
+function agentCase() {
+  return document.getElementById("privy-login")?.dataset.agent === "1";
+}
 function EndSession() {
   const { ready, logout } = usePrivy();
   const [busy, setBusy] = useState(false),
@@ -254,7 +258,7 @@ function FinishSignIn({ config }) {
     return (
       <>
         <p role="status" aria-live="polite">
-          {words(setupFailed ? failMessage || "YEET could not finish connecting. Nothing was charged." : slow ? "Still connecting. This can take a moment." : "Connecting YEET to ChatGPT…")}
+          {words(setupFailed ? failMessage || "YEET could not finish connecting. Nothing was charged." : slow ? "Still connecting. This can take a moment." : `Connecting YEET to ${agentCase() ? "your agent" : "ChatGPT"}…`)}
         </p>
         {setupFailed || slow ? (
           <button type="button" onClick={retry}>

@@ -10,7 +10,7 @@ import {
   diagnostic,
   observeServerError,
 } from "./diagnostics.mjs";
-import { document, credentials, html, expiredAuthorizationBody, promptTitle, providerErrorPage } from "./auth-pages.mjs";
+import { document, credentials, html, expiredAuthorizationBody, promptTitle, agentAsk, providerErrorPage } from "./auth-pages.mjs";
 import express from "express";
 import { providerCsp } from "./provider-csp.mjs";
 import { fundRoutes, privyPageCsp, afterSignIn, nextField, boundNext, FUND_NEXT } from "./fund-page.mjs";
@@ -464,9 +464,9 @@ function authDocument(res, title, body) {
 // address, as Privy's allowed redirect list needs) and the page goes on from what the tab kept (login/bound-return.js).
 // `full` (a page where a new person may sign up): the "beta is full" page for this entry path (beta-full.mjs). The
 // bundle goes there when Privy refuses a new person (sign-up off while the beta is full, or Privy's own user limit).
-const loginFields = (bound = null, full = null) =>
+const loginFields = (bound = null, full = null, agent = false) =>
   process.env.PRIVY_LOGIN === "1"
-    ? `<div id="privy-login"${bound ? ` data-bound="1" data-methods="${bound.methods.join(",")}"` : ""}${!bound && full ? ` data-full="${html(betaFullHref(full))}"` : ""}><p role="status">Loading secure sign in…</p></div><script type="module" src="/account/privy-login/login.js"></script>`
+    ? `<div id="privy-login"${bound ? ` data-bound="1" data-methods="${bound.methods.join(",")}"` : ""}${!bound && full ? ` data-full="${html(betaFullHref(full))}"` : ""}${agent ? ' data-agent="1"' : ""}><p role="status">Loading secure sign in…</p></div><script type="module" src="/account/privy-login/login.js"></script>`
     : credentials();
 // Signed hints on account-bound links (shared/link-token.mjs purpose `hint`): verified here, never trusted from the page.
 const readHint = hintReader((t) => verifyLinkToken(LINK_KEY, t, { purpose: "hint" }));
@@ -899,12 +899,15 @@ app.get("/interaction/:uid", async (q, r, next) => {
       return r.json(data);
     }
     const login = d.prompt.name === "login";
+    const client = await provider.Client.find(d.params.client_id);
+    const agent = AGENT_ON && classOf(client) === "agent";
+    const ask = agent ? agentAsk(client.clientName, d.params.redirect_uri || client.redirectUris?.[0]) : "";
     if (!login) {
       const who = await currentUsername(d.session.accountId);
       r.type("html").send(
-        authDocument(r, promptTitle(d.prompt.name), consentForm({
+        authDocument(r, promptTitle(d.prompt.name, agent), consentForm({
           csrf: data.csrf, name: who.name || who.username || "",
-          ...(AGENT_ON && classOf(await provider.Client.find(d.params.client_id)) === "agent" ? { lead: AGENT_CONNECT_LEAD } : {}),
+          ...(agent ? { lead: AGENT_CONNECT_LEAD, ask } : {}),
           connectedSeconds: compatibilityClient(d.params.client_id) ? configuredRefreshWindow() : 0,
         })),
       );
@@ -912,14 +915,14 @@ app.get("/interaction/:uid", async (q, r, next) => {
     }
     const identity = s && !recoveringAccount(d)
       ? `<input type="hidden" name="session_login" value="yes">`
-      : loginFields(null, { source: "chatgpt", back: `/interaction/${d.uid}` });
+      : loginFields(null, { source: "chatgpt", back: `/interaction/${d.uid}` }, agent);
     const known = s && !recoveringAccount(d) ? await currentUsername(s.id) : null;
     const action = known ? `Continue as ${html(known.name || known.username || "your YEET account")}` : "Sign in";
     r.type("html").send(
       authDocument(
         r,
-        promptTitle("connect-login"),
-        `<form method="POST" data-yeet-prompt="login"><input type="hidden" name="csrf" value="${data.csrf}">${identity}${(!s || recoveringAccount(d)) && process.env.PRIVY_LOGIN === "1" ? "" : `<button type="submit">${action}</button>`}${legalLine()}</form>`,
+        promptTitle("connect-login", agent),
+        `${ask}<form method="POST" data-yeet-prompt="login"><input type="hidden" name="csrf" value="${data.csrf}">${identity}${(!s || recoveringAccount(d)) && process.env.PRIVY_LOGIN === "1" ? "" : `<button type="submit">${action}</button>`}${legalLine()}</form>`,
       ),
     );
   } catch (e) {
