@@ -115,7 +115,7 @@ https://docs.near-intents.org/integration/distribution-channels/1click-api/reusa
     arrived in two parts, and one trade spends from one of them: up to N USDC right now. Try that amount or less."
   - **The solver** sources with its own (Solana) USDC as always and is paid in the token the person gave. Base USDC
     it was paid is inventory like a coin: the leftover unload sells it back to its USDC (same tries per day, same
-    bound; `ledger_unload` with symbol `USDC.base`), at the market's price for that swap (a few basis points, ours).
+    bound; `ledger_unload` with symbol `USDC.base`), at the market's price for that swap. The swap's cost (a few basis points) falls on the solver, not on the person, whose price carries margin 0.
     Until it is sold the float is lower by that amount. A sell always pays Solana's USDC.
   - With the default, none of this is read: the token ids, the balance read, the message and the unload list are
     the ones they were, and Base USDC in an account is "another coin".

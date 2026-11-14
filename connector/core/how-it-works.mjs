@@ -1,8 +1,8 @@
 // yeet_how_it_works: security, wallet and private-key facts (owner, 2026-11-14). EDIT THE WORDING HERE. The shape is
 // the public contract's ($defs.how_it_works); the words live only in this repository.
 //
-// Every sentence must stay true of the running system: the server holds no key to a person's wallet and has no way into it,
-// every trade is approved by the key owner from their own wallet, YEET takes no fee. If one of those ever changes,
+// Every sentence must stay true of the running system: YEET's server holds no key to a person's wallet,
+// every trade is signed by the key owner or by an agent they authorized, YEET takes no fee. If one of those ever changes,
 // this text changes in the same commit.
 export const EXPORT_URL='https://home.privy.io/';
 export const TERMS_CUSTODY_URL='https://yeet.win/terms#section-5a';
@@ -16,7 +16,7 @@ export const SECTIONS=Object.freeze([
  {id:'server_can',title:'What the YEET server can do',
   text:'Read your public balances and holdings, find prices and coins, prepare a quote for a trade you asked for, follow a trade on the blockchain after you approved it, and keep your XP, streak and leaderboard name.'},
  {id:'server_cannot',title:'What the YEET server cannot do',
-  text:'It holds no key to your wallet and has no way into it. It cannot move, spend, freeze or recover your funds, and it cannot send a trade by itself: every trade is approved by you, from your own wallet. YEET takes no fee.'},
+  text:'YEET\'s server holds no key to your wallet. It cannot move, spend, freeze or recover your funds, and it cannot send a trade by itself: every trade is signed by you or by an agent you authorized, from your own wallet. YEET takes no fee.'},
  {id:'wallet',title:'Your wallet',
   text:'YEET does not control your funds. Even so, do not deposit large sums: YEET is in beta and its code is not audited.',
   url:TERMS_BETA_URL},

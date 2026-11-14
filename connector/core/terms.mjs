@@ -22,7 +22,7 @@ export const STATEMENTS=Object.freeze([
  {id:'risk',text:'You understand meme coin trading is extremely risky, meme coins can go to zero, and you will never trade more than you are willing to lose.',url:`${TERMS_URL}#section-7`,required:true},
  // Terms 2 and 2A (owner, 2026-11-15): age, the protocols being legal where the person lives, and sanctions, in one line.
  {id:'eligibility',text:'I am at least 18. I am legally allowed to use these protocols where I live and I am not in a sanctioned region.',url:`${TERMS_URL}#section-2a`,required:true},
- {id:'wallet',text:'You agree to a YEET wallet created and secured by Privy, which only you control.',url:'https://privy.io/user-terms-of-service',required:true},
+ {id:'wallet',text:'You agree to a YEET wallet created and secured by Privy, which you control, together with any agent you authorize.',url:'https://privy.io/user-terms-of-service',required:true},
  // Terms 1A and 9 (owner, 2026-11-15): YEET is an interface; the short names of the services in terms section 9 that
  // a trade runs on. Replaces the NEAR Intents line, which it covers.
  {id:'interface',text:'I understand YEET is an interface. My trades run on third-party protocols and services (NEAR Intents, 1Click, the PoA bridge, Privy, Solana, Base, NEAR) that YEET does not control.',url:`${TERMS_URL}#section-1a`,required:true},

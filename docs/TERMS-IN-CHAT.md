@@ -51,7 +51,7 @@ a new version is a new acceptance, the money routes answer a typed refusal until
 |---|---|---|---|
 | `risk` | You understand meme coin trading is extremely risky, meme coins can go to zero, and you will never trade more than you are willing to lose. | https://yeet.win/terms#section-7 | yes |
 | `eligibility` | I am at least 18. I am legally allowed to use these protocols where I live and I am not in a sanctioned region. | https://yeet.win/terms#section-2a | yes |
-| `wallet` | You agree to a YEET wallet created and secured by Privy, which only you control. | https://privy.io/user-terms-of-service | yes |
+| `wallet` | You agree to a YEET wallet created and secured by Privy, which you control, together with any agent you authorize. | https://privy.io/user-terms-of-service | yes |
 | `interface` | I understand YEET is an interface. My trades run on third-party protocols and services (NEAR Intents, 1Click, the PoA bridge, Privy, Solana, Base, NEAR) that YEET does not control. | https://yeet.win/terms#section-1a | yes |
 | `no_advice` | You understand nothing in YEET or from ChatGPT is financial advice. | https://yeet.win/terms#section-4 | yes |
 | `xp` | I understand XP has no monetary value. | https://yeet.win/terms#section-10a | yes |

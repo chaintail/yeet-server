@@ -53,7 +53,7 @@ test('the answer: who holds the keys, what the server can and cannot do, the exp
   const by=Object.fromEntries(h.sections.map(s=>[s.id,s]));
   assert.deepEqual(h.sections.map(s=>s.id),['keys','server_can','server_cannot','wallet','export','export_warning','risk']);
   assert.match(by.keys.text,/non-custodial/);assert.match(by.keys.text,/YEET never holds it/);
-  assert.match(by.server_cannot.text,/holds no key to your wallet and has no way into it/);
+  assert.match(by.server_cannot.text,/server holds no key to your wallet/);
   assert.match(by.server_cannot.text,/cannot send a trade by itself/);
   assert.match(by.server_cannot.text,/YEET takes no fee/);
   assert.match(by.wallet.text,/do not deposit large sums/);
