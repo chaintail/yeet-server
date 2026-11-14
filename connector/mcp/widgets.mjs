@@ -55,7 +55,7 @@ export function resourceMeta(view, {signOrigin = null} = {}) {
 export function toolMeta(name) {
   const t = toolSpecs[name];
   if (!t) throw new Error(`Unknown tool: ${name}`);
-  const uri = t.card ? CARDS[t.card].uri : null;
+  const uri = t.visible && t.card ? CARDS[t.card].uri : null;
   return {
     ...(uri ? {'openai/outputTemplate': uri} : {}),
     ui: {...(uri ? {resourceUri: uri} : {}), visibility: t.visible ? ['model', 'app'] : ['app']},

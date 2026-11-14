@@ -100,11 +100,11 @@ test('YEET_P2=1: tools/list adds the leaderboard (model and card) and daily_spin
  for(const n of ['yeet_leaderboard','daily_spin'])assert.ok(names.includes(n),n);
  const spin=tools.find(t=>t.name==='daily_spin'),board=tools.find(t=>t.name==='yeet_leaderboard');
  assert.equal(spin._meta['openai/visibility'],'private');assert.deepEqual(spin._meta.ui.visibility,['app']);assert.equal(spin._meta['openai/widgetAccessible'],true);
- assert.equal(spin._meta['openai/outputTemplate'],'ui://yeet/wheel-v1.html');
+ assert.equal(spin._meta['openai/outputTemplate'],undefined,'a card-only tool draws no card of its own');
  // The daily wheel and the lucky wheel are separate cards: the check-in tool and the lucky wheel tool each have their own.
  const by=n=>tools.find(t=>t.name===n);
  assert.equal(by('yeet_checkin')._meta['openai/outputTemplate'],'ui://yeet/wheel-v1.html');assert.deepEqual(by('yeet_checkin')._meta.ui.visibility,['model','app']);
- assert.equal(by('lucky_wheel')._meta['openai/outputTemplate'],'ui://yeet/lucky-v1.html');assert.equal(by('lucky_spin')._meta['openai/outputTemplate'],'ui://yeet/lucky-v1.html');
+ assert.equal(by('lucky_wheel')._meta['openai/outputTemplate'],'ui://yeet/lucky-v1.html');assert.equal(by('lucky_spin')._meta['openai/outputTemplate'],undefined);
  assert.doesNotMatch(by('yeet_checkin').description+by('daily_spin').description,/lucky/i);
  assert.equal(board._meta['openai/visibility'],undefined);assert.deepEqual(board._meta.ui.visibility,['model','app']);
  assert.equal(board._meta['openai/outputTemplate'],'ui://yeet/leaderboard-v1.html');
