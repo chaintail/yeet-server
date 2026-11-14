@@ -159,36 +159,39 @@ function emailOnly(host, intro) {
   host.replaceChildren(line(intro), eLabel, email, send, status, codeBox);
 }
 
-// ---- The email step, once the trade is out: an account that came in with Google or Apple is offered to trust this --
-// device (flow.mjs state.link). It is an opt-in, worded as one: confirm your email once, and the next trades finish
-// inside ChatGPT without this window. It is the page's main content then: the heading asks, the address Google or
-// Apple gave is shown masked (typed only when there is none, or it is a relay address, or it turned out to belong to
-// another account), one button, the code, "Send again", and a small "Not now".
+// ---- The email step, once the trade is out: an account that came in with Google or Apple is offered an upgrade ----
+// (flow.mjs state.link). The trade never waits for it: press and hold works on this page with no email at all. The
+// step reads as a gift, in very simple words and short lines (owner, 2026-11-14): add your email once and trade right
+// in the chat, on devices you trust. One field (or the address Google or Apple gave, shown masked), one button, one
+// code; one small line for people whose address is a hidden or relay one; and a small "Not now".
 const heading = document.querySelector('.top h1'), HEADING = heading?.textContent ?? '';
-const LINK_TITLE = 'Trust this device?';
+const LINK_TITLE = 'Want even better trading?';
+const LINK_LINES = ['Add your email to trade right in the chat.', 'It turns on trusted devices. You do it once.', 'Or skip it. Trading on this page always works.'];
+// The owner's own line, word for word (2026-11-14). It is the one place this page says "Signed".
+const RELAY_LINE = 'Signed up with a hidden or relay email? Use that exact same address.';
 const draft = {email: null, code: ''};
 const linking = (s) => !!s.link && (s.link.stage === 'offer' || s.link.stage === 'code');
 const title = (text) => { if (heading && heading.textContent !== text) heading.textContent = text; };
 function linkStep(s) {
   const k = s.link;
   const box = el('section', 'step'); box.id = 'sign-link'; box.setAttribute('aria-label', LINK_TITLE);
-  box.append(el('p', 'lead', 'Confirm your email once and your next trades finish right inside ChatGPT, without opening this window.'));
+  box.append(el('p', 'lead', LINK_LINES[0]), el('p', 'line', LINK_LINES[1]), el('p', 'fine', LINK_LINES[2]));
+  const relayLine = () => { const p = el('p', 'fine', RELAY_LINE); p.id = 'link-relay'; return p; };
   const small = (text, fn, id, cls) => { const b = el('button', cls, text); b.id = id; b.type = 'button'; b.disabled = k.wait; b.onclick = fn; return b; };
   if (k.stage === 'offer') {
     if (draft.email === null) draft.email = k.email ?? '';
-    const go = el('button', '', k.wait ? 'Sending…' : 'Trust this device'); go.id = 'link-send'; go.disabled = k.wait;
+    const go = el('button', '', k.wait ? 'Sending…' : 'Turn it on'); go.id = 'link-send'; go.disabled = k.wait;
     if (k.fixed) {
       const shownAt = line(`We’ll email a code to ${maskEmail(k.email) ?? k.email}.`); shownAt.id = 'link-address';
       go.onclick = () => flow.linkSend(k.email);
-      box.append(shownAt, go);
+      box.append(shownAt, go, relayLine());
     } else {
       const f = el('input'); f.type = 'email'; f.id = 'link-email'; f.autocomplete = 'email'; f.inputMode = 'email'; f.autocapitalize = 'none'; f.value = draft.email; f.oninput = () => { draft.email = f.value; };
-      const lab = el('label', '', 'Email'); lab.htmlFor = f.id;
+      const lab = el('label', '', 'Your email'); lab.htmlFor = f.id;
       go.onclick = () => flow.linkSend(draft.email);
       f.onkeydown = (e) => { if (e.key === 'Enter') go.click(); };
-      const why = k.relay ? 'Apple keeps your own address private and gave YEET this relay address. The code goes through Apple to your inbox. If it doesn’t arrive, type another email you use.'
-        : k.email ? null : 'Your account didn’t share an email with YEET. Type the one you want to use.';
-      box.append(lab, f, ...(why ? [el('p', 'fine', why)] : []), go);
+      // One field (holding the address Apple gave when there is one), one button, the one small line.
+      box.append(lab, f, go, relayLine());
     }
   } else {
     const sent = line(`We emailed a 6-digit code to ${k.fixed ? maskEmail(k.email) ?? k.email : k.email}.`); sent.id = 'link-sent';

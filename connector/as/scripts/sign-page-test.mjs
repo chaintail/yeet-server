@@ -91,6 +91,9 @@ test('GET /sign: the page with its own policy, the hashed signer, the trade id; 
 
 // The owner's rule for everything the person reads here: never sign, signing, signed or signature, and no "log in".
 const WORDS = /\bsign\w*|signature|log ?in/i;
+// One sentence is exempt, and only as a whole: the owner's own line for the email step (2026-11-14), which says
+// "Signed up" about joining YEET, not about a wallet.
+const OWNER_LINE = 'Signed up with a hidden or relay email? Use that exact same address.';
 test('page assets: script, flow, styles and the wallet-request contract module, same-origin; the copy is product copy with none of the banned words', async () => {
   let sentences = 0;
   for (const [path, type] of [['/sign/sign.js', /text\/javascript/], ['/sign/flow.mjs', /text\/javascript/], ['/sign/sign.css', /text\/css/], ['/sign/wallet-request.mjs', /text\/javascript/]]) {
@@ -102,7 +105,7 @@ test('page assets: script, flow, styles and the wallet-request contract module, 
       // Every sentence the page can show is product copy.
       const copy = [...text.matchAll(/['`]([^'`\n]*[a-z][^'`\n]*[.…])['`]/g)].map((m) => m[1]);
       sentences += copy.length;
-      for (const s of copy) { assert.doesNotMatch(s, BANNED, s); assert.doesNotMatch(s, WORDS, s); }
+      for (const s of copy) { assert.doesNotMatch(s, BANNED, s); if (s !== OWNER_LINE) assert.doesNotMatch(s, WORDS, s); assert.doesNotMatch(s, /\bunlock/i, s); }
     }
     if (path === '/sign/sign.js') {
       assert.match(text, /from '\/sign\/wallet-request\.mjs'/); assert.match(text, /from '\/sign\/flow\.mjs'/);
@@ -115,9 +118,17 @@ test('page assets: script, flow, styles and the wallet-request contract module, 
       assert.doesNotMatch(text, /btn\.onclick = \(\) => flow\.approve/);
       // The email step after the trade: its heading, its one line, the three controls, and a code field a phone can
       // fill from the message.
-      assert.match(text, /const LINK_TITLE = 'Trust this device\?'/);
-      assert.match(text, /'Confirm your email once and your next trades finish right inside ChatGPT, without opening this window\.'/);
-      for (const label of ['Trust this device', 'Send again', 'Not now']) assert.ok(text.includes(`'${label}'`), label);
+      // An opt-in upgrade in very simple words: short lines, one field, one button, one code, one small line.
+      assert.match(text, /const LINK_TITLE = 'Want even better trading\?'/);
+      assert.match(text, /const LINK_LINES = \['Add your email to trade right in the chat\.', 'It turns on trusted devices\. You do it once\.', 'Or skip it\. Trading on this page always works\.'\];/);
+      assert.ok(text.includes(`const RELAY_LINE = '${OWNER_LINE}';`));
+      assert.equal(text.split(OWNER_LINE).length, 2, 'the exempt line appears once');
+      for (const label of ['Turn it on', 'Send again', 'Not now']) assert.ok(text.includes(`'${label}'`), label);
+      // Short lines and short words: nothing in the step runs past 12 words, and none of the old chore wording.
+      for (const l of ['Want even better trading?', 'Add your email to trade right in the chat.', 'It turns on trusted devices. You do it once.', 'Or skip it. Trading on this page always works.', OWNER_LINE])
+        for (const sentence of l.split(/(?<=[.?])\s+/)) assert.ok(sentence.split(/\s+/).length <= 12, sentence);
+      assert.doesNotMatch(text, /Confirm your email once|For your security|Apple keeps your own address private|didn’t share an email/);
+      assert.equal(text.match(/f\.type = 'email'; f\.id = 'link-email'/g).length, 1, 'one email field');
       assert.match(text, /f\.id = 'link-code'; f\.inputMode = 'numeric'; f\.autocomplete = 'one-time-code'; f\.maxLength = 6/);
       // It is drawn only for a trade that is out (the views done and nothing), never in front of the press and hold.
       assert.match(text, /if \(\(s\.view === 'done' \|\| s\.view === 'nothing'\) && linking\(s\)\) return showLinkStep\(s\)/);
