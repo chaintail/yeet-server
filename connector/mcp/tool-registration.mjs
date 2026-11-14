@@ -4,7 +4,7 @@ import {toolError} from './errors.mjs';
 import {toolSchemas,toolSpecs,zodSchema,registrationInput,META_KEYS} from './tool-contract.mjs';
 import {registerWidgets,toolMeta,CONFIRM_META_KEY} from './widgets.mjs';
 import {instructionsFor} from './instructions.mjs';
-import {guidanceFor,styleFor} from './guidance.mjs';
+import {guidanceFor,styleFor,uiFor,updateNote} from './guidance.mjs';
 import {SIGNER_META_KEY,signerMetaFromEnv} from '#shared/signing.mjs';
 import {staleness as processStaleness,staleKey,appRefresh,withRefresh,BUILD_META_KEY,TOOLS_VERSIONS,classifyToolsVersion,loggedVersion} from './refresh.mjs';
 import {refreshGuidance} from './guidance.mjs';
@@ -236,7 +236,12 @@ export function createMcpServer({token,callCore,env=process.env,staleness=proces
     // The style reminder (guidance.mjs STYLED): its own text block after the guidance, on read-type results only.
     // Text only, never structuredContent: the output schemas are closed and stay as they are.
     const style=isObject?styleFor(name,data):undefined;
-    const content=[{type:'text',text},...(TEXT[name]&&parsed.data.guidance?[{type:'text',text:parsed.data.guidance}]:[]),...(style?[{type:'text',text:style}]:[])];
+    // The layout notes (guidance.mjs UI), text only like the style reminder: the update card right after the JSON on the
+    // result that tells the model the app is out of date, the result's own layout (welcome, consent, next steps) after
+    // the guidance.
+    const update=tellRefresh&&isObject?updateNote():undefined;
+    const ui=isObject?uiFor(name,data,ctx):undefined;
+    const content=[{type:'text',text},...(update?[{type:'text',text:update}]:[]),...(TEXT[name]&&parsed.data.guidance?[{type:'text',text:parsed.data.guidance}]:[]),...(ui?[{type:'text',text:ui}]:[]),...(style?[{type:'text',text:style}]:[])];
     return {structuredContent:parsed.data,...(Object.keys(cardMeta).length?{_meta:cardMeta}:{}),content};
    }catch(e){return toolError(e,ctx,{tool:name})}
   });

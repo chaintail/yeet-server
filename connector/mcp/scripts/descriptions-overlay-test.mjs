@@ -20,7 +20,9 @@ import {allScopes} from '#scope-catalog';
 
 
 
-const FULL={p2:'e1110ee4405d8f58afea27bb86b32df9dc2b5e33dfbf79d7e7d22792e306ac8d',default:'08f3976c34a0ff6b8140eb97c85a1644d0215cba045b046ebc5493b64611f721',how_it_works:'c72fbfaf0e7d1962d8f654eb84bf3546cb8160a3acf8b63bfb60d3dface379ee'};
+
+
+const FULL={p2:'182220aabd7ea349d3e066c550ed6cd0394dd6f703f4db9d5b28b59dbdd2b7b7',default:'b364c09a428dcba33e977430a512b2f04735746fc0c2118218eb65e83dcd14d3',how_it_works:'0f5f78051dab37c8955c83b12ef61146a89f903e8640d58524b8753d9934ae5e'};
 const overlay=JSON.parse(readFileSync(DESCRIPTIONS_URL,'utf8')).contract;
 const vendored=()=>JSON.parse(readFileSync(CONTRACT_URL,'utf8'));
 const at=(o,pointer)=>pointer.split('/').slice(1).map(k=>k.replace(/~1/g,'/').replace(/~0/g,'~')).reduce((x,k)=>x?.[k],o);

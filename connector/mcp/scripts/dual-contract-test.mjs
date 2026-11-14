@@ -65,7 +65,8 @@ test('model-visible catalog: titles and descriptions for every tool; data-not-in
  
  
  
- assert.ok(instructions.length>=450&&instructions.length<=3450,`instructions length ${instructions.length}`);
+ 
+ assert.ok(instructions.length>=450&&instructions.length<=4000,`instructions length ${instructions.length}`);
  assert.match(instructions,/YEET/);
  assert.match(instructions,/YEET/);
  assert.doesNotMatch(descriptions.yeet_home,/wallet/i);assert.match(descriptions.yeet_home,/YEET/);

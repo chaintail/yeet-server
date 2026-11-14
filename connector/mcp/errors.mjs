@@ -1,8 +1,8 @@
 import {advertisedScopes} from '#scope-catalog';
 import {normalize,toolMessage,isRetryable,CANNOT_FILL_MESSAGE} from '#contracts/errors';
-import {refusalGuidance} from './guidance.mjs';
-import {META_KEYS,contract} from './tool-contract.mjs';
-const APP=contract['x-yeet-app'];
+import {refusalGuidance,consentNote,updateNote} from './guidance.mjs';
+import {appRefresh} from './refresh.mjs';
+import {META_KEYS} from './tool-contract.mjs';
 /** ctx: as in guidance.mjs (the registered tool names); without it the guidance assumes every tool is there.
  * tool: the tool that failed, when known (an outage of a tool that can never send a trade may say nothing was traded). */
 export function toolError(value,ctx,{tool}={}){
@@ -22,7 +22,7 @@ export function toolError(value,ctx,{tool}={}){
  // APP_OUTDATED: where they refresh the app and how (contract $defs.failure app_refresh, from x-yeet-app).
  // BETA_FULL (private code, contracts/errors.mjs): the "beta is full" page with the waitlist form (https only).
  if(code==='BETA_FULL'&&typeof value?.waitlist_url==='string'&&/^https:\/\/[^\s]{1,500}$/.test(value.waitlist_url))data.waitlist_url=value.waitlist_url;
- if(code==='APP_OUTDATED')data.app_refresh={url:APP.manage_url,steps:APP.refresh_steps};
+ if(code==='APP_OUTDATED')data.app_refresh=appRefresh();
  const terms=code==='TERMS_REQUIRED'&&value?.terms&&typeof value.terms==='object'?value.terms:null;
  if(terms){data.terms=terms;if(Array.isArray(value.missing)&&value.missing.length)data.missing=value.missing.filter(x=>typeof x==='string').slice(0,12)}
  const guidance=refusalGuidance(code,data.message,ctx,{terms,reason:value?.reason,tool});
@@ -34,5 +34,8 @@ export function toolError(value,ctx,{tool}={}){
  const card={error:code,message:data.message,...(data.fund_url?{fund_url:data.fund_url}:{}),...(terms?{terms:{mode:terms.mode==='page'?'page':'chat',...(typeof terms.page_url==='string'?{page_url:terms.page_url}:{})}}:{})};
  // 'mcp/www_authenticate': protocol key, read by the host to start a step-up authorization; never shown to the person.
  const meta={...(META_KEYS.failure?{[META_KEYS.failure]:card}:{}),...(code==='REAUTH_REQUIRED'?{'mcp/www_authenticate':[`Bearer error="insufficient_scope", scope="${advertisedScopes().join(' ')}"`]}:{})};
- return {isError:true,content:[{type:'text',text:JSON.stringify(data)}],...(Object.keys(meta).length?{_meta:meta}:{})};
+ // The layout notes (guidance.mjs UI), each its own text block after the JSON: the update card on APP_OUTDATED, the
+ // consent layout on TERMS_REQUIRED when the terms are accepted in the chat. Text only: the failure stays as it is.
+ const note=code==='APP_OUTDATED'?updateNote():terms&&terms.mode!=='page'?consentNote():undefined;
+ return {isError:true,content:[{type:'text',text:JSON.stringify(data)},...(note?[{type:'text',text:note}]:[])],...(Object.keys(meta).length?{_meta:meta}:{})};
 }

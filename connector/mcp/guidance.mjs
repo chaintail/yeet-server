@@ -2,6 +2,7 @@
 // refusal code and state. This repository carries neutral text in every string; the wording YEET deploys is not part
 // of it.
 import {contract} from './tool-contract.mjs';
+import {REFRESH_URL} from './refresh.mjs';
 const APP=contract['x-yeet-app'];
 
 export const COPY=Object.freeze({
@@ -174,6 +175,7 @@ export const COPY=Object.freeze({
  },
 
  refresh:{
+
   stale:"YEET refresh.stale: {url} {steps}.",
  },
 
@@ -220,7 +222,7 @@ export const COPY=Object.freeze({
  },
 });
 
-export function refreshGuidance(app=APP){return fill(COPY.refresh.stale,{url:app.manage_url,steps:app.refresh_steps})}
+export function refreshGuidance(app=APP,url=REFRESH_URL){return fill(COPY.refresh.stale,{url,steps:app.refresh_steps})}
 
 export const TIER_XP=Object.freeze({winner_xp:'69',vip_over_xp:'1,000'});
 
@@ -328,7 +330,7 @@ function lucky(r){
 }
 function overviewGuidance(r){
  const c=COPY.yeet_overview,first=r.suggestions?.[0]?.id;
- if(r.terms&&r.terms.accepted===false)return fill(r.terms.mode==='page'?c.terms_page:c.terms_chat,{username:r.username,url:APP.manage_url});
+ if(r.terms&&r.terms.accepted===false)return fill(r.terms.mode==='page'?c.terms_page:c.terms_chat,{username:r.username,url:REFRESH_URL});
  const lead=r.trading==='paused'?c.lead_paused:first==='referral'?c.lead_referral:first==='fund'?c.lead_fund:first==='checkin'?c.lead_checkin:c.lead_none;
  return fill(c.base,{username:r.username,lead});
 }
@@ -337,7 +339,7 @@ export function termsGuidance(terms,reason){
  const c=COPY.terms;
  if(reason==='missing')return c.missing;
  if(reason==='version')return terms?.mode==='page'?c.due_page:c.version;
- return terms?.mode==='page'?c.due_page:fill(c.due_chat,{url:APP.manage_url});
+ return terms?.mode==='page'?c.due_page:fill(c.due_chat,{url:REFRESH_URL});
 }
 
 function coinGuidance(r){
@@ -405,6 +407,42 @@ export function styleFor(name,result){
  try{return f(result)?COPY.style.reminder:undefined}catch{return undefined}
 }
 
+export const UI=Object.freeze({
+ welcome:"YEET UI.welcome: {checkin}.",
+ welcome_checkin:" YEET UI.welcome_checkin.",
+ consent:"YEET UI.consent.",
+ next:"YEET UI.next: {count} {buttons} {xp}.",
+ next_wheel:"YEET UI.next_wheel.",
+ next_rest:"YEET UI.next_rest.",
+ next_xp_wheel:"YEET UI.next_xp_wheel.",
+ next_xp:"YEET UI.next_xp.",
+ update:"YEET UI.update: {url}.",
+});
+const hasCheckin=ctx=>!ctx||!ctx.tools||ctx.tools.has('yeet_checkin');
+
+export const consentNote=()=>UI.consent;
+
+export const updateNote=(url=REFRESH_URL)=>fill(UI.update,{url});
+
+export function nextNote(ctx){
+ const wheel=hasCheckin(ctx);
+ return fill(UI.next,{count:wheel?'four':'three',buttons:wheel?`${UI.next_wheel}, ${UI.next_rest}`:UI.next_rest,xp:wheel?UI.next_xp_wheel:UI.next_xp});
+}
+const chatTerms=t=>!!t&&typeof t==='object'&&t.accepted===false&&t.mode!=='page';
+
+export function uiFor(name,result,ctx){
+ if(!result||typeof result!=='object')return undefined;
+ try{
+  if(name==='yeet_overview'){
+   if(result.terms?.accepted===false)return chatTerms(result.terms)?UI.consent:undefined;
+   return fill(UI.welcome,{checkin:hasCheckin(ctx)?UI.welcome_checkin:''});
+  }
+  if(name==='yeet_terms')return chatTerms(result.terms)?UI.consent:undefined;
+  if(name==='yeet_accept_terms')return result.terms?.accepted===true?nextNote(ctx):undefined;
+  return undefined;
+ }catch{return undefined}
+}
+
 export function guidanceFor(name,result,ctx){
  const f=BY_TOOL[name];
  if(!f||!result||typeof result!=='object')return undefined;
@@ -417,7 +455,7 @@ export function refusalGuidance(code,message,ctx,{terms,reason,tool,now=Date.now
  const e=COPY.errors;
  if(code==='TEMPORARILY_UNAVAILABLE')return typeof tool==='string'&&!MAY_SEND.has(tool)?e.TEMPORARILY_UNAVAILABLE_no_send:e.TEMPORARILY_UNAVAILABLE;
  if(code==='TERMS_REQUIRED')return termsGuidance(terms,reason);
- if(code==='APP_OUTDATED')return fill(e.APP_OUTDATED,{url:APP.manage_url,steps:APP.refresh_steps});
+ if(code==='APP_OUTDATED')return fill(e.APP_OUTDATED,{url:REFRESH_URL,steps:APP.refresh_steps});
  if(code==='LIMIT_EXCEEDED'){
   const tier=typeof message==='string'?message.match(/\bas a (Noob|Winner|VIP)\b/)?.[1]:undefined;
   const kind=typeof message!=='string'?undefined:/\bper-trade limit\b/.test(message)?'trade':/\bdaily limit\b/.test(message)?'daily':undefined;

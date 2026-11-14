@@ -1,17 +1,20 @@
 // Server instructions and the tool titles and descriptions re-exported for the text gate. This repository carries
 // neutral text in every line; the wording YEET deploys is not part of it.
-import {toolSpecs,contract} from './tool-contract.mjs';
-const APP=contract['x-yeet-app'];
+import {toolSpecs} from './tool-contract.mjs';
+import {REFRESH_URL} from './refresh.mjs';
 
 export const STYLE_LINES = Object.freeze([
  "YEET STYLE_LINES.1.",
  "YEET STYLE_LINES.2.",
 ]);
+
+export const LAYOUT_LINE = "YEET LAYOUT_LINE.";
 const LINES = [
  "YEET LINES.1.",
  "YEET LINES.2.",
  "YEET LINES.3.",
- `YEET LINES.4: ${APP.manage_url}.`,
+ `YEET LINES.5: ${REFRESH_URL}.`,
+ LAYOUT_LINE,
  "YEET LINES.7.",
  "YEET LINES.7.",
  "YEET LINES.11.",

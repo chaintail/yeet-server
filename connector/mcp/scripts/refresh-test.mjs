@@ -7,8 +7,8 @@ import {readFileSync} from 'node:fs';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
 import {createMcpServer} from '../tool-registration.mjs';
-import {APP,CARD_BUILD,BUILD_META_KEY,createStaleness,sameBuild,staleKey,vendoredBuild,withRefresh,appRefresh,TOOLS_VERSIONS,classifyToolsVersion,loggedVersion} from '../refresh.mjs';
-import {COPY,refreshGuidance} from '../guidance.mjs';
+import {APP,REFRESH_URL,CARD_BUILD,BUILD_META_KEY,createStaleness,sameBuild,staleKey,vendoredBuild,withRefresh,appRefresh,TOOLS_VERSIONS,classifyToolsVersion,loggedVersion} from '../refresh.mjs';
+import {COPY,UI,refreshGuidance,updateNote} from '../guidance.mjs';
 import {contract,CARDS,toolSchemas,zodSchema} from '../tool-contract.mjs';
 import {createHash} from 'node:crypto';
 import {z} from 'zod';
@@ -34,10 +34,16 @@ async function connect({staleness=createStaleness(),sub='yeet-privy-refresh',rou
  const call=(name,args={},meta)=>raw(name,asModel(name,args),meta);
  return {client,call,raw,logs,staleness,routes,close:async()=>{await client.close();await server.close()}};
 }
-const REFRESH="YEET REFRESH.";
+const PERSONAL='https://chatgpt.com/plugins?directoryTab=personal';
+const REFRESH=`YEET REFRESH: ${PERSONAL}.`;
+const APP_REFRESH={url:PERSONAL,steps:'open YEET there, select Refresh, then start a new chat'};
+/** The update card (owner, 2026-11-14): its own text block, plain, with the Personal plugins link. */
+const NOTE=updateNote();
 
 test('the page is the contract’s one constant; the server’s card build is the vendored pin and is stamped in every vendored template',()=>{
  assert.deepEqual(APP,contract['x-yeet-app']);assert.equal(APP.manage_url,'https://chatgpt.com/plugins');
+ // The server's refresh link is the Personal tab of that page (owner, 2026-11-14); the vendored cards keep their own.
+ assert.equal(REFRESH_URL,PERSONAL);assert.ok(REFRESH_URL.startsWith(`${APP.manage_url}?`));
  assert.equal(CARD_BUILD,vendoredBuild());assert.equal(CARD_BUILD,vendoredPin(),'the same pin GET /version reports as yeet_win_commit');
  assert.match(CARD_BUILD,/^[0-9a-f]{40}$/);
  assert.deepEqual(WIDGET_VIEWS,Object.keys(CARDS));
@@ -46,9 +52,11 @@ test('the page is the contract’s one constant; the server’s card build is th
   assert.ok(html.includes(`const BUILD="${CARD_BUILD}";`),`${view}: built from the pinned commit`);
   assert.ok(html.includes(APP.manage_url),`${view}: carries the refresh link`);
  }
- assert.equal(refreshGuidance(),REFRESH);assert.equal(refreshGuidance(),COPY.refresh.stale.replace('{url}',APP.manage_url).replace('{steps}',APP.refresh_steps));
- // No other file names the ChatGPT page: guidance and cards read it from the contract.
- for(const f of ['../guidance.mjs','../refresh.mjs','../tool-registration.mjs','../instructions.mjs'])assert.doesNotMatch(readFileSync(new URL(f,import.meta.url),'utf8').replace(/^\s*\/\/.*$/gm,''),/chatgpt\.com/,f);
+ assert.equal(refreshGuidance(),REFRESH);assert.equal(refreshGuidance(),COPY.refresh.stale.replace('{url}',REFRESH_URL).replace('{steps}',APP.refresh_steps));
+ // No other file names the ChatGPT page: guidance and cards read it from the contract, and the server's link from
+ // refresh.mjs REFRESH_URL, the one place it is written.
+ for(const f of ['../guidance.mjs','../tool-registration.mjs','../instructions.mjs','../errors.mjs'])assert.doesNotMatch(readFileSync(new URL(f,import.meta.url),'utf8').replace(/^\s*\/\/.*$/gm,''),/chatgpt\.com/,f);
+ assert.equal(readFileSync(new URL('../refresh.mjs',import.meta.url),'utf8').replace(/^\s*\/\/.*$/gm,'').match(/chatgpt\.com/g).length,1);
 });
 
 test('staleness: a different card build, or a card-only call with none; the model’s own calls decide nothing; told once; forgotten after the TTL',()=>{
@@ -63,7 +71,7 @@ test('staleness: a different card build, or a card-only call with none; the mode
  s.note('a',{cardBuild:OLD});s.note('b',{cardBuild:OLD});s.note('c',{cardBuild:OLD});assert.ok(s.size()<=2,'bounded');
  assert.equal(sameBuild(OLD,'b'.repeat(40)),false);assert.equal(sameBuild('zz',OLD),false);
  assert.equal(staleKey({sub:'u'},{'openai/session':'conv1'}),'u|conv1');assert.equal(staleKey({sub:'u'},undefined),'u|');assert.notEqual(staleKey({sub:'u'},{'openai/session':'a'}),staleKey({sub:'u'},{'openai/session':'b'}));
- assert.deepEqual(appRefresh(),{url:APP.manage_url,steps:APP.refresh_steps});
+ assert.deepEqual(appRefresh(),{url:REFRESH_URL,steps:APP.refresh_steps});
  const long=withRefresh(REFRESH,'One. '+'x'.repeat(480)+'. Three.');assert.ok(long.length<=500);assert.ok(long.startsWith(REFRESH+' One.'));
 });
 
@@ -81,10 +89,13 @@ test('a stale card’s call marks the conversation: the next result the model re
   assert.deepEqual(c.routes.at(-1),[`/trades/${status.trade_id}`,undefined],'card_build never reaches core');
   const o=await c.call('yeet_overview');
   assert.ok(o.structuredContent.guidance.startsWith(REFRESH+' Welcome Lucky Otter 42'),o.structuredContent.guidance);assert.ok(o.structuredContent.guidance.length<=500);
-  assert.deepEqual(o.structuredContent.app_refresh,{url:'https://chatgpt.com/plugins',steps:'open YEET there, select Refresh, then start a new chat'});
-  assert.equal(o.content[1].text,o.structuredContent.guidance,'in the text the model reads');
+  assert.deepEqual(o.structuredContent.app_refresh,APP_REFRESH);
+  // The update card right after the JSON, then the guidance, then the welcome layout: text only, never structuredContent.
+  assert.equal(o.content[1].text,NOTE);assert.equal(o.content[2].text,o.structuredContent.guidance,'in the text the model reads');
+  assert.match(o.content[3].text,/^YEET welcome layout:/);assert.doesNotMatch(JSON.stringify(o.structuredContent),/YEET update notice|YEET welcome layout/);
   const again=await c.call('yeet_overview');
   assert.doesNotMatch(again.structuredContent.guidance,/out of date/,'once per conversation');assert.equal(again.structuredContent.app_refresh,undefined);
+  assert.ok(!again.content.some(b=>b.text===NOTE),'the update card once per conversation, with the guidance');
  }finally{await c.close()}
 });
 
@@ -98,6 +109,8 @@ test('a card-only call without a build is a card from before build ids; any mode
   assert.doesNotMatch(other.structuredContent.guidance,/out of date/,'another conversation of the same person');
   const lb=await c.call('yeet_leaderboard',{},{'openai/session':'conv-old'});
   assert.ok(lb.structuredContent.guidance.startsWith(REFRESH),lb.structuredContent.guidance);
+  // Any result that tells the model carries the update card as its own block, right after the JSON.
+  assert.equal(lb.content[1].text,NOTE);assert.equal(other.content.some(b=>b.text===NOTE),false);
   assert.equal(JSON.parse(lb.content[0].text).guidance,lb.structuredContent.guidance);
   assert.doesNotMatch((await c.call('yeet_coins',{},{'openai/session':'conv-old'})).structuredContent.guidance,/out of date/);
   // A current card's calls never mark anything.
@@ -117,7 +130,7 @@ test('a build that is not a commit id is refused as an argument; a refused call 
 
 // ---- The tools version (contract x-yeet-app.tools_version; yeet-win docs/CARDS.md "Tools version") ----
 const PAST={current:'tools-9',past:['tools-7','tools-8']};
-const UPDATE="YEET UPDATE.";
+const UPDATE=`YEET UPDATE: ${PERSONAL}.`;
 
 test('tools version: one current value from the contract, the values advertised before it, and how a call is classified',()=>{
  assert.deepEqual(TOOLS_VERSIONS,{current:contract['x-yeet-app'].tools_version,past:contract['x-yeet-app'].tools_versions_past});
@@ -177,10 +190,11 @@ test('a stale client (a tools version advertised before): refresh only. Nothing 
    const r=await c.raw('yeet_overview',{app_version:old},meta);
    assert.equal(r.isError,true,old);assert.equal(Object.hasOwn(r,'structuredContent'),false,'an error: the text, no structuredContent');
    assert.equal(c.routes.length,before,'core is not asked: nothing of the account is loaded');
-   assert.equal(r.content.length,1);assert.equal(r.content[0].type,'text');
+   // The JSON, then the update card as its own text block.
+   assert.equal(r.content.length,2);assert.equal(r.content[0].type,'text');assert.deepEqual(r.content[1],{type:'text',text:NOTE});
    const body=JSON.parse(r.content[0].text);
    assert.deepEqual(body,{error:'APP_OUTDATED',message:'Your YEET in ChatGPT is out of date. Refresh it, then start a new chat.',retryable:false,
-    app_refresh:{url:'https://chatgpt.com/plugins',steps:'open YEET there, select Refresh, then start a new chat'},guidance:UPDATE});
+    app_refresh:APP_REFRESH,guidance:UPDATE});
    assert.doesNotThrow(()=>zodSchema(z,contract.$defs.failure).parse(body));assert.ok(contract.tools.yeet_overview.errors.includes('APP_OUTDATED'));
    // Card only: what the welcome card draws ("Update YEET" and the button), and the server's card build.
    assert.deepEqual(r._meta,{'yeet/failure':{error:'APP_OUTDATED',message:body.message},[BUILD_META_KEY]:CARD_BUILD});
@@ -205,7 +219,7 @@ test('no value, a malformed one or an unknown one: never refused. The overview a
    const r=await c.raw('yeet_overview',args,meta);
    assert.equal(r.isError,undefined,cls);assert.equal(r.structuredContent.username,'Lucky Otter 42');assert.deepEqual(r.structuredContent.suggestions,overview.suggestions);
    assert.ok(r.structuredContent.guidance.startsWith(REFRESH+' Welcome Lucky Otter 42'),r.structuredContent.guidance);
-   assert.deepEqual(r.structuredContent.app_refresh,{url:'https://chatgpt.com/plugins',steps:'open YEET there, select Refresh, then start a new chat'});
+   assert.deepEqual(r.structuredContent.app_refresh,APP_REFRESH);assert.equal(r.content[1].text,NOTE);
    assert.deepEqual(c.logs.at(-1),{event:'tools_version',tool:'yeet_overview',class:cls,value:logged,current:'tools-9'});
    assert.equal(c.staleness.isStale(staleKey({sub:'yeet-privy-refresh'},meta)),true);
    const again=await c.raw('yeet_overview',args,meta);
@@ -254,4 +268,14 @@ test('tools/list snapshot: its hash is the one recorded for this tools version; 
   for(const change of [t=>{t[0].annotations.readOnlyHint=!t[0].annotations.readOnlyHint},t=>{t.pop()},t=>{t[0].inputSchema.properties={...t[0].inputSchema.properties,q:{type:'string'}}},t=>{t[0]._meta['openai/widgetAccessible']=!t[0]._meta['openai/widgetAccessible']},
    t=>{t.find(x=>x.name==='yeet_overview').inputSchema.properties.app_version.enum=['tools-999']}]){const t=structuredClone(tools);change(t);assert.notEqual(toolsListHash(t),hash)}
  }finally{await c.close()}
+});
+
+test('the update card (owner, 2026-11-14): plain, before everything else, titled, the steps, the Personal plugins link, the iPhone note',()=>{
+ assert.equal(NOTE,UI.update.replaceAll('{url}',PERSONAL));
+ assert.match(NOTE,/YEET/);
+ assert.match(NOTE,/YEET/);
+ assert.match(NOTE,/Make https:\/\/chatgpt\.com\/plugins\?directoryTab=personal the card's link\./);
+ assert.match(NOTE,/YEET/);
+ assert.doesNotMatch(NOTE,/chatgpt\.com\/plugins(?!\?directoryTab=personal)/,'never the general page');
+ assert.doesNotMatch(NOTE,/degen|playful|joke(?!s\))|riff/i);
 });

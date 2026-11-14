@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {z} from 'zod';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
-import {COPY,TIER_XP,GUIDED_TOOLS,STYLED_TOOLS,guidanceFor,styleFor,refusalGuidance,fill,firstBuy,hoursToReset} from '../guidance.mjs';
+import {COPY,UI,TIER_XP,GUIDED_TOOLS,STYLED_TOOLS,guidanceFor,styleFor,uiFor,updateNote,consentNote,nextNote,refusalGuidance,fill,firstBuy,hoursToReset} from '../guidance.mjs';
 import {createAgentMcpServer} from '../agent.mjs';
 import {createMcpServer} from '../tool-registration.mjs';
 import {CARD_BUILD} from '../refresh.mjs';
@@ -16,7 +16,7 @@ import {allScopes} from '#scope-catalog';
 import {TIER_DEFAULTS,checkBasket,checkDaily,capsFor,capsView,limitsFromEnv,skeetTooSmall} from '../../core/trade/limits.mjs';
 import {failure,withUserMessage} from '../../core/failure.mjs';
 import {utcDay} from '../../core/trade/util.mjs';
-import {instructions,STYLE_LINES} from '../instructions.mjs';
+import {instructions,instructionsFor,STYLE_LINES,LAYOUT_LINE} from '../instructions.mjs';
 
 const ASK_FUND="YEET ASK_FUND.";
 
@@ -543,10 +543,50 @@ test('style: never on the agent route (plain JSON, its own instructions)',async(
  try{
   const ins=client.getInstructions();
   for(const line of STYLE_LINES)assert.ok(!ins.includes(line));assert.doesNotMatch(ins,/degen|playful|Style:/);
+  // Nor the layout notes (welcome, consent, next steps, update) or their line.
+  assert.ok(!ins.includes(LAYOUT_LINE));assert.doesNotMatch(ins,/layout note|Required agreements|YEET update available|directoryTab/);
   const {tools}=await client.listTools();
   for(const t of tools){
    const r=await client.callTool({name:t.name,arguments:{}}).catch(e=>({content:[{type:'text',text:String(e)}]}));
-   assert.doesNotMatch(JSON.stringify(r),/Style:|degen|playful/,t.name);
+   assert.doesNotMatch(JSON.stringify(r),/Style:|degen|playful|YEET (welcome|consent) layout|YEET next steps|YEET update notice/,t.name);
   }
  }finally{await client.close();await server.close()}
+});
+
+// The layout notes (owner, 2026-11-14): how to present, as their own text block. The welcome is on the overview with
+// the terms accepted, nowhere else.
+const OV={username:'Lucky Otter 42',usdc:'20',xp:5,tier:'Noob',streak_days:1,checkin_open:true,holdings_count:0,top_winner:null,trading:'live',suggestions:[{id:'discover',label:'Discover a new coin to yeet',say:'Help me find a new coin to yeet'}]};
+test('welcome layout: username, the three-column summary, tier and the check-in, mobile-first native components, only returned values',()=>{
+ const w=uiFor('yeet_overview',OV,ALL_P2);
+ assert.equal(w,uiFor('yeet_overview',{...OV,terms:{accepted:true,mode:'chat'}},ALL_P2));
+ assert.match(w,/YEET/);
+ assert.match(w,/YEET/);
+ assert.match(w,/YEET/);
+ assert.doesNotMatch(uiFor('yeet_overview',OV,P01),/check-in/,'no check-in without the wheel tools');
+ // Never on other results, and the consent flow replaces it while the terms are due.
+ for(const name of GUIDED_TOOLS.filter(n=>!['yeet_overview','yeet_terms','yeet_accept_terms'].includes(n)))assert.equal(uiFor(name,{...OV,terms:{accepted:false,mode:'chat'}},ALL_P2),undefined,name);
+ assert.equal(uiFor('yeet_overview',{...OV,terms:{accepted:false,mode:'chat'}}),consentNote());
+ assert.equal(uiFor('yeet_overview',{...OV,terms:{accepted:false,mode:'page'}}),undefined);
+ for(const bad of [null,undefined,'x'])assert.equal(uiFor('yeet_overview',bad),undefined);
+ // Apart from the copy table: no layout note is inside a guidance string.
+ for(const [label,text] of entries)for(const note of [w,consentNote(),nextNote(),updateNote()])assert.ok(!text.includes(note),label);
+ // Plain where it must be: consent, next steps and the update card carry no joke or playful voice.
+ for(const t of [consentNote(),nextNote(),updateNote()])assert.doesNotMatch(t,/playful|degen|riff|humou?r/i);
+});
+
+test('welcome layout through the registered server: its own text block after the guidance, before the style reminder; never in structuredContent',async()=>{
+ const {client,close}=await connect(async route=>route==='/overview'?OV:{coins:[]},{YEET_P2:'1'});
+ try{
+  const o=await client.callTool({name:'yeet_overview',arguments:{app_version:contract['x-yeet-app'].tools_version}});
+  assert.equal(o.isError,undefined,JSON.stringify(o.content));
+  assert.deepEqual(o.content.map(b=>b.text.slice(0,20)),[o.content[0].text.slice(0,20),o.structuredContent.guidance.slice(0,20),'YEET welcome layout:',COPY.style.reminder.slice(0,20)]);
+  assert.equal(o.content[2].text,uiFor('yeet_overview',OV,ALL_P2));assert.doesNotMatch(JSON.stringify(o.structuredContent),/welcome layout/);
+  const c=await client.callTool({name:'yeet_coins',arguments:{}});assert.ok(!c.content.some(b=>/layout|next steps|update notice/.test(b.text)));
+ }finally{await close()}
+});
+
+test('the layout line is in the instructions with every opt-in, within the tested length',()=>{
+ for(const env of [{},{YEET_HOW_IT_WORKS:'1'}]){const ins=instructionsFor(env);assert.ok(ins.includes(` ${LAYOUT_LINE} `));assert.ok(ins.length<=4000,String(ins.length))}
+ assert.match(instructions,/they refresh YEET at https:\/\/chatgpt\.com\/plugins\?directoryTab=personal and say it again/);
+ assert.doesNotMatch(instructions,/chatgpt\.com\/plugins(?!\?directoryTab=personal)/);
 });

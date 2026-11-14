@@ -8,13 +8,17 @@ import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
 import {z} from 'zod';
 import {createMcpServer,ACCOUNT_META_KEY} from '../tool-registration.mjs';
 import {contract,zodSchema} from '../tool-contract.mjs';
-import {COPY,termsGuidance} from '../guidance.mjs';
-import {instructions} from '../instructions.mjs';
+import {COPY,UI,termsGuidance,consentNote,nextNote,uiFor} from '../guidance.mjs';
+import {instructions,LAYOUT_LINE} from '../instructions.mjs';
 import {termsObject,TERMS_VERSION,REQUIRED_IDS,STATEMENTS} from '../../core/terms.mjs';
 import {overview} from '../../core/overview.mjs';
 import {allScopes} from '#scope-catalog';
 
 const PAGE='https://chatgpt.yeet.win/account/terms';
+/** The confirmation rule (owner, 2026-11-14, after a live test): a ticked checkbox list plus Accept is the person's confirmation. */
+const CONFIRM_RULE="YEET CONFIRM_RULE.";
+/** The sentence that made the model refuse a ticked checkbox list: gone everywhere. */
+const OLD_RULE="YEET OLD_RULE.";
 const due=(mode='chat')=>termsObject(null,{mode,pageUrl:PAGE});
 const done=()=>termsObject({accepted_at:Date.parse('2026-11-13T10:00:00Z')},{mode:'chat',pageUrl:PAGE});
 const home={wallets:{base:{address:'0x'+'1'.repeat(40),usdc:'20'},solana:{address:'So1'.padEnd(44,'1')}},funding:{base_usdc:'20',solana_usdc:'0',chosen:'base'},ready:'ready',limits:{tier:'Noob'}};
@@ -35,7 +39,7 @@ test('contract: the terms tools; accepting is not read-only and asks for the hos
  assert.deepEqual(a.annotations,{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false});
  assert.equal(a.visible,true);assert.equal(a.widgetAccessible,false);assert.equal(a.card,null);
  assert.deepEqual(t.annotations,{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false});
- assert.match(a.description,/YEET/);assert.match(a.description,/YEET/);
+ assert.ok(a.description.includes(` ${CONFIRM_RULE} `),a.description);assert.match(a.description,/YEET/);
  assert.match(a.description,/YEET/);
  assert.match(instructions,/yeet_accept_terms/);
  assert.doesNotThrow(()=>zodSchema(z,contract.$defs.failure).parse({error:'TERMS_REQUIRED',message:'Accept the YEET terms in the chat to continue.',retryable:false,terms:due(),missing:['risk'],guidance:COPY.terms.missing}));
@@ -68,7 +72,8 @@ test('a TERMS_REQUIRED result of every tool passes an MCP client’s output sche
    assert.equal(Object.hasOwn(r,'structuredContent'),false,`${name}: an error result carries no structuredContent`);
    // The client's rules, by hand: with an output schema, structuredContent is required unless isError, and checked whenever present.
    if(r.structuredContent!==undefined)assert.ok(zodSchema(z,contract.tools[name].outputSchema).safeParse(r.structuredContent).success,name);
-   assert.equal(r.content.length,1,name);assert.equal(r.content[0].type,'text',name);
+   // The JSON, then the consent layout as its own text block (guidance.mjs UI.consent).
+   assert.equal(r.content.length,2,name);assert.equal(r.content[0].type,'text',name);assert.deepEqual(r.content[1],{type:'text',text:consentNote()},name);
    const body=JSON.parse(r.content[0].text);
    assert.equal(body.error,'TERMS_REQUIRED',`${name}: ${r.content[0].text.slice(0,160)}`);assert.equal(typeof body.message,'string');assert.equal(body.terms.version,TERMS_VERSION);
    assert.equal(body.guidance,termsGuidance(due()),name);
@@ -117,15 +122,16 @@ test('the guidance: show every statement with its link, accept only on the perso
  assert.match(g,/has not accepted the current YEET terms/);
  // Owner, 2026-11-14: a checkbox for every item, never one button that accepts all of them.
  for(const t of [g,COPY.yeet_overview.terms_chat]){
+  // 2026-11-14 (live test): a ticked checkbox list plus Accept is the confirmation; the layout note has the details.
   assert.match(t,/YEET/);
   assert.match(t,/YEET/);
-  assert.match(t,/YEET/);
+  assert.doesNotMatch(t,/one by one/);
   assert.doesNotMatch(t,/all of them/);
  }
  assert.match(COPY.terms.missing,/YEET/);
  // The stale-app case (the tool is not in the model's list): refresh and say it again, never "it cannot be saved".
  assert.match(g,/YEET/);
- assert.match(termsGuidance(due()),/they refresh YEET at https:\/\/chatgpt\.com\/plugins and say it again/);
+ assert.match(termsGuidance(due()),/they refresh YEET at https:\/\/chatgpt\.com\/plugins\?directoryTab=personal and say it again/);
  assert.match(instructions,/YEET/);
  assert.match(instructions,/YEET/);
  assert.doesNotMatch(instructions,/all of them/);
@@ -326,4 +332,92 @@ test("YEET text.",()=>{
  assert.deepEqual(contract.tools.yeet_quote.annotations,{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false});assert.ok(contract.tools.yeet_quote.card&&contract.tools.yeet_quote.visible);
  const all=Object.values(COPY).flatMap(g=>Object.values(g));
  for(const t of all)assert.doesNotMatch(t,/card above|above card|earlier message|previous message|scroll (up|back)/i,t.slice(0,60));
+});
+
+// ---- The layout notes (owner, 2026-11-14, after a test in ChatGPT): consent, and the next steps once recorded. Each
+// rides as its own text block; never in structuredContent or guidance. Owner ruling: no "Select all" of any kind. ----
+const CONSENT=UI.consent;
+/** Every mention of a select-all or accept-all control, as a sentence: each one must say there is none. */
+const allControls=t=>t.split(/(?<=[.!?:;])\s+/).filter(x=>/select[- ]?all|accept[- ]?all|clear all/i.test(x));
+test('consent layout: the contract, verbatim parts; plain; no select-all or accept-all offered anywhere',()=>{
+ assert.equal(consentNote(),CONSENT);
+ for(const part of [
+  /YEET/,
+  /YEET/,
+  /YEET/,
+  /YEET/,
+  /YEET/,
+  /YEET/,
+  /YEET/,
+  /YEET/,
+  /YEET/,
+ ])assert.match(CONSENT,part);
+ assert.doesNotMatch(CONSENT,/playful|degen|joke(?!s\))|riff|Style:/i);
+ // Nowhere is a select-all or accept-all offered: every sentence that names one says there is none.
+ const texts=[...Object.values(UI),...Object.values(COPY).flatMap(Object.values),instructions,LAYOUT_LINE,nextNote(),...Object.values(contract.tools).map(t=>t.description)];
+ for(const t of texts)for(const x of allControls(t))assert.match(x,/\bno\b|\bnever\b/i,`offered as a control: ${x}`);
+ assert.match(LAYOUT_LINE,/YEET/);assert.ok(instructions.includes(LAYOUT_LINE));
+});
+
+test('consent layout on the overview and yeet_terms while the terms are due in the chat, and on TERMS_REQUIRED; never in page mode, once accepted or in structuredContent',async()=>{
+ for(const [name,r] of [['yeet_overview',view(due())],['yeet_terms',{terms:due()}]])assert.equal(uiFor(name,r),CONSENT,name);
+ for(const [name,r] of [['yeet_overview',view(due('page'))],['yeet_terms',{terms:due('page')}],['yeet_terms',{terms:done()}],['yeet_overview',view(done())],['yeet_accept_terms',{terms:done(),overview:null}],['yeet_coins',{coins:[]}]])assert.notEqual(uiFor(name,r),CONSENT,name);
+ let terms=due();
+ const {call,close}=await connect(async route=>route==='/overview'?view(terms):route==='/terms'?{terms}:refuse({terms}));
+ try{
+  for(const name of ['yeet_overview','yeet_terms']){
+   const r=await call(name);
+   assert.equal(r.isError,undefined,name);assert.equal(r.content.filter(b=>b.text===CONSENT).length,1,name);
+   assert.equal(r.content.at(-1).text,CONSENT,`${name}: the consent layout comes last, no style reminder after it`);
+   assert.doesNotMatch(JSON.stringify(r.structuredContent),/YEET consent layout|Required agreements/,name);
+   assert.ok(!r.content.some(b=>/^YEET welcome layout|^Style:/.test(b.text)),`${name}: only the consent flow`);
+  }
+  const g=await call('yeet_coins');
+  assert.equal(g.isError,true);assert.equal(g.content[1].text,CONSENT,'a gated tool answering TERMS_REQUIRED');
+  terms=due('page');
+  for(const name of ['yeet_overview','yeet_terms','yeet_coins'])assert.ok(!(await call(name)).content.some(b=>b.text===CONSENT),`${name}: page mode accepts on the page`);
+  terms=done();
+  for(const name of ['yeet_overview','yeet_terms'])assert.ok(!(await call(name)).content.some(b=>b.text===CONSENT),`${name}: accepted`);
+ }finally{await close()}
+});
+
+test('next steps once recorded: congratulate, then exactly four buttons (the wheel first while it is registered), with no extra overview call',async()=>{
+ const four=nextNote({tools:new Set(['yeet_checkin','yeet_coins','yeet_portfolio'])});
+ assert.equal(nextNote(),four,'every tool there');
+ assert.match(four,/YEET/);
+ assert.match(four,/YEET/);
+ assert.match(four,/YEET/);
+ assert.match(four,/YEET/);
+ const three=nextNote({tools:new Set(['yeet_coins','yeet_portfolio'])});
+ assert.match(three,/exactly these three buttons/);assert.doesNotMatch(three,/wheel|yeet_checkin/,'never a button for a tool that is not registered');
+ assert.doesNotMatch(four,/playful|degen|joke|riff/i);
+ // Through the server: the accept result carries it, after the guidance; the refusals and the other results never do.
+ for(const env of [{},{YEET_P2:'1'}]){
+  const server=createMcpServer({token:{scope:allScopes.join(' '),sub:'yeet-privy-a'},callCore:async route=>route==='/terms/accept'?{terms:done(),overview:view(done())}:route==='/overview'?view(done()):{terms:done()},env});
+  const client=new Client({name:'terms-next',version:'1'});const [a,b]=InMemoryTransport.createLinkedPair();await server.connect(a);await client.connect(b);
+  try{
+   const r=await client.callTool({name:'yeet_accept_terms',arguments:{version:TERMS_VERSION,confirmed:[...REQUIRED_IDS]}});
+   assert.equal(r.isError,undefined);
+   const want=env.YEET_P2?four:three;
+   assert.equal(r.content.length,3);assert.equal(r.content[1].text,r.structuredContent.guidance);assert.equal(r.content[2].text,want,JSON.stringify(env));
+   assert.match(r.structuredContent.guidance,/YEET/);
+   assert.doesNotMatch(JSON.stringify(r.structuredContent),/YEET next steps/);
+   for(const name of ['yeet_terms','yeet_overview']){const o=await client.callTool({name,arguments:name==='yeet_overview'?{app_version:contract['x-yeet-app'].tools_version}:{}});assert.ok(!o.content.some(b=>/^YEET next steps/.test(b.text)),name)}
+  }finally{await client.close();await server.close()}
+ }
+});
+
+test("YEET text.",async()=>{
+ const {readFileSync}=await import('node:fs');
+ const files=['../descriptions.private.json','../guidance.mjs','../instructions.mjs','../tool-registration.mjs','../errors.mjs','../../../docs/TERMS-IN-CHAT.md'];
+ for(const f of files){const t=readFileSync(new URL(f,import.meta.url),'utf8');assert.ok(!t.includes(OLD_RULE),f);if(!f.endsWith('.md'))assert.doesNotMatch(t,/never (from )?a single accept-all/,f)}
+ assert.ok(readFileSync(new URL('../../../docs/TERMS-IN-CHAT.md',import.meta.url),'utf8').replace(/\s+/g,' ').includes(CONFIRM_RULE));
+ const texts=[instructions,...Object.values(COPY).flatMap(Object.values),...Object.values(UI),...Object.values(contract.tools).map(t=>t.description)];
+ for(const t of texts)assert.ok(!t.includes(OLD_RULE)&&!/confirm(ed)? (each required one|them) .*one by one/.test(t),t.slice(0,80));
+ assert.equal(contract.tools.yeet_accept_terms.description,`YEET text: ${CONFIRM_RULE}.`);
+ // The result text alone is enough to record after the gated checkbox confirmation (a description reaches ChatGPT only
+ // after a refresh): the consent note that rides the overview, yeet_terms and TERMS_REQUIRED says so.
+ assert.match(consentNote(),/YEET/);
+ assert.match(consentNote(),/YEET/);
+ for(const t of [COPY.terms.due_chat,COPY.yeet_overview.terms_chat])assert.match(t,/YEET/);
 });
