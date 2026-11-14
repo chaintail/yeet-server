@@ -5,6 +5,8 @@ import { privyConfig } from "./privy-app.jsx";
 import { NO_METHOD_LINE, oauthRefusal } from "./login-methods.js";
 import { BOUND_CALLBACK_PATH, boundView, fromProvider, startedHere } from "./bound-return.js";
 import { ChooseMethod, useEnabledMethods } from "./choose-method.jsx";
+import { needsEmailStep } from "./email-step.js";
+import { EmailStep } from "./email-step.jsx";
 import {
   CHAINS,
   embeddedWallets,
@@ -77,16 +79,25 @@ export function accountLabel(user) {
   return user?.email?.address || user?.google?.email || user?.apple?.email || "your YEET account";
 }
 
-/** Puts the Privy access token on the page form and submits it; the server then opens the YEET session. */
-async function submitSession(getAccessToken) {
+/**
+ * Puts the Privy access token on the page form and submits it; the server then opens the YEET session.
+ * `emailStep`: the server's note from the email step (email-step.jsx), when that step ran. The server compares it
+ * with who is signing in (as/signup-email.mjs).
+ */
+async function submitSession(getAccessToken, emailStep = "") {
   const token = await getAccessToken();
   if (!token) throw Error("no-token");
   const form = document.getElementById("privy-login").closest("form");
-  const input = document.createElement("input");
-  input.type = "hidden";
-  input.name = "privy_access_token";
-  input.value = token;
-  form.append(input);
+  const field = (name, value) => {
+    form.querySelector(`input[type=hidden][name="${name}"]`)?.remove();
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = name;
+    input.value = value;
+    form.append(input);
+  };
+  field("privy_access_token", token);
+  if (emailStep) field("email_step", emailStep);
   form.requestSubmit();
 }
 
@@ -94,6 +105,11 @@ async function submitSession(getAccessToken) {
  * Signed in. When a wallet is missing (the person signed up while Privy did not create wallets at login), the page
  * creates it, links both wallets to the YEET signer and continues on its own, showing each step. When both wallets
  * are already there, the person taps Continue to YEET, which links them (if needed) and continues.
+ *
+ * The email step (email-step.jsx) comes first for a person who came through Google or Apple and has no email login:
+ * right away when the page goes on by itself (the sign-in was started here, or the wallets are being set up), after
+ * the press on Continue otherwise. `gate`: step (the step shows) | ask (Continue leads to the step) | open (go on).
+ * Whether the person entered the code or skipped, the page then goes on exactly as it would have.
  */
 function FinishSignIn({ config }) {
   const { ready, user, getAccessToken, logout } = usePrivy();
@@ -115,6 +131,15 @@ function FinishSignIn({ config }) {
   // The sign-in was started on this page a moment ago: that press is the one this connection needs, so go straight on.
   const [auto] = useState(() => takeStarted());
   const went = useRef(false);
+  // Decided once, from the person as they arrived: entering the code gives them an email login, and the step stays.
+  const [gate, setGate] = useState(() => (needsEmailStep({ enabled: config.emailStep, user }) ? (setup || auto ? "step" : "ask") : "open"));
+  const [stepped, setStepped] = useState(false);
+  const emailStep = useRef("");
+  const afterStep = useRef(({ token }) => {
+    emailStep.current = token || "";
+    setStepped(true);
+    setGate("open");
+  }).current;
 
   /** Server setup: the server creates any missing wallet (no signer is attached: the person signs every trade). */
   async function serverSetup() {
@@ -139,7 +164,7 @@ function FinishSignIn({ config }) {
       setStep("link");
       await refreshUser().catch(() => null);
       setDone([...CHAINS, "link"]);
-      await submitSession(getAccessToken);
+      await submitSession(getAccessToken, emailStep.current);
     } catch (e) {
       clearTimeout(tick);
       // No client-error endpoint on the server yet: a structured, secret-free line in the browser console.
@@ -152,18 +177,18 @@ function FinishSignIn({ config }) {
   }
 
   useEffect(() => {
-    if (!setup || !ready || running.current) return;
+    if (!setup || !ready || gate !== "open" || running.current) return;
     runSetup();
     // runSetup reads the latest hooks; it runs once per attempt.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setup, ready, attempt]);
+  }, [setup, ready, attempt, gate]);
 
   useEffect(() => {
-    if (!setup) return;
+    if (!setup || gate !== "open") return;
     setSlow(false);
     const timer = setTimeout(() => setSlow(true), WALLET_WAIT_MS);
     return () => clearTimeout(timer);
-  }, [setup, attempt]);
+  }, [setup, attempt, gate]);
 
   function retry() {
     // A create call that is still open cannot be cancelled; reloading starts clean from the stored session.
@@ -190,7 +215,7 @@ function FinishSignIn({ config }) {
     }
     setSetupFailed(false);
     try {
-      await submitSession(getAccessToken);
+      await submitSession(getAccessToken, emailStep.current);
     } catch {
       setError("Sign in could not continue. Please try again.");
       setBusy(false);
@@ -198,12 +223,15 @@ function FinishSignIn({ config }) {
   }
 
   useEffect(() => {
-    if (setup || !auto || !ready || went.current) return;
+    // After the email step the page goes on by itself too: the person already pressed Continue, or started here.
+    if (setup || !(auto || stepped) || !ready || gate !== "open" || went.current) return;
     went.current = true;
     continueLogin();
     // continueLogin reads the latest hooks; it runs once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setup, auto, ready]);
+  }, [setup, auto, stepped, ready, gate]);
+
+  if (gate === "step") return <EmailStep onDone={afterStep} />;
 
   if (setup)
     return (
@@ -224,7 +252,7 @@ function FinishSignIn({ config }) {
 
   return (
     <>
-      <button type="button" disabled={!ready || busy} onClick={continueLogin}>
+      <button type="button" disabled={!ready || busy} onClick={gate === "ask" ? () => setGate("step") : continueLogin}>
         {busy ? "Connecting…" : setupFailed ? "Try again" : `Continue as ${accountLabel(user)}`}
       </button>
       <button type="button" className="secondary" disabled={busy} onClick={logout}>

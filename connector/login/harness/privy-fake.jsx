@@ -28,6 +28,25 @@ export function useLoginWithEmail() {
     loginWithCode: async () => {},
   };
 }
+// The email step of the connect screen (email-step.jsx). Addresses that start with "taken" are another account's;
+// the code 123456 links, 429429 is the rate limit, anything else is a wrong code.
+let linkAddress = "";
+export function useLinkEmail() {
+  const no = (code, status) => Promise.reject(Object.assign(Error(code), { privyErrorCode: code, status }));
+  return {
+    state: { status: "initial" },
+    sendCode: async ({ email }) => {
+      if (/^taken/.test(email)) return no("linked_to_another_user", 400);
+      linkAddress = email;
+    },
+    linkWithCode: async ({ code }) => {
+      if (code === "429429") return no("too_many_requests", 429);
+      if (code !== "123456") return no("invalid_credentials", 401);
+      const user = H().user || {};
+      return { user: { ...user, linkedAccounts: [...(user.linkedAccounts || []), { type: "email", address: linkAddress }] } };
+    },
+  };
+}
 export function useLoginWithOAuth() {
   return { initOAuth: async () => {}, loading: false };
 }

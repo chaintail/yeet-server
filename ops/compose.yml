@@ -45,6 +45,8 @@ services:
       PRIVY_JWKS_URL: ${PRIVY_JWKS_URL:-}
       # Sign-in methods on pages with no account-bound link: comma list of google, apple, email. Default google,apple.
       YEET_LOGIN_METHODS: ${YEET_LOGIN_METHODS:-}
+      # The email code right after a Google or Apple sign-in on the connect screen. Default on; 0 turns it off.
+      YEET_SIGNUP_EMAIL_STEP: ${YEET_SIGNUP_EMAIL_STEP:-}
       STATE_DIR: /state
       CORE_INTERNAL: ${CORE_INTERNAL:-}
       YEET_DAILY_CAP_USDC: ${YEET_DAILY_CAP_USDC:-}

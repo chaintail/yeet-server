@@ -678,3 +678,56 @@ test('no oidc-provider default TTL notices and no upstream-parsed body warning',
  const bad=providerNotices.filter(m=>/ttl\.(Interaction|Session|Grant|IdToken|RefreshToken)|already parsed request body|rpInitiatedLogout/.test(m));
  assert.deepEqual(bad,[]);
 });
+
+test('the email step of the connect screen: the note is for one Privy user; a sign-in by anyone else is refused and creates nothing',async()=>{
+ const {accountCount}=await import('../core/identity-store.mjs');
+ const {CHANGED_LINE}=await import('../as/signup-email.mjs');
+ const ALICE='DEV:did:privy:acceptance-step-alice',MALLORY='DEV:did:privy:acceptance-step-mallory';
+ const start=(identity_token,origin=ORIGIN)=>fetch(AS+'/account/email-step',{method:'POST',headers:{'content-type':'application/json',origin},body:JSON.stringify({identity_token})});
+ const before=accountCount();
+ // The note: for a verified caller on this origin only, and nobody is created by asking for it.
+ assert.equal((await start(ALICE,'https://evil.example')).status,403);
+ assert.equal((await start('not-a-credential')).status,401);
+ let r=await start(ALICE);assert.equal(r.status,200);assert.equal(r.headers.get('cache-control'),'no-store');
+ const {step}=await r.json();assert.match(step,/^e1\./);
+ assert.equal(accountCount(),before,'the step creates no account');
+ // The connect sign-in, with the note on the form.
+ const login=async(identity,note)=>{
+  const cookies=jar();
+  const go=async(url,init={})=>{const x=await fetch(local(url),{redirect:'manual',...init,headers:{cookie:cookies.header(),...init.headers}});cookies.add(x);return x};
+  const auth=new URL(AS+'/auth');
+  auth.search=new URLSearchParams({client_id:'local-chatgpt-fixture',response_type:'code',redirect_uri:'http://127.0.0.1:38314/callback',code_challenge:'x'.repeat(43),code_challenge_method:'S256',scope:SCOPES.join(' '),resource:ORIGIN,state:'s1'});
+  const page=(await go(auth.href)).headers.get('location');
+  const d=await (await go(page)).json();assert.equal(d.prompt,'login');
+  return go(page,{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded',origin:ORIGIN},body:new URLSearchParams({csrf:d.csrf,identity_token:identity,...(note===undefined?{}:{email_step:note})})});
+ };
+ // Another Privy user than the one the step was started by: refused before anyone is resolved.
+ r=await login(MALLORY,step);assert.equal(r.status,409);
+ let text=await r.text();assert.ok(text.includes(CHANGED_LINE));assert.doesNotMatch(text,/did:privy|yeet-privy-/);
+ assert.equal(accountCount(),before,'nobody was created for the other user');
+ // A note that does not verify is refused, never dropped.
+ r=await login(ALICE,step+'x');assert.equal(r.status,409);
+ r=await login(ALICE,'');assert.equal(r.status,409);
+ assert.equal(accountCount(),before);
+ // The same person, whether they entered the code or skipped: the sign-in goes on as it always did.
+ r=await login(ALICE,step);assert.equal(r.status,303);
+ assert.equal(accountCount(),before+1);
+ // Now the account exists: a new note names it, and still only its own user passes.
+ const again=(await (await start(ALICE)).json()).step;
+ r=await login(MALLORY,again);assert.equal(r.status,409);
+ r=await login(ALICE,again);assert.equal(r.status,303);
+ assert.equal(accountCount(),before+1);
+ // No note at all: the sign-in as before (a person for whom the step is off, or never shown).
+ r=await login('DEV:did:privy:acceptance-step-plain');assert.equal(r.status,303);
+ // The plain sign-in page holds the same check.
+ const cookies=jar();
+ const html=await (async()=>{const x=await fetch(AS+'/account/login',{headers:{cookie:cookies.header()}});cookies.add(x);return x.text()})();
+ const csrf=html.match(/name="csrf" value="([0-9a-f]+)"/)[1];
+ const plain=(identity_token,note)=>fetch(AS+'/account/login',{method:'POST',redirect:'manual',headers:{cookie:cookies.header(),origin:ORIGIN,'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf,identity_token,email_step:note})});
+ r=await plain(MALLORY,again);assert.equal(r.status,409);assert.ok((await r.text()).includes(CHANGED_LINE));
+ r=await plain(ALICE,again);assert.equal(r.status,302);
+ // The setting off: the route is gone (the page is told with /account/identity-config and never asks).
+ process.env.YEET_SIGNUP_EMAIL_STEP='0';
+ try{assert.equal((await start(ALICE)).status,404)}finally{delete process.env.YEET_SIGNUP_EMAIL_STEP}
+ assert.equal((await start(ALICE)).status,200);
+});

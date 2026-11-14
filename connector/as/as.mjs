@@ -54,6 +54,7 @@ import {
   read,
   write,
   verifyIdentity,
+  verifiedIdentity,
   lookupAccount,
   secret,
   coreCall,
@@ -66,10 +67,13 @@ import {
 } from "#shared/common.mjs";
 import { issuableScopes } from "./scopes.mjs";
 import { loginMethods } from "./login-methods.mjs";
+import { signupEmailStep, signupEmailRoutes, stepReader, stepGuard, stepAccount, StepChanged, changedBody, STEP_PATH } from "./signup-email.mjs";
 import { requireLinkKey, verifyLinkToken } from "#shared/link-token.mjs";
 configuredRefreshWindow();
 // YEET_LOGIN_METHODS (login-methods.mjs): a wrong value stops the server here, not at the first sign-in.
 loginMethods();
+// YEET_SIGNUP_EMAIL_STEP (signup-email.mjs): the same.
+signupEmailStep();
 // The key the page link tokens are verified with (shared/link-token.mjs). No usable key: the server does not start.
 const LINK_KEY = requireLinkKey("as");
 const publicBase = process.env.PUBLIC_BASE_URL || AS;
@@ -352,6 +356,7 @@ function limit(max) {
 }
 if (PUBLIC) {
   app.use("/account/login", limit(20));
+  app.use(STEP_PATH, limit(20));
   app.use("/account/wallets", limit(30));
   app.use("/account/terms", limit(40));
   app.use("/interaction", limit(64));
@@ -418,9 +423,22 @@ app.get("/account/identity-config", (_q, r) =>
         appId: process.env.PRIVY_APP_ID,
         // The sign-in methods a page with no account-bound link offers (YEET_LOGIN_METHODS, login-methods.mjs).
         methods: loginMethods(),
+        // The email step right after a Google or Apple sign-in (YEET_SIGNUP_EMAIL_STEP, signup-email.mjs).
+        emailStep: signupEmailStep(),
       })
     : r.sendStatus(404),
 );
+// The email step of the connect screen (signup-email.mjs): the note of who started it, and the checks the sign-in
+// makes with it. The server links nothing and records nothing here.
+const readStep = stepReader(LINK_KEY);
+signupEmailRoutes(app, {
+  enabled: () => process.env.PRIVY_LOGIN === "1" || (TEST && process.env.DEV_IDENTITY_STUB === "1"),
+  on: signupEmailStep, key: LINK_KEY, identity: verifiedIdentity, lookup: lookupAccount, originOK,
+});
+/** The sign-in was not the person the email step was started by: one plain page, nothing created or switched. */
+const stepChangedPage = (r, title) => r.status(409).set({ "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" }).type("html").send(authDocument(r, title, changedBody()));
+/** The person added an email login a moment ago: the core drops what it cached about the account's sign-in. */
+const emailStepPassed = (id) => { coreSend("/sign/account/login-refresh", id, secret("core-as"), {}, 5000).catch(() => {}); };
 const csrf = (uid) =>
   createHmac("sha256", secret("csrf")).update(uid).digest("base64url");
 function session(req) {
@@ -631,12 +649,17 @@ app.post("/account/login", formBody, async (q, r) => {
       cookie(r, BOUND_COOKIE, "", 0);
       return r.redirect(q.body.next === FUND_NEXT ? `/fund?h=${encodeURIComponent(bound.token)}` : afterSignIn(q.body.next));
     }
+    // The email step ran on the page (signup-email.mjs): whoever signs in must be the person it was started by.
+    const step = await stepGuard(q.body, { read: readStep, identity: verifiedIdentity });
     const id = await verifyIdentity(q.body);
+    stepAccount(step, id);
     if (!sameOwner(session(q), id) || !(await eligible(id)))
       return r.sendStatus(403);
     openSession(r, id);
+    if (step) emailStepPassed(id);
     r.redirect(afterSignIn(q.body.next));
-  } catch {
+  } catch (e) {
+    if (e instanceof StepChanged) return stepChangedPage(r, promptTitle("login"));
     r.status(401).json({ error: "sign in failed" });
   }
 });
@@ -829,7 +852,22 @@ app.post("/interaction/:uid", formBody, async (q, r, next) => {
     if (d.prompt.name === "login") {
       const s = session(q);
       const binding = requireFreshBinding(read("interaction-bindings.json")[d.uid]);
+      // The email step ran on the page (signup-email.mjs): whoever signs in must be the person it was started by.
+      // Checked before anyone is resolved, so a changed sign-in creates no account.
+      let step;
+      try {
+        step = await stepGuard(q.body, { read: readStep, identity: verifiedIdentity });
+      } catch (e) {
+        if (e instanceof StepChanged) return stepChangedPage(r, promptTitle("connect-login"));
+        throw e;
+      }
       const id = await verifiedInteractionLogin(d,s,binding,q.body,{verifyIdentity,eligible});
+      try {
+        stepAccount(step, id);
+      } catch {
+        return stepChangedPage(r, promptTitle("connect-login"));
+      }
+      if (step) emailStepPassed(id);
       binding.account = id;
       binding.signedIn = Date.now();
       noteSignIn(d, id);

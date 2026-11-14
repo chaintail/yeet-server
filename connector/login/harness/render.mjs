@@ -49,7 +49,8 @@ const appConfig = { email_auth: true, google_oauth: true, apple_oauth: true, twi
 function harness(state) {
   return `<script>window.__YEET_HARNESS__=${JSON.stringify(state)};(function(){var real=window.fetch.bind(window),h=window.__YEET_HARNESS__;
 window.fetch=function(url,init){var u=String(url);
-if(u.indexOf("/account/identity-config")>=0)return Promise.resolve(new Response(JSON.stringify({appId:"harness-app",signerId:"s",policyIds:{}}),{status:200,headers:{"content-type":"application/json"}}));
+if(u.indexOf("/account/identity-config")>=0)return Promise.resolve(new Response(JSON.stringify({appId:"harness-app",signerId:"s",policyIds:{},emailStep:!!h.emailStep}),{status:200,headers:{"content-type":"application/json"}}));
+if(u.indexOf("/account/email-step")>=0)return Promise.resolve(new Response(JSON.stringify({step:"harness-step"}),{status:200,headers:{"content-type":"application/json"}}));
 if(u.indexOf("/account/wallets")>=0){if(h.wallets==="fail")return Promise.resolve(new Response(JSON.stringify({code:"WALLET_SETUP_FAILED",message:"YEET could not set up your wallets. Nothing was charged. Tap Try again."}),{status:409,headers:{"content-type":"application/json"}}));return new Promise(function(){});}
 if(u.indexOf("mainnet.base.org")>=0){h.baseReads=(h.baseReads||0)+1;var units=h.rise&&h.baseReads>1?67500000:42500000;return Promise.resolve(new Response(JSON.stringify({jsonrpc:"2.0",id:1,result:"0x"+units.toString(16).padStart(64,"0")}),{status:200,headers:{"content-type":"application/json"}}));}
 if(u.indexOf("api.mainnet-beta.solana.com")>=0){var owner=JSON.parse(init.body).params[0];return Promise.resolve(new Response(JSON.stringify({jsonrpc:"2.0",id:1,result:{context:{slot:1},value:[{pubkey:"x",account:{data:{program:"spl-token",parsed:{type:"account",info:{mint:"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",owner:owner,tokenAmount:{amount:"12000000",decimals:6,uiAmountString:"12"}}}}}}]}}),{status:200,headers:{"content-type":"application/json"}}));}
@@ -64,6 +65,11 @@ const PAGES = {
   setup: page(CONNECT, loginForm(), { authenticated: true, user: base, appConfig }),
   "setup-failed": page(CONNECT, loginForm(), { authenticated: true, user: base, appConfig, wallets: "fail" }),
   continue: page(CONNECT, loginForm(), { authenticated: true, user: withWallets, appConfig }),
+  // The email step right after a Google or Apple sign-in (email-step.jsx): the code screen; an address that is
+  // another account's; Apple gave no address.
+  "email-step": page(CONNECT, loginForm(), { authenticated: true, user: { id: "did:privy:liam", linkedAccounts: [{ type: "google_oauth", email: "luke@gmail.com" }] }, appConfig, emailStep: true }),
+  "email-step-taken": page(CONNECT, loginForm(), { authenticated: true, user: { id: "did:privy:tess", linkedAccounts: [{ type: "google_oauth", email: "taken@gmail.com" }] }, appConfig, emailStep: true }),
+  "email-step-apple": page(CONNECT, loginForm(), { authenticated: true, user: { id: "did:privy:ava", linkedAccounts: [{ type: "apple_oauth", email: null }] }, appConfig, emailStep: true }),
   consent: page("Connect YEET to ChatGPT", consentForm({ csrf: "x", name: "Nimble Tapir 88", connectedSeconds: 86400 * 7 })),
   terms: page(TERMS_TITLE, termsBody({ csrf: "x", terms: termsObject(null, { mode: "page", pageUrl: "https://chatgpt.yeet.win/account/terms" }) })),
   "terms-accepted": page(TERMS_TITLE, termsBody({ csrf: "x", terms: termsObject({ accepted_at: Date.parse("2026-11-13T10:00:00Z") }) })),
