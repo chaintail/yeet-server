@@ -30,6 +30,18 @@
 // 262 characters. checkBatch(req) runs before any call: the typed data must be exactly the transfers the request's
 // leg_summaries list, so a server that misstates the batch is refused here. The literal `unsupported` is the card's
 // answer when the wallet refuses the 7702 method; the server then answers per-leg evm_tx requests.
+//
+// Ledger route (kind "near_intent", docs/LEDGER-ROUTE.md): the whole trade is ONE message for the NEAR Intents ledger,
+// approved with the person's Solana key and never a transaction: nothing is sent by the wallet and no network fee
+// exists. payload.message is the exact text (a `token_diff`: what the person gives, the least they receive);
+// payload.gives and payload.receives restate it. checkIntent(req) runs before the wallet is asked: the text must be
+// exactly that one exchange, for this wallet's own ledger account, on intents.near, ending at payload.deadline, and
+// what it gives must be what the request's leg summaries list; a server that misstates the message is refused here.
+// Privy wallet RPC body: {method: "signMessage", chain_type: "solana", params: {message: <base64 of the text>,
+// encoding: "base64"}}; the answer data.signature (base64 of 64 bytes, made over the text's bytes with no prefix) is
+// `signed`. React SDK equivalent (@privy-io/react-auth/solana useSignMessage): signMessage({message: bytes, wallet})
+// -> {signature: Uint8Array}; `signed` = base64 of it. The server verifies the signature against the wallet's key over
+// the exact bytes before anything else happens.
 
 const hex=v=>'0x'+BigInt(v).toString(16);
 const B64=/^[A-Za-z0-9+/]+={0,2}$/;
@@ -76,8 +88,54 @@ export function checkBatch(req){
  return true;
 }
 
+const refuseIntent=why=>Object.assign(TypeError(`near_intent refused: ${why}`),{code:'BATCH_REFUSED'});
+const B58='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+/** Hex of the 32 bytes a Solana address encodes (the ledger account its key owns), or null. */
+function addressHex(a){
+ if(typeof a!=='string'||!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a))return null;
+ let n=0n;for(const c of a)n=n*58n+BigInt(B58.indexOf(c));
+ const h=n.toString(16);
+ return h.length>64?null:h.padStart(64,'0');
+}
+const utf8Base64=text=>{const b=new TextEncoder().encode(text);let s='';for(const x of b)s+=String.fromCharCode(x);return btoa(s)};
+
+/** Throws (code BATCH_REFUSED) unless a near_intent request's message is exactly the one exchange it states: a single
+ * `token_diff` of `gives` (negative) and `receives` (positive) for the wallet's own ledger account on intents.near,
+ * ending at `deadline`, with the amounts given equal to the request's leg summaries. */
+export function checkIntent(req){
+ if(req?.kind!=='near_intent')throw refuseIntent('not a near_intent request');
+ const p=req.payload??{};
+ if(p.standard!=='raw_ed25519'||typeof p.message!=='string'||!p.message.length||p.message.length>4000)throw refuseIntent('message');
+ if(p.message_base64!==utf8Base64(p.message))throw refuseIntent('message_base64 is not the message');
+ let m;try{m=JSON.parse(p.message)}catch{throw refuseIntent('message is not JSON')}
+ const own=addressHex(req.wallet);
+ if(!own||m.signer_id!==own||p.signer_id!==own)throw refuseIntent('not the own ledger account of this wallet');
+ if(m.verifying_contract!=='intents.near'||p.verifying_contract!=='intents.near')throw refuseIntent('verifying contract');
+ if(Object.keys(m).sort().join()!=='deadline,intents,nonce,signer_id,verifying_contract'||typeof m.nonce!=='string')throw refuseIntent('message fields');
+ const end=Date.parse(m.deadline),ex=Date.parse(req.expires_at);
+ if(!Number.isFinite(end)||m.deadline!==p.deadline||!Number.isFinite(ex)||ex>end)throw refuseIntent('deadline');
+ const it=Array.isArray(m.intents)&&m.intents.length===1?m.intents[0]:null;
+ if(!it||it.intent!=='token_diff'||Object.keys(it).sort().join()!=='diff,intent'||!it.diff||typeof it.diff!=='object')throw refuseIntent('not one token_diff');
+ const gives=Array.isArray(p.gives)?p.gives:[],receives=Array.isArray(p.receives)?p.receives:[],want={};
+ if(!gives.length||!receives.length)throw refuseIntent('gives or receives');
+ for(const g of gives){if(!UINT.test(String(g?.amount_raw??''))||BigInt(g.amount_raw)===0n||want[g.token_id]!==undefined)throw refuseIntent('gives');want[g.token_id]=`-${g.amount_raw}`}
+ for(const r of receives){if(!UINT.test(String(r?.min_raw??''))||BigInt(r.min_raw)===0n||want[r.token_id]!==undefined)throw refuseIntent('receives');want[r.token_id]=String(r.min_raw)}
+ const ids=Object.keys(it.diff);
+ if(ids.length!==Object.keys(want).length||ids.some(id=>it.diff[id]!==want[id]))throw refuseIntent('the message is not the stated exchange');
+ const sums=Array.isArray(req.leg_summaries)?req.leg_summaries:[];
+ if(!sums.length||sums.length>5||!Array.isArray(req.legs)||req.legs.length!==sums.length||sums.some((s,i)=>s?.leg!==req.legs[i]||!UINT.test(String(s.amount_raw??''))||s.to!==own))throw refuseIntent('leg summaries');
+ const side=sums[0].side;
+ if(sums.some(s=>s.side!==side))throw refuseIntent('sides');
+ // a buy gives one asset for every leg together; a sell gives each leg's own coin
+ if(side==='buy'){if(gives.length!==1||receives.length!==sums.length||BigInt(gives[0].amount_raw)!==sums.reduce((a,s)=>a+BigInt(s.amount_raw),0n))throw refuseIntent('the amount given is not the total of the legs')}
+ else if(side==='sell'){if(receives.length!==1||gives.length!==sums.length||gives.some((g,i)=>BigInt(g.amount_raw)!==BigInt(sums[i].amount_raw)))throw refuseIntent('the amounts given are not those of the legs')}
+ else throw refuseIntent('side');
+ return true;
+}
+
 /** Every Privy wallet RPC body a sign request needs, in order (one, or two for a first evm_7702 basket). */
 export function privyRpcBodies(req){
+ if(req?.kind==='near_intent')checkIntent(req);
  if(req?.kind!=='evm_7702')return [privyRpcBody(req)];
  checkBatch(req);
  const a=req.payload.authorization,out=[];
@@ -115,6 +173,11 @@ export function privyRpcBody(req){
    to:p.to,data:p.data,value:hex(p.value),chain_id:Number(p.chainId),nonce:Number(p.nonce),type:2,
    gas_limit:hex(p.gas),max_fee_per_gas:hex(p.maxFeePerGas),max_priority_fee_per_gas:hex(p.maxPriorityFeePerGas)}}};
  }
+ if(req?.kind==='near_intent'){
+  const m=req.payload?.message_base64;
+  if(req.payload?.standard!=='raw_ed25519'||typeof m!=='string'||!B64.test(m))throw TypeError('near_intent payload needs message_base64');
+  return {method:'signMessage',chain_type:'solana',params:{message:m,encoding:'base64'}};
+ }
  if(req?.kind==='evm_7702')throw TypeError('evm_7702 needs privyRpcBodies (one or two wallet calls)');
  throw TypeError(`unknown sign request kind ${req?.kind}`);
 }
@@ -122,6 +185,7 @@ export function privyRpcBody(req){
 /** The React SDK argument for a sign request (useSignTransaction on the matching chain). `bytes` is a Uint8Array. */
 export function reactSdkArgs(req){
  if(req?.kind==='solana_tx')return {transaction:Uint8Array.from(atob(req.payload.transaction_base64),c=>c.charCodeAt(0))};
+ if(req?.kind==='near_intent')return {message:Uint8Array.from(atob(req.payload.message_base64),c=>c.charCodeAt(0))};
  if(req?.kind==='evm_tx'){const p=req.payload;
   return {to:p.to,data:p.data,value:hex(p.value),chainId:Number(p.chainId),nonce:Number(p.nonce),type:2,gasLimit:hex(p.gas),maxFeePerGas:hex(p.maxFeePerGas),maxPriorityFeePerGas:hex(p.maxPriorityFeePerGas)};
  }
@@ -141,6 +205,12 @@ export function signedFromWallet(req,answer){
   const s=a?.signed_transaction??a?.signature??a?.signedTransaction;
   if(typeof s!=='string'||!/^0x02[0-9a-fA-F]+$/.test(s))throw TypeError('no 0x02 signed transaction in the wallet answer');
   return s.toLowerCase();
+ }
+ if(req?.kind==='near_intent'){
+  const s=a?.signature;
+  if(s instanceof Uint8Array&&s.length===64)return btoa(String.fromCharCode(...s));
+  if(typeof s!=='string'||!/^[A-Za-z0-9+/]{86}==$/.test(s))throw TypeError('no 64-byte signature in the wallet answer');
+  return s;
  }
  throw TypeError(`unknown sign request kind ${req?.kind}`);
 }

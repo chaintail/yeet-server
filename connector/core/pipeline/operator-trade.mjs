@@ -123,7 +123,10 @@ export async function runUserSignedTrade({opts,wallet,env=process.env,emit=()=>{
  const sign={solana_tx:(w,r)=>Buffer.from(w.solana.signTransaction(Buffer.from(r.payload.transaction_base64,'base64'))).toString('base64'),
   // Base: the test wallet's secp256k1 key signs the payload exactly as given (sign only), like the card's Privy wallet.
   evm_tx:async(w,r)=>privateKeyToAccount(`0x${Buffer.from(w.base.privateKey()).toString('hex')}`).signTransaction(txFromPayload(r.payload)),
-  evm_7702:async(w,r)=>sign7702(privateKeyToAccount(`0x${Buffer.from(w.base.privateKey()).toString('hex')}`),r),...signers};
+  evm_7702:async(w,r)=>sign7702(privateKeyToAccount(`0x${Buffer.from(w.base.privateKey()).toString('hex')}`),r),
+  // Ledger route: the same wallet call the card makes (Solana signMessage over the message's bytes, no prefix), after
+  // the card's own check of the message (checkIntent inside privyRpcBodies).
+  near_intent:(w,r)=>{const [body]=privyRpcBodies(r);return signedFromWallets(r,[{data:{signature:Buffer.from(w.solana.signMessage(Buffer.from(body.params.message,'base64'))).toString('base64')}}])},...signers};
  emit({step:'start',mode:opts.broadcast?'broadcast':'dry_run',chain:opts.chain,side:opts.side,account:accountId,solana_wallet:wallet.solana.address,base_wallet:wallet.base.address,
   drivers:Object.fromEntries(Object.entries(p.drivers).map(([c,d])=>[c,d.readiness()]))});
 
@@ -135,6 +138,7 @@ export async function runUserSignedTrade({opts,wallet,env=process.env,emit=()=>{
  const x=await p.execute(ctx,{proposal_id:prop.proposal_id,revision:prop.revision,confirm:prop.confirm.code});
  emit({step:'executed',trade_id:x.trade_id,status:x.status,sign_requests:(x.sign_requests??[]).map(r=>({leg:r.leg,legs:r.legs??[r.leg],kind:r.kind,wallet:r.wallet,to:r.summary.to,amount_raw:r.summary.amount_raw,asset:r.summary.asset,expires_at:r.expires_at,
   ...(r.kind==='solana_tx'?{unsigned_bytes:Buffer.from(r.payload.transaction_base64,'base64').length}:{}),
+  ...(r.kind==='near_intent'?{message:r.payload.message,gives:r.payload.gives,receives:r.payload.receives,deadline:r.payload.deadline}:{}),
   ...(r.leg_summaries?{leg_summaries:r.leg_summaries.map(s=>({leg:s.leg,asset:s.asset,amount_raw:s.amount_raw,to:s.to}))}:{})}))});
  const results=[];
  for(const r of x.sign_requests??[]){
@@ -161,6 +165,12 @@ export async function runUserSignedTrade({opts,wallet,env=process.env,emit=()=>{
   }
  }
  for(const e of events.filter(e=>/refus|failed|expired|invalid/i.test(e)))emit({step:'event',line:e.slice(0,240)});
+ // Ledger route: a settled sell still sells the solver's coins and passes the surplus on; wait for that before the
+ // process ends.
+ if(opts.broadcast&&p.ledgerRoute){await p.ledgerRoute.idle();
+  // and one pass over the solver's leftover inventory (a trade that was sourced and not settled), capped per coin and day
+  const unload=await p.ledgerRoute.tick();await p.ledgerRoute.idle();if(Array.isArray(unload)&&unload.length)emit({step:'ledger_unload',coins:unload});
+  const lr=x.trade_id?p.ledgerRoute.row(x.trade_id):null;if(lr){const j=JSON.parse(lr.json);emit({step:'ledger',state:lr.state,user_ledger_account:lr.user_account,result:j.result??null,unload:j.unload?{state:j.unload.state??null,surplus:j.unload.surplus??null,reason:j.unload.reason??null}:null})}}
  p.tracker.stop?.();
  return {trade_id:x.trade_id,results,status};
 }

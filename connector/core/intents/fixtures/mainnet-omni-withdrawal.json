@@ -1,0 +1,54 @@
+{
+ "source": "NEAR mainnet transaction 7biSAtiJPQcoGb3evR1aouZChogem1YFqBmGyLiTH9Yj (2026-11-13T16:17:13Z), execute_intents on intents.near: a WIF withdrawal to Solana through omni.bridge.near. Public chain data, fetched with EXPERIMENTAL_tx_status.",
+ "signed": [
+  {
+   "payload": {
+    "message": "{\"deadline\":\"2026-11-13T16:19:12.634Z\",\"intents\":[{\"intent\":\"transfer\",\"receiver_id\":\"ca819c8e4f400435d0c8505b80e99467c9a61a57297998cb8877bc8b992d7908\",\"tokens\":{\"nep141:wrap.near\":\"2865329513034496051232\"}}],\"signer_id\":\"824ffeb7b8a5c11a96845503894731aa87bad638c186f91e8f730a0552e7d4c4\"}",
+    "nonce": "Vij2xgAlKBKzgBJftSSn5xiKKqgi7L0YRGxnemh9N1A=",
+    "recipient": "intents.near"
+   },
+   "public_key": "ed25519:9mgkRaK72eV8N9pyf7UddCEbm5Hzj3wE1UbzUKV9dmkw",
+   "signature": "ed25519:iuGCeK75u7UbYkB5M5tKbBD7YAkqYftsocKnrDB76VGmcpKN1VoxVNhuRqpDYsnLGj6zgpd7qwSkyLSme3ATP4f",
+   "standard": "nep413"
+  },
+  {
+   "payload": {
+    "message": "{\"deadline\":\"2026-12-13T16:45:34.736Z\",\"intents\":[{\"deposit_for_account_id\":\"efa590523355ba33fc4617c889a72663e56354dc0ec312e51bc6cdd9197e422a\",\"amount\":\"2865329513034496051232\",\"contract_id\":\"omni.bridge.near\",\"intent\":\"storage_deposit\"},{\"intent\":\"ft_withdraw\",\"token\":\"sol-b9c68f94ec8fd160137af8cdfe5e61cd68e2afba.omft.near\",\"receiver_id\":\"omni.bridge.near\",\"amount\":\"19716532\",\"msg\":\"{\\\"recipient\\\":\\\"sol:3pdbUF2a37ANMsnvCHK4PdtvHCnxobF81ULE3rht8mVq\\\",\\\"fee\\\":\\\"0\\\",\\\"native_token_fee\\\":\\\"2865329513034496051232\\\",\\\"external_id\\\":\\\"6cdbe483-3a8e-47f8-aa2a-959932a9dd19\\\"}\",\"min_gas\":\"37400000000000\"},{\"intent\":\"transfer\",\"receiver_id\":\"609214950ce11a0c38e0d562c8575285fc29770a86cd16259831ab009b1392c6\",\"tokens\":{\"nep141:sol-b9c68f94ec8fd160137af8cdfe5e61cd68e2afba.omft.near\":\"66402\"}}],\"signer_id\":\"ca819c8e4f400435d0c8505b80e99467c9a61a57297998cb8877bc8b992d7908\"}",
+    "nonce": "Vij2xgAlKBKzAMRBGf7d8BjlhT22+INCWZ5ysISacck=",
+    "recipient": "intents.near"
+   },
+   "public_key": "ed25519:EdVz5NEhF17qCWcYacq5VGAqGwaXHRvojUNNwfcHiX5Z",
+   "signature": "ed25519:2F5ErcYWjQiVRatyrJbKsxxjnvQ8rrXCnt8oWGXm3YZ93mtegqMTcmvwgrWbxBRWAjwbZobX14FM7cse7R2XpcFR",
+   "standard": "nep413"
+  }
+ ],
+ "intents_executed": [
+  {
+   "intent_hash": "C5jERjjQLoxzm8GUo7Urk5WKwk6m6GRaYPxuLyNzBbPx",
+   "account_id": "824ffeb7b8a5c11a96845503894731aa87bad638c186f91e8f730a0552e7d4c4",
+   "nonce": "Vij2xgAlKBKzgBJftSSn5xiKKqgi7L0YRGxnemh9N1A="
+  },
+  {
+   "intent_hash": "EvkUmULqympr9SdRwQfbLhnRz2v7NBJT4b6tqz2oY8XR",
+   "account_id": "ca819c8e4f400435d0c8505b80e99467c9a61a57297998cb8877bc8b992d7908",
+   "nonce": "Vij2xgAlKBKzAMRBGf7d8BjlhT22+INCWZ5ysISacck="
+  }
+ ],
+ "omni": {
+  "storage_account_id": "efa590523355ba33fc4617c889a72663e56354dc0ec312e51bc6cdd9197e422a",
+  "init_transfer_event": {
+   "origin_nonce": 835829,
+   "token": "near:sol-b9c68f94ec8fd160137af8cdfe5e61cd68e2afba.omft.near",
+   "amount": "19716532",
+   "recipient": "sol:3pdbUF2a37ANMsnvCHK4PdtvHCnxobF81ULE3rht8mVq",
+   "fee": {
+    "fee": "0",
+    "native_fee": "2865329513034496051232"
+   },
+   "sender": "near:intents.near",
+   "msg": "",
+   "destination_nonce": 608717,
+   "origin_transfer_id": null
+  }
+ }
+}

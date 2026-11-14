@@ -1,0 +1,44 @@
+{
+ "source": "Solana mainnet transaction, read 2026-11-13 with getTransaction; a USDC deposit into intents.near through the Omni bridge program",
+ "signature": "3fdso6JNkxjunpdsoeurz4tqmKxw413uEthm86ZbsZ6ZfvwxBc1qBsXavNRrEQUdA9k4CMtyBeU8vgZJMtYSbmN",
+ "block_time": 1794601017,
+ "program": "dahPEoZGXfyV58JqqH85okdHmpN8U2q8owgPUXSCPxe",
+ "accounts": [
+  "FvULawNPGBbuwYus74ECaQoV1oH9Tk6XPN7VPN51NYds",
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+  "54RsuULjsEFoCp1YPmXwRUvb2ThxzcSa5uUUojGD6ocD",
+  "DqsbPmbFoGfjfYiBzCEYqRN7phA6uYmbaTzfwBHA5pSP",
+  "6tckHFBpiJ8YgYN8FUskvtvTpXQZ55g5LHeo1kvELoDQ",
+  "HHEeXUsroHK69b9hVZeuFQVCCQ3KuZoUYXNx6Bw9fFxy",
+  "2iANpDh96GgithLPTVMZjZFtnbrYBUCLqnEvaytbwTQq",
+  "2yVjuQwpsvdsrywzsJJVs9Ueh4zayyo5DYJbBNc3DDpn",
+  "9bFNrXNb2WTx8fMHXCheaZqkLZ3YCCaiqTftHxeintHy",
+  "79nePUUxtfJSdrkbririgL5YMaoEh5g4HNQaar2EuJ7",
+  "4NKTVpUKP3Qn7nZtnZbuddr1CC8JYjqFhtEGDTsz4MKj",
+  "9WL2A89YBr6X47ABKYNzPentWiBA3H8tpaiuf5CaYHx6",
+  "SysvarC1ock11111111111111111111111111111111",
+  "SysvarRent111111111111111111111111111111111",
+  "worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth",
+  "11111111111111111111111111111111",
+  "EtZMZM22ViKMo4r5y4Anovs3wKQ2owUmDpjygnMMcdEX",
+  "HQS31aApX3DDkuXgSpV9XyDUNtFgQ31pUn5BNWHG2PSp",
+  "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+ ],
+ "signers": [
+  "9WL2A89YBr6X47ABKYNzPentWiBA3H8tpaiuf5CaYHx6",
+  "HHEeXUsroHK69b9hVZeuFQVCCQ3KuZoUYXNx6Bw9fFxy"
+ ],
+ "payload": {
+  "amount": "2999000000",
+  "recipient": "near:intents.near",
+  "fee": "0",
+  "native_fee": "124533",
+  "message": "a7c5e109aeeb54e01cf14edef5b3ccd7f43e305372cf9aff8c215a5d2299b395"
+ },
+ "data_hex": "ae3286637af3f3e0c01bc1b2000000000000000000000000110000006e6561723a696e74656e74732e6e6561720000000000000000000000000000000075e60100000000004000000061376335653130396165656235346530316366313465646566356233636364376634336533303533373263663961666638633231356135643232393962333935",
+ "compute_units": 57456,
+ "bridge_record": {
+  "initialised": 1794601017,
+  "finalised_on_near": 1794601085
+ }
+}

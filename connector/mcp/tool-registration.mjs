@@ -64,6 +64,12 @@ export function spinText(r){
  * top-level properties so the closed output schema still passes; the fields flow through once the contract lists them. */
 // yeet_home and the proposals carry `limits` (XP tier caps: tier, per_trade_usdc, daily_limit_usdc, left_today_usdc).
 const CUT_TO_CONTRACT=new Set(['yeet_overview','yeet_profile','daily_spin','yeet_home','yeet_propose','yeet_quote','skeet_propose']);
+/** Leaves out of `data.sign_requests` (in place) every request whose kind the output schema does not list. Returns data. */
+export function cutSignRequests(outputSchema,data){
+ const kinds=outputSchema?.properties?.sign_requests?.items?.properties?.kind?.enum;
+ if(Array.isArray(data?.sign_requests)&&Array.isArray(kinds))data.sign_requests=data.sign_requests.filter(r=>kinds.includes(r?.kind));
+ return data;
+}
 /** lucky_wheel and lucky_spin: one plain sentence for the model (the card reads structuredContent). */
 export function luckyText(r){
  const l=r?.lucky;
@@ -142,6 +148,11 @@ export function createMcpServer({token,callCore,env=process.env,staleness=proces
     // The signed hint for the trade page link (core account-login.mjs hintFor): card only, on the signer's page address.
     const hint=isObject&&typeof result.card_hint==='string'&&LINK_TOKEN.test(result.card_hint)?result.card_hint:undefined;
     const data=isObject?Object.fromEntries(Object.entries(result).filter(([k])=>k!=='confirm'&&k!=='guidance'&&k!=='card_account'&&k!=='card_hint'&&(!listed||listed.has(k)))):result;
+    // A sign request of a kind the pinned contract does not list yet (the ledger route's near_intent,
+    // docs/LEDGER-ROUTE.md) is left out, so the closed output schema still passes: the trade stays open and is
+    // approved on the YEET page, which reads its requests from core directly. Once the contract lists the kind the
+    // request flows through. Every kind of the chain route is listed: nothing of it is ever cut.
+    if(isObject)cutSignRequests(schemas.output,data);
     // Agent guidance (guidance.mjs): for the model, in structuredContent (the card ignores it) and in the text it reads.
     const own=isObject?guidanceFor(name,data,ctx):undefined;
     const guidance=tellRefresh&&isObject?withRefresh(refreshGuidance(),own):own;

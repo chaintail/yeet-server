@@ -40,6 +40,11 @@ import {WALLET_CHAIN,CHAINS} from './driver-interface.mjs';
 import {createFunding,forcedBuyChain,chainPaused,NETWORK} from './funding.mjs';
 import {xpRuntime} from '../xp/xp.mjs';
 import {averageCost} from '../trade/pnl.mjs';
+import {ledgerConfig} from '../ledger-route/config.mjs';
+import {createLedgerRoute,ledgerBalances} from '../ledger-route/route.mjs';
+import {createSolver,loadSolverKey} from '../ledger-route/solver.mjs';
+import {createNearRpc,createVerifier} from '../intents/verifier.mjs';
+import {NEAR_RPC_URLS} from '../intents/constants.mjs';
 
 export const PREVIEW_STALE_MS=60_000;
 export const PRICE_TTL_MS=5*60_000;
@@ -68,7 +73,7 @@ const chainEnv=(env,name)=>{const v=env[name]?.trim()||'sol';if(!CHAINS.includes
 export function createPipeline({db,env=process.env,client,wallets,directory,balances,drivers,ledger,catalog=CATALOG,now=Date.now,fetch=globalThis.fetch,didFor,
  onSettled,trackerIntervalMs=5000,log=line=>console.log(line),driverOverrides,liveBroadcast=true,
  landingPollMs=1000,landingWatchMs=60_000,landingWatchMax=200,sleep=ms=>new Promise(r=>{const h=setTimeout(r,ms);h.unref?.()}),
- xpOf=id=>xpRuntime(env).total(id)}){
+ xpOf=id=>xpRuntime(env).total(id),ledgerOverrides}){
  const limits=limitsFromEnv(env);
  /** The account's XP for the tier caps (limits.mjs); an unreadable XP store counts as 0 XP (Noob, the lowest caps). */
  const xpTotal=id=>{try{const n=Number(xpOf(id));return Number.isFinite(n)?n:0}catch{return 0}};
@@ -78,6 +83,19 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
  const event=e=>{try{log(JSON.stringify(e))}catch{}};
  client??=new OneClickClient({jwt:env.ONECLICK_JWT||undefined,timeoutMs:6000,retryDelayMs:500,fetch:statusTolerantFetch(fetch)});
  balances??=createRpcBalances({baseRpcUrl:env.BASE_RPC_URL,solanaRpcUrl:env.SOLANA_RPC_URL,fetch});
+ // The ledger route (docs/LEDGER-ROUTE.md, ledger-route/): off unless YEET_ROUTE=ledger or YEET_LEDGER_ACCOUNTS names an
+ // account; then its settings must be complete or this throws. `ledgerRoute` stays null while it is off, and every
+ // use below is behind it, so the chain route runs exactly as before. An account on the ledger route has its
+ // spendable USDC and its coins read from its own ledger account.
+ const ledgerCfg=ledgerConfig(env);
+ let ledgerRoute=null,ledgerVerifier=null,ledgerRpc=null;
+ if(ledgerCfg.enabled){
+  ledgerRpc=ledgerOverrides?.rpc??createNearRpc({urls:ledgerCfg.nearRpc?[ledgerCfg.nearRpc,...NEAR_RPC_URLS]:NEAR_RPC_URLS,fetch});
+  ledgerVerifier=ledgerOverrides?.verifier??createVerifier({rpc:ledgerRpc});
+  const byAddress=db.prepare('SELECT account_id FROM wallets WHERE address=? OR lower(address)=lower(?)');
+  balances=ledgerBalances(balances,{verifier:ledgerVerifier,catalog,
+   isLedgerAddress:address=>ledgerCfg.route==='ledger'||byAddress.all(address,address).some(r=>ledgerCfg.accounts.has(r.account_id))});
+ }
  directory??=walletDirectoryFromEnv({env,fetch,didFor});
  wallets??=createWallets({db,directory,balances,now});
  ledger??=createLedger({db,now,sponsorLimits:readSponsorshipLimits(env),log:l=>event(JSON.parse(l))});
@@ -94,10 +112,15 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   const low=view.chosen===null&&(forced?bal[forced]!==null:known&&funding.open().some(c=>bal[c]!==null));
   return {funding:view,lands_on:'solana',low};
  };
- const proposals=createProposals({db,client,limits,wallets,codes,now,catalog,xpOf:xpTotal,routeOf});
+ const proposals=createProposals({db,client,limits,wallets,codes,now,catalog,xpOf:xpTotal,routeOf,
+  // An account on the ledger route is quoted the ledger's own amounts (null: the chain route's quotes, as before).
+  clientFor:accountId=>ledgerRoute?.handles(accountId)?ledgerRoute.previewClient:null});
  const tracker=createTracker({db,client,now,onSettled,intervalMs:trackerIntervalMs,trackMaxHours:limits.trackMaxHours,accounting:{raiseAlert:a=>ledger.raiseAlert(a),
   // Review finding 2: held BUY amounts return to the daily cap only after the deposit deadline, on 1Click's word.
-  async tick(){await ledger.releaseDue((addr,memo)=>client.status(addr,memo));for(const d of Object.values(drivers))try{await d.accountingTick?.()}catch(e){event({event:'accounting_tick_failed',chain:d.chain,error:String(e?.message??e).slice(0,120)})}}}});
+  async tick(){await ledger.releaseDue((addr,memo)=>client.status(addr,memo));
+   // Not awaited: it resumes interrupted ledger runs and sells leftover solver inventory, which can take minutes.
+   ledgerRoute?.tick().catch(e=>event({event:'ledger_tick_failed',error:String(e?.message??e).slice(0,120)}));
+   for(const d of Object.values(drivers))try{await d.accountingTick?.()}catch(e){event({event:'accounting_tick_failed',chain:d.chain,error:String(e?.message??e).slice(0,120)})}}}});
  const trade=id=>db.prepare('SELECT * FROM trades WHERE id=?').get(id);
  const legsOf=id=>db.prepare('SELECT * FROM trade_legs WHERE trade_id=? ORDER BY idx').all(id);
  const legOf=(id,idx)=>db.prepare('SELECT * FROM trade_legs WHERE trade_id=? AND idx=?').get(id,idx);
@@ -141,6 +164,7 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
  /** Sign requests for every leg awaiting a signature: the open attempt while it is valid (one request per attempt,
   * however many legs it pays), else new ones (attempt n+1) for the uncovered legs. */
  async function signRequests(t){
+  if(ledgerRoute?.owns(t.id))return ledgerRoute.signRequests(t);
   const out=[],chain=t.origin_chain,seen=new Set(),uncovered=[];
   if(!chain)return out;
   for(const l of legsOf(t.id).filter(l=>l.send_status==='awaiting_signature')){
@@ -162,7 +186,7 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   return out.sort((x,y)=>x.leg-y.leg);
  }
  const legView=(t,l)=>({symbol:l.symbol,deposit_address:l.deposit_address,tx_hash:l.send_status==='sent'||l.send_status==='signing'?l.tx_hash??null:null,
-  explorer_url:explorer(t.origin_chain,l.send_status==='sent'?l.tx_hash:null),status:l.send_status});
+  explorer_url:ledgerRoute?.owns(t.id)?ledgerRoute.explorerUrl(l.send_status==='sent'?l.tx_hash:null):explorer(t.origin_chain,l.send_status==='sent'?l.tx_hash:null),status:l.send_status});
  /** The execute_trade answer for a stored trade (also what a replayed code gets). */
  /** Contract `funded_from` / `lands_on` of a trade (tracker.networksOf); nothing for a trade without legs. */
  const networksOf=t=>t?.receipt_json?tradeNetworks(t):{};
@@ -224,6 +248,7 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
  async function recoverTrade(tradeId){
   if(inFlight.has(tradeId))return false;
   const t=trade(tradeId);if(!t||!t.origin_chain)return false;
+  if(ledgerRoute?.owns(tradeId))return ledgerRoute.recover(tradeId);
   const open=legsOf(tradeId).filter(l=>OPEN_LEG.includes(l.send_status)||(l.send_status==='sent'&&!l.deposit_submitted));
   if(!open.length)return false;
   inFlight.add(tradeId);
@@ -250,6 +275,18 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   return true;
  }
  tracker.useRecovery(id=>recoverTrade(id));
+ if(ledgerCfg.enabled){
+  const solver=createSolver({cfg:ledgerCfg,near:ledgerOverrides?.near??loadSolverKey({accountId:ledgerCfg.solverAccount,keyFile:ledgerCfg.solverKeyFile}),rpc:ledgerRpc,verifier:ledgerVerifier,client,db,now,
+   // its own timers (not the landing watcher's unref'd `sleep`): a run that is waiting must keep the process alive
+   ...(ledgerOverrides?.sleep?{sleep:ledgerOverrides.sleep}:{}),log:event,...(ledgerOverrides?.pollMs!==undefined?{pollMs:ledgerOverrides.pollMs}:{})});
+  // The gate of a ledger trade is the account's alone (kill switch, YEET_LIVE, YEET_LIVE_ACCOUNTS): no network's pause.
+  const ledgerPaused=t=>{try{gateFor(null)(t.account_id);return null}catch(e){return e?.detail??'paused'}};
+  ledgerRoute=createLedgerRoute({db,cfg:ledgerCfg,verifier:ledgerVerifier,solver,client,catalog,now,log:event,signWindowMs:SIGN_WINDOW_MS,
+   ...(ledgerOverrides?.unloadWaitMs!==undefined?{unloadWaitMs:ledgerOverrides.unloadWaitMs}:{}),
+   hooks:{trade,legsOf,settle:(id,lastError)=>settle(id,lastError),refresh:id=>{try{tracker.refresh(id)}catch(e){ledger.note(id,`refresh: ${e?.message}`)}},
+    apply:(id,idx,res)=>tracker.apply(id,idx,res),legNotSent:(id,idx,evidence)=>ledger.legNotSent(id,idx,evidence),raiseAlert:a=>ledger.raiseAlert(a),
+    note:(id,message)=>ledger.note(id,message),paused:ledgerPaused,gate:accountId=>gateFor(null)(accountId)}});
+ }
 
  async function replay(tradeId){await recoverTrade(tradeId);return answer(tradeId)}
  const existingTrade=proposalId=>db.prepare("SELECT id FROM trades WHERE proposal_id=? AND status<>'requote_required' ORDER BY created_at DESC LIMIT 1").get(proposalId)?.id;
@@ -278,15 +315,18 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   if(code.used)return replay(code.trade_id);
   const p=proposals.row(proposal_id);
   // A BUY without an override has no network yet (null): it is chosen below from the person's balances.
-  const fixed=opts.chain??(p.direction==='yeet'?funding.forced():sellChain);
+  // The ledger route for this account (null: the chain route). A ledger trade is recorded with origin_chain 'sol'
+  // (the person's Solana key owns their ledger account) and is told apart by its ledger_trade row.
+  const led=!opts.chain&&ledgerRoute?.handles(ctx.accountId)?ledgerRoute:null;
+  const fixed=led?'sol':opts.chain??(p.direction==='yeet'?funding.forced():sellChain);
   let chain=fixed;
   checkKillSwitch(limits);
-  gateFor(fixed)(ctx.accountId);
+  gateFor(led?null:fixed)(ctx.accountId);
   if(p.status!=='proposed'||p.revision!==revision){const prior=existingTrade(p.id);if(prior)return replay(prior);refuse('CONFIRMATION_REQUIRED','revision is not current')}
   const legs=proposals.legsOf(p.id,revision);
   if(quoteHash(p.id,revision,legs)!==code.quote_sha256)refuse('CONFIRMATION_REQUIRED','quote changed');
   const readyOrRefuse=c=>{const d=driverOf(c),ready=d.readiness();if(!ready.ok)refuse('TEMPORARILY_UNAVAILABLE',`driver ${c}: ${ready.reasons.join(',')}`);return d};
-  if(fixed)readyOrRefuse(fixed);
+  if(fixed&&!led)readyOrRefuse(fixed);
   const w=await wallets.require(ctx.accountId);
   const total=legs.reduce((a,l)=>a+BigInt(l.amount_in_raw),0n);
   let held;
@@ -304,9 +344,11 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
     event({event:'buy_chain_chosen',chain,base_usdc:f.balances.base?.toString()??null,sol_usdc:f.balances.sol?.toString()??null,total:total.toString()});
    }
   }else held=await wallets.holdings(w.solana.address);
-  const driver=readyOrRefuse(chain);
-  const live=await livePlan({direction:p.direction,legs,w,chain,slippageBps:p.slippage_bps,client,now,catalog});
-  assertLivePlan({direction:p.direction,chain,live,legs,w,catalog});
+  const driver=led?led.driver:readyOrRefuse(chain);
+  // Ledger: the balance checks above and below read the person's ledger account (ledgerBalances); the plan is the
+  // solver's firm sourcing quotes, checked by the route itself (its own account, bounds and float).
+  const live=led?await led.livePlan({direction:p.direction,legs,w,slippageBps:p.slippage_bps}):await livePlan({direction:p.direction,legs,w,chain,slippageBps:p.slippage_bps,client,now,catalog});
+  if(!led)assertLivePlan({direction:p.direction,chain,live,legs,w,catalog});
   if(p.direction==='skeet')for(const [i,l] of live.legs.entries()){
    const mint=proposals.mintOf(l.origin.symbol),have=held.filter(h=>h.mint===mint).reduce((a,h)=>a+h.raw,0n);
    if(have<BigInt(legs[i].amount_in_raw))refuse('BALANCE_LOW');
@@ -333,10 +375,11 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
     ins.run(tradeId,l.index,l.symbol,l.amountIn,l.depositAddress,l.depositMemo??null,JSON.stringify(l),'awaiting_signature',JSON.stringify(receiptLeg(l)),t,driver.kind);
     appendEvent(db,{tradeId,legIdx:l.index,kind:'leg',from:null,to:'awaiting_signature',evidence:{amount_in_raw:l.amountIn,deposit_address:l.depositAddress,correlation_id:l.correlationId??null},at:t});
    }
+   if(led)led.commit({tradeId,accountId:ctx.accountId,wallet:w.solana.address,live,at:t});
    return true;
   });
   if(!committed)return replay(codes.check({code:confirm,accountId:ctx.accountId,clientId:ctx.clientId,proposalId:proposal_id,revision}).trade_id);
-  event({event:'trade_committed',trade:tradeId,direction:p.direction,chain,legs:live.legs.length});
+  event({event:'trade_committed',trade:tradeId,direction:p.direction,chain,legs:live.legs.length,...(led?{route:'ledger'}:{})});
   // Sign requests: on Solana one transaction for the whole basket when it fits (one signature), else one per leg; on
   // Base one 7702 batch when eligible, else one per leg. A leg whose request cannot be built never moved funds: not_sent, amount back to the cap.
   const tRow=trade(tradeId);let lastError;
@@ -359,13 +402,19 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
  /** submit_trade_signature: the person's signed bytes for one attempt. */
  async function submit(ctx,{trade_id,leg,attempt_id,signed},{dryRun=false}={}){
   const t=owned(ctx,trade_id);
+  let r;
+  if(ledgerRoute?.owns(t.id)){
+   // The person's approval of the trade's one message: the route checks it, stores it and settles in the background.
+   inFlight.add(t.id);
+   try{r=await ledgerRoute.submit({trade:t,leg,attemptId:attempt_id,signed,dryRun,accountId:ctx.accountId,wallet:await walletOf(t,'sol')})}
+   finally{inFlight.delete(t.id)}
+  }else{
   const a=ledger.attempt(attempt_id);
   if(!a||a.trade_id!==t.id||a.leg_idx!==leg||a.account_id!==ctx.accountId)refuse('INVALID_ARGUMENT','unknown attempt');
   const l=legOf(t.id,leg),d=driverOf(a.chain);
   const wallet=await walletOf(t,a.chain);
   if(wallet!==a.wallet)refuse('INVALID_ARGUMENT','the attempt is for another wallet');
   const covered=ledger.legsOfAttempt(a);
-  let r;
   inFlight.add(t.id);
   try{r=await d.submit({trade:t,leg:l,wallet,attemptId:attempt_id,signed,dryRun,now:now()});
    if(r.state==='sent')for(const i of covered)await depositSubmit(t,i)}
@@ -373,6 +422,7 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   // Sent but not yet landed (Solana answers `pending` after the broadcast): watch this attempt and tell 1Click the
   // moment it lands, instead of on the next tracker pass.
   if(!dryRun&&r.state==='pending'&&r.txHash&&d.recoverAttempt)watchLanding(t,covered,attempt_id,d);
+  }
   if(!dryRun){settle(t.id);try{tracker.refresh(t.id)}catch(e){ledger.note(t.id,`refresh: ${e?.message}`)}}
   event({event:'signature_submitted',trade:t.id,leg,attempt:attempt_id.slice(0,12),state:r.state,dry_run:dryRun});
   const fresh=r.state==='expired'?await signRequests(trade(t.id)):[];
@@ -393,7 +443,8 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   const open=legs.filter(l=>l.send_status==='awaiting_signature');
   if(!open.length)return view({cancelled:false,reason:`nothing to cancel (trade ${t.status})`});
   const note=typeof reason==='string'&&reason.trim()?reason.trim().slice(0,200):null;
-  for(const l of open)ledger.legNotSent(tradeId,l.idx,{reason:'operator cancel: never signed',operator_note:note,stage:'cancel'});
+  if(ledgerRoute?.owns(tradeId))ledgerRoute.close(tradeId,{reason:'operator cancel: never signed',operator_note:note,stage:'cancel'});
+  else for(const l of open)ledger.legNotSent(tradeId,l.idx,{reason:'operator cancel: never signed',operator_note:note,stage:'cancel'});
   settle(tradeId);
   try{tracker.refresh(tradeId)}catch{}
   return view({cancelled:true});
@@ -410,6 +461,8 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
 
  return {
   limits,wallets,proposals,tracker,codes,ledger,drivers,buyChain,sellChain,catalog,funding,
+  /** The ledger route (ledger-route/route.mjs), or null while it is off. */
+  ledgerRoute,
   /** The trade database, read only by the leaderboards (core/xp/boards.mjs over trade/pnl.mjs). */
   db,
   /** The person's average YEET price per held coin, from settled legs (trade/pnl.mjs): Map(symbol -> USD per coin). */

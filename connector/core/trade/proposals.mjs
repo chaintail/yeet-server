@@ -27,7 +27,7 @@ export async function routed(fn){
 /** Hash of what a confirm code approves: proposal, revision and each leg's coin, exact input and minimum output. */
 export const quoteHash=(proposalId,revision,legs)=>sha256({proposalId,revision,legs:legs.map(l=>({symbol:l.symbol,asset:l.asset_id,in:l.amount_in_raw,min:l.dry_min_out_raw}))});
 
-export function createProposals({db,client,limits,wallets,codes,now=Date.now,catalog=CATALOG,xpOf,routeOf}){
+export function createProposals({db,client,limits,wallets,codes,now=Date.now,catalog=CATALOG,xpOf,routeOf,clientFor}){
  // routeOf(w, direction, amountRaw) -> {funding?, lands_on, low?} (the pipeline, funding.mjs): the person's USDC on
  // both networks, the network that pays this YEET, and where the result lands. Without it (old engine) a YEET is
  // checked against USDC on Base alone and the proposal carries neither field.
@@ -39,7 +39,9 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
  const coin=symbol=>{const t=findToken(symbol,'solana',catalog);if(!t||t.kind==='funding')refuse('COIN_NOT_SUPPORTED',symbol);return t};
  const legsOf=(id,revision)=>db.prepare('SELECT * FROM proposal_legs WHERE proposal_id=? AND revision=? ORDER BY idx').all(id,revision);
  const row=id=>db.prepare('SELECT * FROM proposals WHERE id=?').get(id);
- const deps=()=>({client,catalog,now:()=>new Date(now())});
+ // clientFor(accountId) -> the 1Click client that quotes this account's previews, or null for the default one (the
+ // pipeline: an account on the ledger route is quoted the ledger's amounts).
+ const deps=accountId=>({client:(accountId!==undefined&&clientFor?.(accountId))||client,catalog,now:()=>new Date(now())});
 
  function validateYeetLegs(legs){
   checkLegCount(limits,legs?.length);
@@ -131,8 +133,8 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
   return row(id);
  }
 
- async function yeetPlan(w,amount,legs,slippage){
-  return routed(()=>buildYeetPlan({amountUsdc:amount,legs:legs.map(l=>({symbol:l.symbol,parts:l.parts})),recipientSol:w.solana.address,refundBase:w.base.address,slippageBps:slippage,dry:true},deps()));
+ async function yeetPlan(w,amount,legs,slippage,accountId){
+  return routed(()=>buildYeetPlan({amountUsdc:amount,legs:legs.map(l=>({symbol:l.symbol,parts:l.parts})),recipientSol:w.solana.address,refundBase:w.base.address,slippageBps:slippage,dry:true},deps(accountId)));
  }
  async function skeetLegs(w,legs){
   checkLegCount(limits,legs?.length);
@@ -147,8 +149,8 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
    return {symbol:t.symbol,percent:l.percent,amount:formatUnits(raw,t.decimals)};
   });
  }
- async function skeetPlan(w,legs,slippage){
-  const plan=await routed(()=>buildSkeetPlan({legs:legs.map(l=>({symbol:l.symbol,amount:l.amount})),recipientBase:w.base.address,refundSol:w.solana.address,slippageBps:slippage,dry:true},deps()));
+ async function skeetPlan(w,legs,slippage,accountId){
+  const plan=await routed(()=>buildSkeetPlan({legs:legs.map(l=>({symbol:l.symbol,amount:l.amount})),recipientBase:w.base.address,refundSol:w.solana.address,slippageBps:slippage,dry:true},deps(accountId)));
   if(plan.legs.some(l=>BigInt(l.amountOut)<limits.minLegRaw))refuse('AMOUNT_TOO_SMALL','skeet leg under minimum');
   return plan;
  }
@@ -178,7 +180,7 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
    checkBasket(limits,legShares(total,legs),capsOf(ctx.accountId));
    checkDaily(db,limits,ctx.accountId,now(),total,xp(ctx.accountId));
    const w=await wallets.require(ctx.accountId);
-   const plan=await yeetPlan(w,amount_usdc,legs,slippage);
+   const plan=await yeetPlan(w,amount_usdc,legs,slippage,ctx.accountId);
    const rows=legRows(plan);
    checkCost(limits,legsCost(rows));
    const p=store(ctx,{request_id,hash,direction:'yeet',amountInRaw:total,slippage,legs:rows});
@@ -193,7 +195,7 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
    if(existing)return present(existing,existing.revision,ctx,await wallets.resolve(ctx.accountId));
    const w=await wallets.require(ctx.accountId);
    const amounts=await skeetLegs(w,legs);
-   const plan=await skeetPlan(w,amounts,100);
+   const plan=await skeetPlan(w,amounts,100,ctx.accountId);
    const rows=legRows(plan,{percents:amounts.map(l=>l.percent)});
    checkCost(limits,legsCost(rows));
    const p=store(ctx,{request_id,hash,direction:'skeet',amountInRaw:0n,slippage:100,legs:rows});
@@ -215,11 +217,11 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
     total=amountRaw(amount);
     checkBasket(limits,legShares(total,nextLegs),capsOf(ctx.accountId));
     checkDaily(db,limits,ctx.accountId,now(),total,xp(ctx.accountId));
-    rows=legRows(await yeetPlan(w,amount,nextLegs,p.slippage_bps));
+    rows=legRows(await yeetPlan(w,amount,nextLegs,p.slippage_bps,ctx.accountId));
    }else{
     if(legs!==undefined||amount_usdc!==undefined)refuse('INVALID_ARGUMENT','a SKEET quote takes no new legs or amount');
     const amounts=await skeetLegs(w,prev.map(l=>({symbol:l.symbol,percent:l.percent})));
-    rows=legRows(await skeetPlan(w,amounts,p.slippage_bps),{percents:amounts.map(l=>l.percent)});
+    rows=legRows(await skeetPlan(w,amounts,p.slippage_bps,ctx.accountId),{percents:amounts.map(l=>l.percent)});
    }
    checkCost(limits,legsCost(rows));
    const revision=p.revision+1;

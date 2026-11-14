@@ -8,6 +8,8 @@ import {secret,equal,read,write,port,TEST,DEV_APP_ID} from '#shared/common.mjs';
 import {coins} from './coins.mjs';
 import {unavailable,failure,withUserMessage} from './failure.mjs';
 import {tradeEngine,onTradeSettled} from './trade/runtime.mjs';
+import {ledgerConfig} from './ledger-route/config.mjs';
+import {loadSolverKey} from './ledger-route/solver.mjs';
 import {xpRuntime,p2On,homeXp,homeXpKeys,checkSpinTable} from './xp/xp.mjs';
 import {createAvailability,quoteProbe} from './xp/availability.mjs';
 import {z} from 'zod';
@@ -27,6 +29,10 @@ import {hasScope} from '#scope-catalog';
 const devStub=TEST&&process.env.DEV_IDENTITY_STUB==='1';
 if(process.env.PRIVY_LOGIN==='1'&&devStub)throw Error('Identity modes must be separate');
 if(process.env.PRIVY_LOGIN!=='1'&&!devStub)throw Error('No identity verifier configured');
+// The ledger route (docs/LEDGER-ROUTE.md) is checked at start, not at the first trade: with YEET_ROUTE=ledger or an account
+// in YEET_LEDGER_ACCOUNTS, a missing or malformed solver setting, or a key file that is absent or belongs to another
+// account, stops the core here. With the route off (the default) nothing is read.
+{const ledger=ledgerConfig(process.env);if(ledger.enabled)loadSolverKey({accountId:ledger.solverAccount,keyFile:ledger.solverKeyFile})}
 initializeIdentityStore({app:process.env.PRIVY_LOGIN==='1'?process.env.PRIVY_APP_ID:DEV_APP_ID});
 const user=id=>account(id);
 // XP (lane E, YEET_P2=1): trade settlement pays through the tracker's onSettled hook; read per event so the flag is live.
