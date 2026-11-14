@@ -134,3 +134,24 @@ test('landedWheel swaps the drawn value onto the drawn coin',()=>{
  assert.deepEqual(landedWheel(w,'A',5),{wheel:[{coin:'A',xp:5},{coin:'B',xp:2},{coin:'C',xp:0}],slice:0});
  assert.deepEqual(landedWheel(w,'B',40),{wheel:[{coin:'A',xp:0},{coin:'B',xp:40},{coin:'C',xp:5}],slice:1});
 });
+
+test('another account: its spin id is refused, nothing of it is written or revealed',()=>{
+ const {l,spin}=setup();
+ const a=spin.fairNext('a');
+ assert.throws(()=>spin.spin('b',undefined,{client_seed:SEED,spin_id:a.spin_id}),e=>e.code==='INVALID_ARGUMENT');
+ assert.equal(row(l,a.spin_id).client_seed,null,'a\'s commitment is still open');
+ assert.equal(n(l,"SELECT COUNT(*) n FROM xp_event WHERE identity_id='b'"),0);
+ const b=spin.spin('b');assert.notEqual(b.fair.spin_id,a.spin_id);assert.notEqual(b.fair.server_seed,row(l,a.spin_id).server_seed);
+ const s=spin.spin('a',undefined,{client_seed:SEED,spin_id:a.spin_id});assert.equal(s.fair.client_seed_by,'card');
+});
+
+test('switched back off the same day: a repeat shows the stored fair draw and wheel, with no fair fields',()=>{
+ const now=fakeClock(Date.parse('2026-11-01T09:00:00.000Z'));const l=openLedger(':memory:',{now});
+ const on=createSpin({ledger:l,secret:SECRET,fair:true});
+ const f=on.fairNext('a');const s=on.spin('a',undefined,{client_seed:SEED,spin_id:f.spin_id});
+ const off=createSpin({ledger:l,secret:SECRET,fair:false});
+ const r=off.spin('a');
+ assert.equal('fair' in r,false);assert.equal('fair_next' in r,false);
+ assert.equal(r.draw_xp,s.draw_xp);assert.equal(r.xp_won,s.xp_won);assert.equal(r.streak_xp,s.streak_xp);
+ assert.deepEqual(r.wheel,s.wheel);assert.equal(r.slice,s.slice);
+});

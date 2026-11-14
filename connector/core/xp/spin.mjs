@@ -107,7 +107,9 @@ export function createSpin({ledger,secret,coins,fair=false}){
  const openGrants=(who,day)=>db.prepare('SELECT id,reason FROM xp_spin_grant WHERE identity_id=? AND day=? AND used_at IS NULL ORDER BY created_at,id').all(who,day);
  // ---- fair wheel (YEET_FAIR_WHEEL=on, docs/WHEEL-STAMPS.md "Fair wheel") ----
  const fairOn=()=>fair&&ready();
- const fairRow=(who,key)=>fair?db.prepare('SELECT * FROM xp_fair_spin WHERE identity_id=? AND spin_key=?').get(who,key):undefined;
+ // A server switched back off still reads the fair spins it stored, so a repeat shows the stored draw and wheel (no fair fields).
+ const fairTable=fair||!!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='xp_fair_spin'").get();
+ const fairRow=(who,key)=>fairTable?db.prepare('SELECT * FROM xp_fair_spin WHERE identity_id=? AND spin_key=?').get(who,key):undefined;
  const usedRow=(who,key)=>{const r=fairRow(who,key);return r&&r.client_seed!==null?r:null};
  const outcomeOf=r=>fairOutcome({serverSeed:r.server_seed,clientSeed:r.client_seed,spinId:r.spin_id,coins:JSON.parse(r.coins),weights:BONUS_TABLE});
  const reveal=(r,o)=>({version:FAIR_VERSION,spin_id:r.spin_id,commitment:r.commitment,server_seed:r.server_seed,client_seed:r.client_seed,
@@ -169,7 +171,7 @@ export function createSpin({ledger,secret,coins,fair=false}){
    ...(fr?landedWheel(JSON.parse(fr.layout),stamp.coin,parts.draw_xp):wheelFor(secret,who,seedDay,stamps.coins,stamp.coin,parts.draw_xp)),
    stamp:spinStamp(stamp),set_bonus_xp:Number(stamp.set_bonus_xp),
    stamps:stamps.list(who),sets_completed:stamps.setsCompleted(who),...left(who,day),
-   ...(fr?{fair:reveal(fr,outcomeOf(fr))}:{}),...(fair?{fair_next:fairNextIn(who,day,ledger.iso())}:{})};
+   ...(fr&&fair?{fair:reveal(fr,outcomeOf(fr))}:{}),...(fair?{fair_next:fairNextIn(who,day,ledger.iso())}:{})};
  }
  /** A stored spin's XP parts: the draws are deterministic, so they are recomputed; the XP is the stored row. */
  function parts(who,day,key,reason){
