@@ -543,7 +543,7 @@ const BRAND={"logo":{"box":"-40 180 4256 820","d":"M84 990Q45 990,16 984Q-12 979
 const WheelCard=(()=>({logic:{normalizeSpin:()=>null,normalizeLucky:()=>null}}))(window); // src/wheel-card.js: the daily wheel (views home and wheel) and the lucky wheel (view lucky)
 const SIGNING=(()=>null)(null);   // src/trade-signing.js over src/vendor/wallet-request.mjs
 const signerCfg={"app_id":null,"script":null,"page":null};  // {app_id,script,page}: build-time; a result's _meta['yeet/signer'] overrides
-const BUILD="b1cd0c9a3021ad313f87a773de536ac8bf0c17c5";     // the yeet-win commit this template was built from; null for a local build
+const BUILD="c671cc59f542825e7e0704b98995737fb538929f";     // the yeet-win commit this template was built from; null for a local build
 const APP={"manage_url":"https://chatgpt.com/plugins","refresh_label":"Refresh YEET in ChatGPT","refresh_steps":"open YEET there, select Refresh, then start a new chat"};         // {manage_url,refresh_label,refresh_steps}: where the person refreshes the app in ChatGPT
 const CONFIRM_KEY='yeet/confirm',SIGNER_KEY='yeet/signer',BUILD_KEY='yeet/build',FAILURE_KEY='yeet/failure';
 const POLL_MS=5000,POLL_MAX=360,SKEW_MS=2000,MAX_PARTS=99,AMOUNT_MAX=25,MORE_USDC='5';
@@ -1884,20 +1884,21 @@ function qrPath(code, quiet = 4) {
 
 return {qrCode,qrPath};})();           // src/vendor/qr.mjs: {qrCode,qrPath}
 const FUND_POLL_MS=10000,FUND_POLLS=30,FUND_POLLS_SEND=60,FUND_POLLS_TRACK=180,DEPOSIT_KEY='yeet/deposit';
-const TRACK_STEPS={waiting:'Waiting for your deposit',found:'Deposit found',preparing:'Getting it ready to trade',ready:'Ready'};
+const TRACK_STEPS={waiting:'Waiting for your deposit',detected:'Detected',found:'Deposit found',preparing:'Getting it ready to trade',ready:'Ready'};
+const DETECTED_SAID='Deposit detected. It will be ready to trade shortly.';
 const FUND_WAYS=['crypto','card'];
 const DEPOSIT_NETS={solana:['Solana',/^[1-9A-HJ-NP-Za-km-z]{32,44}$/],base:['Base',/^0x[0-9a-fA-F]{40}$/]};
 let fundPick=null,fundWatch=0,fundTimer=null,fundBusy=false,fundGot=null;
 let fundView,fundDeposit=null,fundNet=null,fundCopied=null,fundCopyTimer=null,fundSeen=null,fundLate=false,fundOther=null;
 /** The ways to add money this account can use: `methods` when the server names them, else both. */
 const fundWays=d=>Array.isArray(d?.methods)?FUND_WAYS.filter(m=>d.methods.includes(m)):FUND_WAYS;
-/** The deposit the server follows: {steps, stage, other, coin, arrived}, or null when it follows none (or the block is unsound). */
+/** The deposit the server follows: {steps, stage, other, coin, arrived, detected}, or null when it follows none (or the block is unsound). */
 function watchOf(d){
  const w=d?.watch;if(!w||typeof w!=='object'||!Array.isArray(w.steps))return null;
- const steps=[];for(const x of w.steps.slice(0,4))if(typeof x==='string'&&Object.hasOwn(TRACK_STEPS,x)&&!steps.includes(x))steps.push(x);
+ const steps=[];for(const x of w.steps.slice(0,5))if(typeof x==='string'&&Object.hasOwn(TRACK_STEPS,x)&&!steps.includes(x))steps.push(x);
  if(steps.length<2||steps[0]!=='waiting'||steps.at(-1)!=='ready')return null;
  const other=w.stage==='other_coin';
- return {steps,stage:steps.includes(w.stage)?w.stage:'waiting',other,coin:other&&typeof w.coin==='string'&&/^[A-Za-z0-9$.]{1,16}$/.test(w.coin)?w.coin:null,arrived:micro(w.arrived_usdc)};
+ return {steps,stage:steps.includes(w.stage)?w.stage:'waiting',other,coin:other&&typeof w.coin==='string'&&/^[A-Za-z0-9$.]{1,16}$/.test(w.coin)?w.coin:null,arrived:micro(w.arrived_usdc),detected:w.stage==='detected'?micro(w.detected_usdc):null};
 }
 const sendPolls=()=>watchOf(current?.data)?FUND_POLLS_TRACK:FUND_POLLS_SEND;
 /** The account's own deposit addresses, from the server: [{network,address}], the network a first YEET spends from first. */
@@ -1966,7 +1967,7 @@ function trackSteps(w,d){
   const r=el('div','row');r.setAttribute('role','listitem');r.dataset.step=x;r.dataset.state=state;
   const dot=el('i','step-dot');if(state==='done')dot.append(use('i-check'));
   const nm=el('div','nm');nm.append(el('div','tk',TRACK_STEPS[x]));
-  const tone=state==='done'?'ok':'wait',say=x==='ready'&&state==='done'&&money(d.usdc)?`${money(d.usdc)} USDC`:state==='done'?'Done':state==='now'?'Now':'';
+  const tone=state==='done'?'ok':'wait',say=x==='ready'&&state==='done'&&money(d.usdc)?`${money(d.usdc)} USDC`:x==='detected'&&state==='now'&&w.detected>0n?`${usdMicro(w.detected)} USDC`:state==='done'?'Done':state==='now'?'Now':'';
   if(say){const sub=el('div','sub');sub.append(el('span',`stat ${tone}`,say));nm.append(sub)}
   r.append(dot,nm);list.append(r);
  });
@@ -1989,7 +1990,7 @@ function renderFund(d){
  else if(w?.stage==='ready')said='Your USDC is here. You’re ready to YEET.';
  else if(note)said=note;
  else if(fundView==='crypto'&&fundOther)said=`We received ${fundOther}. It is in your account, but YEET trades from USDC.`;
- else if(fundView==='crypto'&&fundLate)said='Still waiting. This card will update when your USDC arrives; you can come back later.';
+ else if(fundView==='crypto'&&fundLate&&w?.stage!=='detected')said='Still waiting. This card will update when your USDC arrives; you can come back later.';
  const sayNote=()=>{if(said){const n=noteLine(said);if(fundGot!==null||w?.stage==='ready')n.dataset.role='arrived';else if(fundOther&&fundView==='crypto'&&!note)n.dataset.role='other-coin';else if(fundLate&&fundView==='crypto'&&!note)n.dataset.role='late';c.append(n)}};
  if(fundView==='crypto'){
   const nets=fundDeposit?.networks??[];
@@ -2014,9 +2015,10 @@ function renderFund(d){
    const live=el('span','sr',fundCopied==='ok'?'Address copied':'');live.setAttribute('role','status');c.append(live);
    if(fundCopied==='no')c.append(mark(el('p','hold-hint warn','Copying isn’t allowed here. Press and hold the address to copy it.'),'copy-no',true));
    const only=mark(el('p','dep-only'),'only',true);only.dataset.role='network-line';
-   only.append(el('strong',null,`Send USDC on ${name} only.`),document.createTextNode(w?' YEET trades from USDC.':' Other networks or coins sent here are lost.'));c.append(only);
+   const least=micro(d.min_deposit_usdc);
+   only.append(el('strong',null,least>0n?`Send at least ${String(d.min_deposit_usdc)} USDC on ${name} to this address.`:`Send USDC on ${name} only.`),document.createTextNode(w?' YEET trades from USDC.':' Other networks or coins sent here are lost.'));c.append(only);
    if(w)c.append(trackSteps(w,d));
-   if(!said)said='This card updates when your USDC arrives.';
+   if(!said)said=w?.stage==='detected'&&fundGot===null?DETECTED_SAID:'This card updates when your USDC arrives.';
   }
   sayNote();
   if(ways.includes('card'))c.append(fundSwap('Pay by card instead','card'));

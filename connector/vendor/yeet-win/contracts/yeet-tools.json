@@ -1828,13 +1828,14 @@
     },
     "deposit_watch": {
       "type": "object",
-      "description": "How far a deposit to the person’s YEET deposit address is, when the server follows it. steps: the stages this account’s card shows, in order (only stages the server can really observe are listed). stage: where it is now; other_coin: a coin that is not USDC arrived, named in coin. arrived_usdc: the USDC that arrived, once stage is ready. No address is ever in here.",
+      "description": "How far a deposit to the person’s YEET deposit address is, when the server follows it. steps: the stages this account’s card shows, in order (only stages the server can really observe are listed). stage: where it is now; detected: the USDC was seen arriving at the deposit address on its network and is not in the account yet (detected_usdc and detected_tx when known); other_coin: a coin that is not USDC arrived, named in coin. arrived_usdc: the USDC that arrived, once stage is ready. No address is ever in here.",
       "properties": {
         "steps": {
           "type": "array",
           "items": {
             "enum": [
               "waiting",
+              "detected",
               "found",
               "preparing",
               "ready"
@@ -1847,11 +1848,21 @@
         "stage": {
           "enum": [
             "waiting",
+            "detected",
             "found",
             "preparing",
             "ready",
             "other_coin"
           ]
+        },
+        "detected_usdc": {
+          "$ref": "#/$defs/usdc",
+          "description": "The USDC seen arriving at the deposit address, when stage is detected and the amount is known."
+        },
+        "detected_tx": {
+          "type": "string",
+          "pattern": "^(0x[0-9a-f]{64}|[1-9A-HJ-NP-Za-km-z]{64,90})$",
+          "description": "The network transaction that brought it, when known. A transaction id, never an address."
         },
         "arrived_usdc": {
           "$ref": "#/$defs/usdc"
@@ -1939,7 +1950,7 @@
           "app_version": {
             "type": "string",
             "enum": [
-              "tools-6"
+              "tools-7"
             ],
             "description": "The tools version this tool list was built for."
           },
@@ -3538,6 +3549,10 @@
           "watch": {
             "$ref": "#/$defs/deposit_watch"
           },
+          "min_deposit_usdc": {
+            "$ref": "#/$defs/usdc",
+            "description": "The least USDC to send in one deposit, when the account has one. The card says “Send at least N USDC on <network> to this address.” A smaller deposit is still credited."
+          },
           "guidance": {
             "$ref": "#/$defs/guidance"
           }
@@ -4363,13 +4378,14 @@
     "manage_url": "https://chatgpt.com/plugins",
     "refresh_label": "Refresh YEET in ChatGPT",
     "refresh_steps": "open YEET there, select Refresh, then start a new chat",
-    "tools_version": "tools-6",
+    "tools_version": "tools-7",
     "tools_versions_past": [
       "tools-3",
       "tools-4",
-      "tools-5"
+      "tools-5",
+      "tools-6"
     ],
-    "tools_hash": "62d4cf64559dc91f9adfb53742f5d58a35c346f0f0ac77ff7155d246509627a4"
+    "tools_hash": "a5b0e24f8e089d4f938d6a400fdd406dc10e701aff156f7000121341a8cfb9ec"
   },
   "x-yeet-spin": {
     "base_xp": 5,
