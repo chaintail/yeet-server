@@ -1,7 +1,20 @@
 // Tool schemas from the vendored yeet-win contract (vendor/yeet-win/contracts/yeet-tools.json; commit in PINNED).
 import {readFileSync} from 'node:fs';
 import {CONTRACT_URL} from '#contracts/errors';
-export const contract=JSON.parse(readFileSync(CONTRACT_URL,'utf8'));
+/** The private descriptions (descriptions.private.json "contract"): the public contract carries one neutral sentence
+ * where ChatGPT reads ours. At each JSON pointer the vendored text must be the recorded neutral one (or already the
+ * original); anything else means a re-vendor changed that text, and loading stops until the overlay is re-recorded. */
+export const DESCRIPTIONS_URL=new URL('./descriptions.private.json',import.meta.url);
+export function applyDescriptions(target,overlay){
+ for(const [pointer,{neutral,original}] of Object.entries(overlay)){
+  const keys=pointer.split('/').slice(1).map(k=>k.replace(/~1/g,'/').replace(/~0/g,'~'));const last=keys.pop();
+  let o=target;for(const k of keys){o=o?.[k];if(!o||typeof o!=='object')throw Error(`descriptions.private.json: ${pointer} is not in the vendored contract`)}
+  if(o[last]!==neutral&&o[last]!==original)throw Error(`descriptions.private.json: ${pointer} reads ${JSON.stringify(o[last])} in the vendored contract, not the recorded neutral text`);
+  o[last]=original;
+ }
+ return target;
+}
+export const contract=applyDescriptions(JSON.parse(readFileSync(CONTRACT_URL,'utf8')),JSON.parse(readFileSync(DESCRIPTIONS_URL,'utf8')).contract);
 export function resolveSchema(schema){
  if(Array.isArray(schema))return schema.map(resolveSchema);
  if(!schema||typeof schema!=='object')return schema;

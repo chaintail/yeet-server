@@ -7,3 +7,4 @@ files:
   widget/basket-v1.html coin-v1.html fund-v1.html home-v1.html leaderboard-v1.html lucky-v1.html overview-v1.html portfolio-v1.html receipt-v1.html referral-v1.html templates.json wheel-v1.html yeet-signer.js 
   router/dist/src/**
   router/test/fixtures/*.json
+edited: contracts/yeet-tools.json descriptions neutralised as in yeet-win prep/scrub-chatgpt-text; ours are in connector/mcp/descriptions.private.json, applied at load
