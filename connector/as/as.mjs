@@ -14,7 +14,7 @@ import { document, credentials, html, expiredAuthorizationBody, promptTitle, pro
 import express from "express";
 import { providerCsp } from "./provider-csp.mjs";
 import { fundRoutes, privyPageCsp, afterSignIn, nextField, boundNext, FUND_NEXT } from "./fund-page.mjs";
-import { hintReader, mismatchBody, expiredBody, switchBody } from "./account-bound.mjs";
+import { hintReader, mismatchBody, expiredBody, switchBody, BOUND_RETURN_PATH, BOUND_COOKIE, BOUND_COOKIE_AGE, boundCookieValue, readBoundCookie } from "./account-bound.mjs";
 import { signRoutes } from "./sign-page.mjs";
 import { ACCOUNT_TITLE, USERNAME_PATH, accountBody, usernameMessage } from "./account-page.mjs";
 import {
@@ -536,6 +536,18 @@ async function finishConnect(q, r, d) {
   accountConsent(d.session.accountId, { grantId });
   await provider.interactionFinished(q, r, { consent: { grantId } }, { mergeWithLastSubmission: true });
 }
+/** The bound sign-in form: the account's methods only, the hint and the destination posted back to /account/login. */
+function boundLoginPage(r, next, bound) {
+  const c = randomBytes(24).toString("hex");
+  cookie(r, "yeet_login", c, 300);
+  // What a return from Google or Apple is bound to (account-bound.mjs): kept by the server's own cookie.
+  cookie(r, BOUND_COOKIE, boundCookieValue(next, bound), BOUND_COOKIE_AGE);
+  return authDocument(
+    r,
+    promptTitle("login"),
+    `<form method="POST" action="/account/login" data-yeet-prompt="login"><input type="hidden" name="csrf" value="${c}">${nextField(next)}<input type="hidden" name="hint" value="${html(bound.token)}">${loginFields(bound)}${process.env.PRIVY_LOGIN === "1" ? "" : '<button type="submit">Sign in</button>'}</form>`,
+  );
+}
 app.get("/account/login", (q, r) => {
   const next = nextField(q.query.next);
   r.set({ "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
@@ -545,15 +557,28 @@ app.get("/account/login", (q, r) => {
   const { supplied, hint: found } = readHint.state(q.query.h);
   const bound = found && boundNext(q.query.next) ? found : null;
   if (supplied && !bound) return r.status(410).type("html").send(authDocument(r, promptTitle("login"), expiredBody()));
+  if (bound) return r.type("html").send(boundLoginPage(r, q.query.next, bound));
   const c = randomBytes(24).toString("hex");
   cookie(r, "yeet_login", c, 300);
   r.type("html").send(
     authDocument(
       r,
       promptTitle("login"),
-      `<form method="POST" data-yeet-prompt="login"><input type="hidden" name="csrf" value="${c}">${next}${bound ? `<input type="hidden" name="hint" value="${html(bound.token)}">` : ""}${loginFields(bound)}${process.env.PRIVY_LOGIN === "1" ? "" : '<button type="submit">Sign in</button>'}</form>`,
+      `<form method="POST" data-yeet-prompt="login"><input type="hidden" name="csrf" value="${c}">${next}${loginFields()}${process.env.PRIVY_LOGIN === "1" ? "" : '<button type="submit">Sign in</button>'}</form>`,
     ),
   );
+});
+// Back from Google or Apple for a sign-in that started on a bound page. Only bound sign-ins return here, so this is
+// never the ordinary sign-in: with the server's cookie it is the same bound page again (the hint verified again);
+// with the cookie missing, stale or altered it is the expired state and nothing else. No account can be created here.
+app.get(BOUND_RETURN_PATH, (q, r) => {
+  r.set({ "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
+  const kept = readBoundCookie(q.headers.cookie, readHint, boundNext);
+  if (!kept) {
+    cookie(r, BOUND_COOKIE, "", 0);
+    return r.status(410).type("html").send(authDocument(r, promptTitle("login"), expiredBody()));
+  }
+  r.type("html").send(boundLoginPage(r, kept.next, kept.hint));
 });
 function openSession(r, id) {
   const token = randomBytes(32).toString("base64url");
@@ -581,7 +606,10 @@ app.post("/account/login", formBody, async (q, r) => {
     if (q.body.hint !== undefined) {
       r.set({ "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
       const bound = boundNext(q.body.next) ? readHint(q.body.hint) : null;
-      if (!bound) return r.status(410).type("html").send(authDocument(r, promptTitle("login"), expiredBody()));
+      if (!bound) {
+        cookie(r, BOUND_COOKIE, "", 0);
+        return r.status(410).type("html").send(authDocument(r, promptTitle("login"), expiredBody()));
+      }
       const id = await lookupAccount(q.body);
       // Another account, or nobody's: the one line and Try again. Nothing about the right account is said.
       if (id !== bound.account)
@@ -600,6 +628,7 @@ app.post("/account/login", formBody, async (q, r) => {
         write("sessions.json", db);
       }
       openSession(r, id);
+      cookie(r, BOUND_COOKIE, "", 0);
       return r.redirect(q.body.next === FUND_NEXT ? `/fund?h=${encodeURIComponent(bound.token)}` : afterSignIn(q.body.next));
     }
     const id = await verifyIdentity(q.body);

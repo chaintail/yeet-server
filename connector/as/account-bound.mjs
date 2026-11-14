@@ -61,3 +61,27 @@ export function switchBody({fields}){
  const hidden=fields.filter(([,v])=>typeof v==='string'&&v).map(([k,v])=>`<input type="hidden" name="${html(k)}" value="${html(v)}">`).join('');
  return `<p class="lead">This browser is using another YEET account.</p><p>Switch to use this link. Nothing else changes.</p><form method="POST" action="/account/login">${hidden}<input type="hidden" name="switch" value="yes"><button type="submit">${html(SWITCH_LABEL)}</button></form>`;
 }
+
+// ---- The way back from Google or Apple for a sign-in that started on a bound page --------------------------------
+// The provider returns to ONE fixed address with no query (Privy matches allowed redirect addresses exactly, and a
+// hint is different in every link): BOUND_RETURN_PATH. Nothing but a bound sign-in ever returns there, so a request
+// for it IS a bound return. What it is bound to is kept by the SERVER'S cookie, set when the bound page was served:
+// httpOnly, SameSite=Lax, 15 minutes, holding the destination and the signed hint itself (so nothing is trusted from
+// it that the signature does not cover). When the return arrives and that cookie is missing, stale or altered, the
+// answer is the expired state and nothing else: never the ordinary sign-in, which could create an account.
+export const BOUND_RETURN_PATH='/account/login/bound';
+export const BOUND_COOKIE='yeet_bound';
+export const BOUND_COOKIE_AGE=900;
+/** The cookie's value for a destination and a verified hint. */
+export const boundCookieValue=(next,hint)=>`${next}.${hint.token}`;
+/**
+ * What a return is bound to, from the request's Cookie header.
+ *   readHint: hintReader(...)      allowed(next): the destinations a hint may ride to
+ * -> {next, hint} or null (no cookie, an unknown destination, or a hint that does not verify now).
+ */
+export function readBoundCookie(header,readHint,allowed){
+ const raw=typeof header==='string'?header.split(';').map(x=>x.trim()).find(x=>x.startsWith(`${BOUND_COOKIE}=`))?.slice(BOUND_COOKIE.length+1):undefined;
+ if(!raw||raw.length>600)return null;
+ const dot=raw.indexOf('.'),next=dot>0?raw.slice(0,dot):'',hint=dot>0?readHint(raw.slice(dot+1)):null;
+ return hint&&allowed(next)?{next,hint}:null;
+}

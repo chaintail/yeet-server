@@ -8,7 +8,7 @@ import express from 'express';
 import {signRoutes} from '../sign-page.mjs';
 import {fundRoutes} from '../fund-page.mjs';
 import {termsRoutes} from '../terms-page.mjs';
-import {hintReader, mismatchBody, expiredBody, switchBody, MISMATCH_LINE, MISMATCH_CODE, EXPIRED_LINK_LINE, EXPIRED_CODE, SWITCH_LABEL} from '../account-bound.mjs';
+import {BOUND_RETURN_PATH, BOUND_COOKIE, BOUND_COOKIE_AGE, boundCookieValue, readBoundCookie, hintReader, mismatchBody, expiredBody, switchBody, MISMATCH_LINE, MISMATCH_CODE, EXPIRED_LINK_LINE, EXPIRED_CODE, SWITCH_LABEL} from '../account-bound.mjs';
 import {createSignFlow} from '../viewer/sign/flow.mjs';
 import * as wr from '../../core/pipeline/wallet-request.mjs';
 import {deriveLinkKey, mintLinkToken, verifyLinkToken, HINT_LINK_TTL_S} from '#shared/link-token.mjs';
@@ -263,4 +263,19 @@ test('the server\'s approval drives what the page shows: A approved, then the br
   assert.equal(approvedAddresses({userId: 'did:privy:gina', wallets: ginaWallets, approval: now}), null);
   const next = await api('/fund/api/check', {privy_access_token: 'tok:gina', hint: hint(EMIL)}, {cookie: 'yeet_session=emil'});
   assert.deepEqual(readCheck(next.status, next.body), {status: 'mismatch', message: MISMATCH_LINE});
+});
+
+test('N1: what a provider return is bound to comes from the server\'s cookie; a missing, stale or altered one is nothing', () => {
+  assert.equal(BOUND_RETURN_PATH, '/account/login/bound'); assert.equal(BOUND_COOKIE, 'yeet_bound'); assert.equal(BOUND_COOKIE_AGE, 900);
+  const allowed = (n) => n === 'fund' || n === 'terms';
+  const h = readHint(hint(EMIL));
+  const value = boundCookieValue('fund', h);
+  assert.equal(value, `fund.${h.token}`);
+  assert.deepEqual(readBoundCookie(`a=1; ${BOUND_COOKIE}=${value}; yeet_login=x`, readHint, allowed), {next: 'fund', hint: h});
+  assert.deepEqual(readBoundCookie(`${BOUND_COOKIE}=${boundCookieValue('terms', h)}`, readHint, allowed).next, 'terms');
+  const stale = hint(EMIL, {now: Date.now() - (HINT_LINK_TTL_S + 1) * 1000});
+  for (const header of [undefined, '', 'yeet_login=x', `${BOUND_COOKIE}=`, `${BOUND_COOKIE}=fund`, `${BOUND_COOKIE}=fund.junk`, `${BOUND_COOKIE}=fund.${stale}`,
+    `${BOUND_COOKIE}=fund.${h.token.slice(0, -3)}AAA`, `${BOUND_COOKIE}=account.${h.token}`, `${BOUND_COOKIE}=.${h.token}`, `${BOUND_COOKIE}=${h.token}`, `${BOUND_COOKIE}=fund.${'A'.repeat(700)}`,
+    `x${BOUND_COOKIE}=${value}`])
+    assert.equal(readBoundCookie(header, readHint, allowed), null, String(header).slice(0, 40));
 });

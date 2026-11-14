@@ -617,6 +617,37 @@ test('a sign-in page opened from an account-bound link lets only that account in
  page=await open('next=fund&h='+hint);
  r=await submit(page,{next:'fund',hint,identity_token:'DEV:did:privy:acceptance-alice',switch:'yes'});
  assert.equal(r.status,403);
+ // N1: the way back from Google or Apple. The bound page set the server's own cookie; the fixed return address is
+ // answered from it, with the same bound form (the hint verified again).
+ const trip=jar();
+ const served=await fetch(AS+'/account/login?next=fund&h='+hint,{headers:{cookie:trip.header()}});trip.add(served);
+ const set=served.headers.getSetCookie().find(c=>c.startsWith('yeet_bound='));
+ assert.ok(set,'the bound page sets the cookie');
+ assert.match(set,/^yeet_bound=fund\.v1\.[A-Za-z0-9_.-]+; HttpOnly; SameSite=Lax; Path=\/; Max-Age=900/);
+ const back=await open('privy_oauth_code=c&privy_oauth_state=s',trip).then(()=>fetch(AS+'/account/login/bound?privy_oauth_code=c&privy_oauth_state=s',{headers:{cookie:trip.header()}}));
+ trip.add(back);
+ assert.equal(back.status,200);
+ const backHtml=await back.text();
+ assert.ok(backHtml.includes(`<input type="hidden" name="hint" value="${hint}">`));assert.match(backHtml,/<form method="POST" action="\/account\/login"/);assert.match(backHtml,/name="next" value="fund"/);
+ r=await submit({cookies:trip,csrf:backHtml.match(/name="csrf" value="([0-9a-f]+)"/)[1]},{next:'fund',hint,identity_token:'DEV:did:privy:acceptance-bound'});
+ assert.equal(r.status,302);assert.equal(r.headers.get('location'),`/fund?h=${hint}`);
+ assert.ok(r.headers.getSetCookie().some(c=>/^yeet_bound=; .*Max-Age=0/.test(c)),'the cookie ends with the sign-in');
+ // The return arrives and the cookie is missing (storage or cookie lost, more than 15 minutes), stale or altered:
+ // the expired state and nothing else. No form, no csrf, no sign-in of any kind, so no account can be created.
+ const count=accountCount();
+ for(const cookieHeader of [undefined,'yeet_bound=','yeet_bound=fund.'+stale,'yeet_bound=fund.'+hint.slice(0,-2)+'AA','yeet_bound=account.'+hint,'yeet_session=whatever']){
+  const lost=await fetch(AS+'/account/login/bound?privy_oauth_code=c&privy_oauth_state=s',{redirect:'manual',headers:cookieHeader?{cookie:cookieHeader}:{}});
+  assert.equal(lost.status,410,String(cookieHeader));
+  const text=await lost.text();
+  assert.match(text,EXPIRED);
+  assert.doesNotMatch(text,/name="csrf"|identity_token|privy-login|login\.js|<form|<button/,'nothing else is on the page: no ordinary sign-in');
+  assert.ok(!lost.headers.getSetCookie().some(c=>c.startsWith('yeet_login=')),'no sign-in form token is issued');
+  assert.ok(lost.headers.getSetCookie().some(c=>/^yeet_bound=; .*Max-Age=0/.test(c)));
+ }
+ assert.equal(accountCount(),count);
+ // The ordinary sign-in page is untouched by the cookie: it stays the plain form at its own address.
+ const ordinary=await fetch(AS+'/account/login',{headers:{cookie:'yeet_bound=fund.'+hint}});
+ assert.equal(ordinary.status,200);assert.doesNotMatch(await ordinary.text(),/name="hint"/);
  // A hint that stopped verifying between the page and the form: refused, never treated as a plain sign-in.
  for(const bad of ['',hint.slice(0,-2)+'AA',stale,mintLinkToken(key,{purpose:'terms',account,ttl:600,claims:{v:TERMS_VERSION,m:['email'],j:'x'.repeat(16)}})]){
   page=await open('next=fund&h='+hint);
