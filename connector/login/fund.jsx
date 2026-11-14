@@ -19,6 +19,7 @@ import { AMOUNT_CHIPS, NETWORKS, chipFromSearch, sendAmount, validAddress, walle
 import { watchBalance } from "./fund-watch.js";
 import { qrCode, qrPath } from "./qr.js";
 import { Swap } from "./screen.jsx";
+import { approvalKey, approvalOf, approvedAddresses, currentApproval, readCheck } from "./fund-approval.js";
 import { words } from "./brand-words.jsx";
 
 // The link this page was opened from may carry a signed hint for ONE account (as/account-bound.mjs): the server put
@@ -27,84 +28,91 @@ const HINT = document.getElementById("yeet-fund")?.dataset.hint || "";
 const SIGN_IN = `/account/login?next=fund${HINT ? `&h=${encodeURIComponent(HINT)}` : ""}`;
 const CHECK_FAILED = "YEET could not check your account just now. Nothing was changed.";
 
-/**
- * Asks the server whether the Privy user in this browser is the account this page is for (POST /fund/api/check).
- * -> {status: "ok"} | {status: "mismatch", message, use} | {status: "signin"} | {status: "error"}
- * The page shows a wallet address only after "ok": money sent to another account's address would be lost to the
- * person's own.
- */
-export async function checkAccount({ getAccessToken, hint = HINT, post = fetch }) {
+/** Asks the server whether the Privy user in this browser is the account this page is for (POST /fund/api/check). */
+async function checkAccount(getAccessToken) {
   try {
     const token = await getAccessToken();
     if (!token) return { status: "signin" };
-    const r = await post("/fund/api/check", {
+    const r = await fetch("/fund/api/check", {
       method: "POST",
       credentials: "same-origin",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ privy_access_token: token, ...(hint ? { hint } : {}) }),
+      body: JSON.stringify({ privy_access_token: token, ...(HINT ? { hint: HINT } : {}) }),
     });
-    if (r.ok) return { status: "ok" };
     let body = null;
     try {
       body = await r.json();
     } catch {
       /* no body */
     }
-    if (r.status === 409 && body?.code === "ACCOUNT_MISMATCH") return { status: "mismatch", message: String(body.message ?? ""), use: typeof body.use === "string" ? body.use : "" };
-    if (r.status === 401) return { status: "signin" };
-    return { status: "error" };
+    return readCheck(r.status, body);
   } catch {
     return { status: "error" };
   }
 }
-const WALLET_NAMES = { rainbow: "Rainbow", coinbase: "Coinbase Wallet", phantom: "Phantom", solflare: "Solflare" };
 
 function Fund({ readers }) {
   const { ready, authenticated, user, getAccessToken, logout } = usePrivy();
-  const [check, setCheck] = useState({ status: "checking" });
-  const [attempt, setAttempt] = useState(0);
   const wallets = embeddedWallets(user);
-  const addresses = {
-    base: validAddress("base", wallets.base?.address) ? wallets.base.address : null,
-    solana: validAddress("solana", wallets.solana?.address) ? wallets.solana.address : null,
-  };
+  // The approval is tied to who is here and which wallets the browser holds (fund-approval.js). When either changes,
+  // `key` changes in this same render: the kept answer no longer counts, nothing is shown, and the server is asked again.
+  const key = ready && authenticated ? approvalKey(user?.id, wallets) : null;
+  const [kept, setKept] = useState(null);
+  const [attempt, setAttempt] = useState(0);
+  const hasWallet = !!wallets.base?.address;
   useEffect(() => {
     if (ready && !authenticated) location.assign(SIGN_IN);
   }, [ready, authenticated]);
-  // Before any address shows: the server says whether who is here is the account this page is for.
   useEffect(() => {
-    if (!ready || !authenticated) return;
+    if (!key || !hasWallet) return;
     let live = true;
-    setCheck({ status: "checking" });
-    checkAccount({ getAccessToken }).then((out) => {
+    checkAccount(getAccessToken).then((out) => {
+      // An answer to an earlier question (another user, other wallets, an older try) is dropped.
       if (!live) return;
       if (out.status === "signin") return location.assign(SIGN_IN);
-      setCheck(out);
+      setKept(approvalOf(key, out));
     });
     return () => {
       live = false;
     };
-  }, [ready, authenticated, getAccessToken, attempt]);
-  /** Another account is here: end its Privy session and offer the right account's methods. */
+  }, [key, hasWallet, getAccessToken, attempt]);
+  const approval = currentApproval(kept, key);
+  // Only what the server confirmed for the bound account, and only while the same Privy user is here.
+  const shown = approvedAddresses({ userId: user?.id, wallets, approval });
+  const addresses = {
+    base: shown && validAddress("base", shown.base) ? shown.base : null,
+    solana: shown && validAddress("solana", shown.solana) ? shown.solana : null,
+  };
+  /** Another account is here. The person presses this: it ends that session and opens the sign-in for the right one. */
   async function tryAgain() {
     try {
       await logout();
     } catch {
-      /* the sign-in page ends it */
+      /* the sign-in page offers Use another account */
     }
-    location.assign(`${SIGN_IN}${HINT ? "&again=1" : ""}`);
+    location.assign(SIGN_IN);
   }
-  const screen = !ready || !authenticated || check.status === "checking" ? "loading" : check.status === "mismatch" ? "mismatch" : check.status !== "ok" ? "error" : addresses.base ? "fund" : "waiting";
+  const screen =
+    !ready || !authenticated ? "loading"
+    : !hasWallet ? "waiting"
+    : approval.status === "checking" ? "loading"
+    : approval.status === "expired" ? "expired"
+    : approval.status === "mismatch" || (approval.status === "ok" && !addresses.base) ? "mismatch"
+    : approval.status !== "ok" ? "error"
+    : "fund";
   return (
     <Swap id={screen}>
       {screen === "loading" ? (
         <p role="status">{words("Loading your YEET wallet…")}</p>
+      ) : screen === "expired" ? (
+        <p role="alert" className="notice">
+          {words(approval.message || "This link has expired. Go back to ChatGPT and ask for a new one.")}
+        </p>
       ) : screen === "mismatch" ? (
         <>
           <p role="alert" className="notice">
-            {words(check.message || "This is a different YEET account than the one in your ChatGPT.")}
+            {words("This is a different YEET account than the one in your ChatGPT.")}
           </p>
-          {check.use ? <p className="lead">{check.use}</p> : null}
           <button type="button" onClick={tryAgain}>
             Try again
           </button>
