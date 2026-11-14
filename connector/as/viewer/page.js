@@ -165,7 +165,16 @@
     root.classList.remove("leaving");
     each("form", function (f) { f.__leaving = false; });
   });
-  window.YeetPage = { leave: leave };
+  /** A new page heading from a page script (the sign-in page's email step), set in the same display type. */
+  function title(text) {
+    var h = doc.getElementById("page-title");
+    if (!h || typeof text !== "string" || !text) return;
+    h.classList.remove("set");
+    h.textContent = text;
+    doc.title = text;
+    if (h.classList.contains("display")) setType(h);
+  }
+  window.YeetPage = { leave: leave, title: title };
 
   each("h1.display", setType);
   each("main", signWords);

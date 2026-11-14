@@ -290,3 +290,9 @@ input[type=checkbox]:focus-visible { outline: 3px solid var(--yellow); outline-o
   *, *::before, *::after { animation: none !important; transition: none !important; }
   .card::before, .card::after, .tw, button::before, button::after, .button::before, .button::after { display: none; }
 }
+
+/* ---------- the email step of the connect screen (login/email-step.jsx) ---------- */
+input.code:not([type=hidden]) { text-align: center; font: 700 1.6rem/1.2 var(--font-mono); letter-spacing: .34em; padding-left: calc(16px + .34em); }
+input.code::placeholder { color: var(--dim); letter-spacing: .34em; }
+button.link.quiet { min-height: 40px; margin-top: 0; color: var(--muted); font-weight: 500; font-size: var(--text-small); }
+button.link.quiet:hover { color: var(--text); }
