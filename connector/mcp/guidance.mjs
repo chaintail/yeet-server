@@ -134,6 +134,9 @@ export const COPY=Object.freeze({
   crypto:"YEET yeet_fund_own.crypto.",
   no_card:"YEET yeet_fund_own.no_card.",
   ready:"YEET yeet_fund_own.ready.",
+  detected:"YEET yeet_fund_own.detected.",
+
+  minimum:"YEET yeet_fund_own.minimum: {min}.",
   other_coin:"YEET yeet_fund_own.other_coin: {coin}.",
   unavailable:"YEET yeet_fund_own.unavailable.",
  },
@@ -356,7 +359,9 @@ const BY_TOOL={
    if(!r.methods.includes('crypto'))return c.unavailable;
    if(r.watch?.stage==='ready')return c.ready;
    if(r.watch?.stage==='other_coin')return fill(c.other_coin,{coin:typeof r.watch.coin==='string'&&/^[A-Za-z0-9$.]{1,16}$/.test(r.watch.coin)?r.watch.coin:'another coin'});
-   return r.method==='card'?c.no_card:c.crypto;
+   if(r.watch?.stage==='detected')return c.detected;
+   const min=typeof r.min_deposit_usdc==='string'&&/^\d{1,6}(\.\d{1,2})?$/.test(r.min_deposit_usdc)?r.min_deposit_usdc:null;
+   return join(r.method==='card'?c.no_card:c.crypto,min?fill(c.minimum,{min}):null);
   }
   return r.method==='crypto'?COPY.yeet_fund.crypto:r.method==='card'?COPY.yeet_fund.card:COPY.yeet_fund.choose;
  },

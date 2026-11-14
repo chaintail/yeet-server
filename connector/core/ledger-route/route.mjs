@@ -86,16 +86,32 @@ export function previewClient(client,{solverAccount,usdcAssetIds}){
  * ledger account instead (USDC and every catalogue coin, one view call), and their USDC elsewhere counts as nothing
  * spendable. `isLedgerAddress(address)` decides per wallet address; every other address reads as before.
  */
-export function ledgerBalances(inner,{isLedgerAddress,verifier,catalog=CATALOG}){
+export function ledgerBalances(inner,{isLedgerAddress,verifier,catalog=CATALOG,usdcTokenIds=[USDC_SOL_TOKEN_ID]}){
  const coins=catalog.filter(e=>e.chain==='solana'&&e.address&&TOKEN_ID.test(e.assetId));
+ // USDC credited under another network's token id (Base's, when Base is offered for deposits) is the person's USDC
+ // too: it is counted into the one USDC number. Which of them a buy spends is decided in livePlan (payWith).
+ const more=usdcTokenIds.filter(id=>id!==USDC_SOL_TOKEN_ID&&TOKEN_ID.test(id));
  return {...inner,
   async baseUsdc(address){return isLedgerAddress(address)?0n:inner.baseUsdc(address)},
   async solanaTokens(owner){
    if(!isLedgerAddress(owner))return inner.solanaTokens(owner);
-   const bal=await verifier.balances(ledgerAccountOf(owner),coins.map(c=>c.assetId));
-   return coins.map((c,i)=>({mint:c.address,raw:bal[i],decimals:c.decimals})).filter(h=>h.raw>0n);
+   const bal=await verifier.balances(ledgerAccountOf(owner),[...coins.map(c=>c.assetId),...more]);
+   const extra=more.reduce((a,_,i)=>a+bal[coins.length+i],0n);
+   return coins.map((c,i)=>({mint:c.address,raw:c.assetId===USDC_SOL_TOKEN_ID?bal[i]+extra:bal[i],decimals:c.decimals})).filter(h=>h.raw>0n);
   }};
 }
+/**
+ * Which USDC token id a buy of `total` spends, from the person's balance of each (`held`, in the order of `ids`:
+ * Solana's first). One message gives one token, so a buy is paid from ONE of them: the first that covers it (Solana's
+ * when it does), else nothing: {tokenId} or {tokenId:null, most: the larger single balance}.
+ */
+export function payWith(ids,held,total){
+ const i=held.findIndex(b=>b>=total);
+ if(i>=0)return {tokenId:ids[i]};
+ return {tokenId:null,most:held.reduce((a,b)=>b>a?b:a,0n)};
+}
+/** What a person reads when their USDC is in two parts and no single one covers the buy. */
+export const twoPartsMessage=most=>`Your USDC arrived in two parts, and one trade spends from one of them: up to ${formatUnits(most,6)} USDC right now. Try that amount or less.`;
 
 /** The token_diff a request states, rebuilt from its `gives` and `receives`: {tokenId: bigint}. */
 export function diffOf({gives,receives}){
@@ -105,7 +121,7 @@ export function diffOf({gives,receives}){
  return d;
 }
 
-export function createLedgerRoute({db,cfg,verifier,solver,client,catalog=CATALOG,now=Date.now,sleep=ms=>new Promise(r=>setTimeout(r,ms)),log=()=>{},hooks,signWindowMs=10*60_000,unloadEveryMs=60_000,unloadWaitMs=90_000}){
+export function createLedgerRoute({db,cfg,verifier,solver,client,catalog=CATALOG,usdcTokenIds=[USDC_SOL_TOKEN_ID],now=Date.now,sleep=ms=>new Promise(r=>setTimeout(r,ms)),log=()=>{},hooks,signWindowMs=10*60_000,unloadEveryMs=60_000,unloadWaitMs=90_000}){
  db.exec(SCHEMA);
  const event=e=>{try{log(e)}catch{}};
  const usdc=catalog.find(e=>e.chain==='solana'&&e.assetId===USDC_SOL_TOKEN_ID);
@@ -120,6 +136,8 @@ export function createLedgerRoute({db,cfg,verifier,solver,client,catalog=CATALOG
  const setState=(id,from,to,j)=>db.prepare(`UPDATE ledger_trade SET state=?,json=?,updated_at=? WHERE trade_id=? AND state IN(${from.map(()=>'?').join(',')})`).run(to,JSON.stringify(j),now(),id,...from).changes===1;
  const saver=(id,j)=>()=>{db.prepare('UPDATE ledger_trade SET json=?,updated_at=? WHERE trade_id=?').run(JSON.stringify(j),now(),id)};
  const preview=previewClient(client,{solverAccount:solver.accountId,usdcAssetIds:usdcIds});
+ /** The USDC token ids a buy may be paid with, Solana's first: only ids the catalogue lists as USDC. */
+ const payIds=[USDC_SOL_TOKEN_ID,...usdcTokenIds.filter(id=>id!==USDC_SOL_TOKEN_ID&&usdcIds.includes(id)&&TOKEN_ID.test(id))];
 
  /** One firm quote with the ledger on both sides and the solver as the account: nothing is committed until it is paid. */
  async function quoteFirm({originAsset,destinationAsset,amount,slippageBps,deadlineMs,dry=false}){
@@ -157,8 +175,20 @@ export function createLedgerRoute({db,cfg,verifier,solver,client,catalog=CATALOG
   const [feePips,float]=await quoteErrors(()=>Promise.all([verifier.fee(),solver.float()]));
   const at=now(),deadlineMs=at+QUOTE_MINUTES*60_000;
   const coins=legs.map(l=>coinOf(l.asset_id));
+  // The USDC token the person pays a buy with. Solana's alone unless Base is offered for deposits; then the one of
+  // the two that covers the whole buy (a message gives one token). The solver still sources with its own USDC.
+  let usdcTokenId=USDC_SOL_TOKEN_ID;
   if(direction==='yeet'){
    const total=sum(legs.map(l=>big(l.amount_in_raw)));
+   if(payIds.length>1){
+    const held=await quoteErrors(()=>verifier.balances(userAccount,payIds)),pick=payWith(payIds,held,total);
+    if(!pick.tokenId){
+     if(sum(held)<total)refuse('BALANCE_LOW');
+     throw Object.assign(new TradeError('BALANCE_LOW',`USDC in two token ids, the larger holds ${pick.most}, the buy needs ${total}`),{userMessage:twoPartsMessage(pick.most)});
+    }
+    usdcTokenId=pick.tokenId;
+    if(usdcTokenId!==USDC_SOL_TOKEN_ID)event({event:'ledger_buy_pays_with',token:usdcTokenId,total:total.toString()});
+   }
    solver.checkExposure(total);
    if(float<total)cannotFill(`solver float ${float} is below ${total}`);
   }
@@ -184,11 +214,11 @@ export function createLedgerRoute({db,cfg,verifier,solver,client,catalog=CATALOG
   if(!dry&&new Set(out.map(l=>l.depositAddress)).size!==out.length)refuse('TEMPORARILY_UNAVAILABLE','ledger quote: deposit account repeated');
   const id=`${direction}_${sha256Hex(JSON.stringify({direction,route:'ledger',legs:out.map(l=>[l.origin.assetId,l.destination.assetId,l.amountIn]),userAccount,at})).slice(0,24)}`;
   return {id,direction,dry:false,createdAt:iso(at),recipient:userAccount,refundTo:userAccount,slippageBps,authenticated:!!client.authenticated,legs:out,originChain:'sol',
-   ledger:{userAccount,feePips:Number(feePips),quoteDeadlineMs:deadlineMs}};
+   ledger:{userAccount,feePips:Number(feePips),quoteDeadlineMs:deadlineMs,...(usdcTokenId!==USDC_SOL_TOKEN_ID?{usdcTokenId}:{})}};
  }
 
  /** The route's row for a trade the pipeline is committing (called inside its transaction). */
- const stateOf=live=>({direction:live.direction,fee_pips:live.ledger.feePips,quote_deadline_ms:live.ledger.quoteDeadlineMs,
+ const stateOf=live=>({direction:live.direction,fee_pips:live.ledger.feePips,quote_deadline_ms:live.ledger.quoteDeadlineMs,...(live.ledger.usdcTokenId?{usdc_token_id:live.ledger.usdcTokenId}:{}),
   legs:live.legs.map(l=>({idx:l.index,symbol:l.symbol,originAsset:l.origin.assetId,destinationAsset:l.destination.assetId,amount_in:l.amountIn,
    quote:{depositAddress:l.depositAddress,amountIn:l.sourcingAmountIn,amountOut:l.amountOut,minAmountOut:l.minAmountOut,correlationId:l.correlationId??null}}))});
  function commit({tradeId,accountId,wallet,live,at}){
@@ -201,10 +231,13 @@ export function createLedgerRoute({db,cfg,verifier,solver,client,catalog=CATALOG
  function terms(j){
   const fee=big(j.fee_pips);
   if(j.direction==='yeet'){
-   const floors=buyFloors({legs:j.legs.map(l=>({symbol:l.symbol,tokenId:l.destinationAsset,usdcIn:l.amount_in,minOut:l.quote.minAmountOut})),feePips:fee,marginBps:0});
+   // the token the person gives: Solana's USDC, or the one chosen at the tap (stored with the trade, one of payIds)
+   const paid=j.usdc_token_id??USDC_SOL_TOKEN_ID;
+   if(!payIds.includes(paid))throw new TradeError('TEMPORARILY_UNAVAILABLE','the trade names a USDC token this route does not take');
+   const floors=buyFloors({legs:j.legs.map(l=>({symbol:l.symbol,tokenId:l.destinationAsset,usdcIn:l.amount_in,minOut:l.quote.minAmountOut})),feePips:fee,marginBps:0,usdcTokenId:paid});
    const loss=solverLoss({spentUsdc:floors.usdc.userGives,receivesUsdc:floors.usdc.solverReceives,maxLossBps:MAX_LOSS_BPS});
    if(!loss.ok)throw new TradeError('TEMPORARILY_UNAVAILABLE','the ledger fee is over the solver bound');
-   return {gives:[{token_id:USDC_SOL_TOKEN_ID,amount_raw:floors.usdc.userGives.toString()}],receives:floors.legs.map(l=>({token_id:l.tokenId,min_raw:l.userFloor.toString()})),floors};
+   return {gives:[{token_id:paid,amount_raw:floors.usdc.userGives.toString()}],receives:floors.legs.map(l=>({token_id:l.tokenId,min_raw:l.userFloor.toString()})),floors};
   }
   const floor=sum(j.legs.map(l=>receivedFor(big(l.quote.minAmountOut),fee)));
   if(floor<=0n)throw new TradeError('AMOUNT_TOO_SMALL','sell floor');
@@ -528,7 +561,10 @@ export function createLedgerRoute({db,cfg,verifier,solver,client,catalog=CATALOG
 
  // ---- leftover inventory ----
  let lastUnload=0,unloading=null;
- const leftoverCoins=()=>catalog.filter(e=>e.chain==='solana'&&TOKEN_ID.test(e.assetId)&&e.assetId!==USDC_SOL_TOKEN_ID).map(e=>({symbol:e.symbol,tokenId:e.assetId}));
+ // USDC the solver was paid under another network's token id (a buy paid with Base's) is inventory like a coin: it is
+ // sold back to the solver's own USDC by the same unload, under the same tries and bound.
+ const leftoverCoins=()=>[...catalog.filter(e=>e.chain==='solana'&&TOKEN_ID.test(e.assetId)&&e.assetId!==USDC_SOL_TOKEN_ID).map(e=>({symbol:e.symbol,tokenId:e.assetId})),
+  ...payIds.slice(1).map(id=>({symbol:`USDC.${/^nep141:([a-z]{2,8})-/.exec(id)?.[1]??'other'}`,tokenId:id}))];
  /** Resumes interrupted runs; then, while no trade is running and at most every unloadEveryMs, sells what the solver
   * holds besides USDC (solver.unloadLeftovers: capped tries per coin and day). */
  async function tick(){

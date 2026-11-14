@@ -125,7 +125,16 @@ export function checkinText(r){
  return `Daily check-in: ${c.streak_days}-day streak, ${c.total} XP. ${left>0?`${left} spin${left===1?' is':'s are'} waiting in the card.`:'Today\'s spin is done.'}`;
 }
 
-export const fundText=r=>`YEET fundText.`;
+export const fundText=(r,networks)=>`YEET fundText.`;
+/** The stated minimum of one deposit, for the model: the card names the network ("Send at least 5 USDC on Solana to
+ * this address."); the model reads the same with the network name(s) the card offers and never an address. No reason, no warning. */
+const NETWORK_NAME={solana:'Solana',base:'Base'};
+export function minimumText(r,networks){
+ if(typeof r?.min_deposit_usdc!=='string'||!/^\d{1,6}(\.\d{1,2})?$/.test(r.min_deposit_usdc)||!Array.isArray(r.methods)||!r.methods.includes('crypto'))return '';
+ // the networks the card offers (their names only, from the card-only block; never an address)
+ const names=(Array.isArray(networks)?networks:[]).map(n=>NETWORK_NAME[n?.network]).filter(Boolean);
+ return ` Send at least ${r.min_deposit_usdc} USDC${names.length===1?` on ${names[0]}`:names.length===2?` on ${names[0]} or ${names[1]}, whichever is chosen in the card,`:''} to the address in the card.`;
+}
 /** yeet_terms and yeet_accept_terms: what the model reads first, in one line; the JSON follows in structuredContent. */
 /** yeet_profile's text for the model: the name, XP, tier and streak. Nothing else of the overview is in it. */
 export const profileText=r=>`Profile: ${r.username}${r.xp===null?'':`, ${r.xp} XP`} (${r.tier})${r.streak_days===null?'':`, ${r.streak_days}-day streak`}.`;
@@ -213,7 +222,7 @@ export function createMcpServer({token,callCore,env=process.env,staleness=proces
     const refresh=tellRefresh&&name==='yeet_overview'&&isObject?{app_refresh:appRefresh()}:{};
     const parsed=output.safeParse(guidance?{...data,...refresh,guidance}:data);
     if(!parsed.success)return toolError({error:'TEMPORARILY_UNAVAILABLE'},ctx,{tool:name});
-    const text=TEXT[name]?TEXT[name](name==='yeet_fund'?parsed.data:result):JSON.stringify(parsed.data);
+    const text=TEXT[name]?TEXT[name](name==='yeet_fund'?parsed.data:result,name==='yeet_fund'?deposit?.networks:undefined):JSON.stringify(parsed.data);
     // Card only: the server's card build, so a card built from another commit can tell it is stale.
     const cardMeta={[BUILD_META_KEY]:staleness.build,...(confirm?{[CONFIRM_META_KEY]:confirm}:{}),...(account?{[ACCOUNT_META_KEY]:account}:{}),...(deposit?{[DEPOSIT_META_KEY]:deposit}:{}),...(chart?{[CHART_META_KEY]:chart}:{}),...(signer&&SIGNER_TOOLS.has(name)?{[SIGNER_META_KEY]:boundSigner(signer,hint)}:{})};
     // The one-sentence tools (spin, lucky wheel) carry the guidance as a second text block; JSON text already has it.

@@ -82,7 +82,7 @@ assert.ok(env.core.has("YEET_PRIVY_KEY_QUORUM_ID"));
 // The 1Click partner key (ONECLICK_JWT) makes the ledger route's permanent deposit addresses: the core alone reads it,
 // from its env_file; no service gets it through compose. The route's funding settings reach the core only.
 for (const role of Object.keys(roles)) assert.ok(!env[role].has("ONECLICK_JWT"), `${role}: ONECLICK_JWT is never in a compose environment block`);
-for (const name of ["YEET_LEDGER_DEPOSIT_NETWORKS", "YEET_LEDGER_DEPOSIT_STAGES"]) {
+for (const name of ["YEET_LEDGER_DEPOSIT_NETWORKS", "YEET_LEDGER_DEPOSIT_STAGES", "YEET_LEDGER_DEPOSIT_SWEEP_HOURS", "YEET_MIN_DEPOSIT_USDC", "SOLANA_BACKUP_RPC_URL"]) {
   assert.ok(env.core.has(name), `core gets ${name}`);
   assert.ok(!env.as.has(name) && !env.mcp.has(name), `${name} is the core's alone`);
 }

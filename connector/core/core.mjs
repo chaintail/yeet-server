@@ -336,7 +336,7 @@ app.get('/fund',trade('yeet_fund',async(e,ctx)=>{
  // deposit. No card payment and no funding page link: a card payment lands in the person's wallet, not in their
  // ledger account. null for every other account, whose answer below is unchanged.
  const led=await e.ledgerFund?.(ctx,home);
- if(led)return {...fundAnswer(led.usdc??(f?totalUsdc(f.base_usdc,f.solana_usdc):null),null),methods:led.methods,...(led.card_deposit?{card_deposit:led.card_deposit}:{}),...(led.watch?{watch:led.watch}:{})};
+ if(led)return {...fundAnswer(led.usdc??(f?totalUsdc(f.base_usdc,f.solana_usdc):null),null),methods:led.methods,...(led.card_deposit?{card_deposit:led.card_deposit}:{}),...(led.watch?{watch:led.watch}:{}),...(led.min_deposit_usdc?{min_deposit_usdc:led.min_deposit_usdc}:{})};
  const deposit=depositFor(home.wallets,e.funding?.deposits?.());
  return {...fundAnswer(f?totalUsdc(f.base_usdc,f.solana_usdc):totalUsdc(home.wallets?.base?.usdc),await fundLink(ctx.accountId)),...(deposit?{card_deposit:deposit}:{})};
 }));

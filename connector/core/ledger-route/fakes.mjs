@@ -185,7 +185,7 @@ export const accountOf=wallet=>ed25519AccountId(wallet.address);
  * `float` to the solver. The clock moves only when the route sleeps. `restart()` builds a new pipeline over the same
  * database, ledger and 1Click (a process restart: runs in memory are lost, state is kept).
  */
-export function ledgerPipeline({env={},userUsdc=20_000_000n,float=30_000_000n,xp=0,chainHoldings=[],rates=RATES,depositFetch}={}){
+export function ledgerPipeline({env={},userUsdc=20_000_000n,float=30_000_000n,xp=0,chainHoldings=[],rates=RATES,depositFetch,depositRpcFetch}={}){
  const now=fakeClock(),world=fakeLedger({now}),oneclick=fakeLedgerOneClick({world,now,rates}),near=solverKey(),db=openTradeDb(':memory:'),logs=[];
  world.credit(accountOf(aliceWallet),USDC,userUsdc);world.credit(near.accountId,USDC,float);
  const fullEnv={...LEDGER_ENV,YEET_SOLVER_ACCOUNT:near.accountId,...env};
@@ -193,7 +193,7 @@ export function ledgerPipeline({env={},userUsdc=20_000_000n,float=30_000_000n,xp
  const chain=fakeBalances({usdc:'0',holdings:chainHoldings}),rpc=fakeSolanaRpc();
  const build=()=>createPipeline({db,env:fullEnv,client:oneclick,directory,balances:chain,now,trackerIntervalMs:0,landingWatchMs:0,log:l=>logs.push(JSON.parse(l)),xpOf:()=>xp,
   driverOverrides:{rpc,signatureStatus:rpc.signatureStatus,historySignatureStatus:rpc.signatureStatus,feePayer:fakeFeePayer()},
-  ledgerOverrides:{rpc:world.rpc,verifier:world.verifier,near,pollMs:0,unloadWaitMs:30_000,sleep:async ms=>{now.advance(Math.max(ms,500))},...(depositFetch?{depositFetch}:{})}});
+  ledgerOverrides:{rpc:world.rpc,verifier:world.verifier,near,pollMs:0,unloadWaitMs:30_000,sleep:async ms=>{now.advance(Math.max(ms,500))},...(depositFetch?{depositFetch}:{}),...(depositRpcFetch?{depositRpcFetch}:{})}});
  const t={p:build(),db,now,world,oneclick,near,logs,env:fullEnv,chain,restart(){t.p=build();return t.p}};
  return t;
 }

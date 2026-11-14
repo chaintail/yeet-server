@@ -42,10 +42,11 @@ import {xpRuntime} from '../xp/xp.mjs';
 import {averageCost} from '../trade/pnl.mjs';
 import {ledgerConfig} from '../ledger-route/config.mjs';
 import {createLedgerRoute,ledgerBalances,ledgerAccountOf} from '../ledger-route/route.mjs';
-import {createDeposits,depositNetworksFromEnv,depositStagesFromEnv} from '../ledger-route/deposits.mjs';
+import {createDeposits,depositNetworksFromEnv,depositStagesFromEnv,minDepositFromEnv,depositSweepMsFromEnv} from '../ledger-route/deposits.mjs';
+import {createDepositRpc,depositRpcFromEnv} from '../ledger-route/deposit-rpc.mjs';
 import {createSolver,loadSolverKey} from '../ledger-route/solver.mjs';
 import {createNearRpc,createVerifier} from '../intents/verifier.mjs';
-import {NEAR_RPC_URLS} from '../intents/constants.mjs';
+import {NEAR_RPC_URLS,USDC_SOL_TOKEN_ID} from '../intents/constants.mjs';
 
 export const PREVIEW_STALE_MS=60_000;
 export const PRICE_TTL_MS=5*60_000;
@@ -89,12 +90,17 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
  // use below is behind it, so the chain route runs exactly as before. An account on the ledger route has its
  // spendable USDC and its coins read from its own ledger account.
  const ledgerCfg=ledgerConfig(env);
- let ledgerRoute=null,ledgerVerifier=null,ledgerRpc=null,ledgerDeposits=null;
+ let ledgerRoute=null,ledgerVerifier=null,ledgerRpc=null,ledgerDeposits=null,ledgerDepositNetworks=null,ledgerUsdcIds=[USDC_SOL_TOKEN_ID];
  if(ledgerCfg.enabled){
+  // With Base offered for deposits (YEET_LEDGER_DEPOSIT_NETWORKS=solana,base) USDC sent there is credited under
+  // Base's own token id: it then counts as the person's USDC and a buy may be paid with it (docs/LEDGER-ROUTE.md 1.5).
+  ledgerDepositNetworks=depositNetworksFromEnv(env);
+  const baseUsdc=catalog.find(e=>e.chain==='base'&&e.symbol==='USDC')?.assetId;
+  if(ledgerDepositNetworks.includes('base')&&baseUsdc)ledgerUsdcIds=[USDC_SOL_TOKEN_ID,baseUsdc];
   ledgerRpc=ledgerOverrides?.rpc??createNearRpc({urls:ledgerCfg.nearRpc?[ledgerCfg.nearRpc,...NEAR_RPC_URLS]:NEAR_RPC_URLS,fetch});
   ledgerVerifier=ledgerOverrides?.verifier??createVerifier({rpc:ledgerRpc});
   const byAddress=db.prepare('SELECT account_id FROM wallets WHERE address=? OR lower(address)=lower(?)');
-  balances=ledgerBalances(balances,{verifier:ledgerVerifier,catalog,
+  balances=ledgerBalances(balances,{verifier:ledgerVerifier,catalog,usdcTokenIds:ledgerUsdcIds,
    isLedgerAddress:address=>ledgerCfg.route==='ledger'||byAddress.all(address,address).some(r=>ledgerCfg.accounts.has(r.account_id))});
  }
  directory??=walletDirectoryFromEnv({env,fetch,didFor});
@@ -121,6 +127,8 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   async tick(){await ledger.releaseDue((addr,memo)=>client.status(addr,memo));
    // Not awaited: it resumes interrupted ledger runs and sells leftover solver inventory, which can take minutes.
    ledgerRoute?.tick().catch(e=>event({event:'ledger_tick_failed',error:String(e?.message??e).slice(0,120)}));
+   // Not awaited either: due reads of deposit addresses nobody has a card open for, and the sweep (it never throws).
+   ledgerDeposits?.tick().catch(e=>event({event:'ledger_deposit_tick_failed',error:String(e?.message??e).slice(0,120)}));
    for(const d of Object.values(drivers))try{await d.accountingTick?.()}catch(e){event({event:'accounting_tick_failed',chain:d.chain,error:String(e?.message??e).slice(0,120)})}}}});
  const trade=id=>db.prepare('SELECT * FROM trades WHERE id=?').get(id);
  const legsOf=id=>db.prepare('SELECT * FROM trade_legs WHERE trade_id=? ORDER BY idx').all(id);
@@ -282,14 +290,19 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
    ...(ledgerOverrides?.sleep?{sleep:ledgerOverrides.sleep}:{}),log:event,...(ledgerOverrides?.pollMs!==undefined?{pollMs:ledgerOverrides.pollMs}:{})});
   // The gate of a ledger trade is the account's alone (kill switch, YEET_LIVE, YEET_LIVE_ACCOUNTS): no network's pause.
   const ledgerPaused=t=>{try{gateFor(null)(t.account_id);return null}catch(e){return e?.detail??'paused'}};
-  ledgerRoute=createLedgerRoute({db,cfg:ledgerCfg,verifier:ledgerVerifier,solver,client,catalog,now,log:event,signWindowMs:SIGN_WINDOW_MS,
+  ledgerRoute=createLedgerRoute({db,cfg:ledgerCfg,verifier:ledgerVerifier,solver,client,catalog,usdcTokenIds:ledgerUsdcIds,now,log:event,signWindowMs:SIGN_WINDOW_MS,
    ...(ledgerOverrides?.unloadWaitMs!==undefined?{unloadWaitMs:ledgerOverrides.unloadWaitMs}:{}),
    hooks:{trade,legsOf,settle:(id,lastError)=>settle(id,lastError),refresh:id=>{try{tracker.refresh(id)}catch(e){ledger.note(id,`refresh: ${e?.message}`)}},
     apply:(id,idx,res)=>tracker.apply(id,idx,res),legNotSent:(id,idx,evidence)=>ledger.legNotSent(id,idx,evidence),raiseAlert:a=>ledger.raiseAlert(a),
     note:(id,message)=>ledger.note(id,message),paused:ledgerPaused,gate:accountId=>gateFor(null)(accountId)}});
   // Funding on this route: the account's permanent deposit addresses (made once, with the 1Click partner key) and the
   // watch of a deposit. Without the key nothing is made and yeet_fund answers that adding funds is not available yet.
-  ledgerDeposits=createDeposits({db,key:env.ONECLICK_JWT?.trim()||undefined,verifier:ledgerVerifier,accountOf:ledgerAccountOf,catalog,networks:depositNetworksFromEnv(env),stages:depositStagesFromEnv(env),
+  // YEET_LEDGER_DEPOSIT_STAGES=rpc: the deposit's own network is read too (deposit-rpc.mjs; SOLANA_RPC_URL,
+  // SOLANA_BACKUP_RPC_URL, BASE_RPC_URL). Without an endpoint for a network the balance alone decides, as before.
+  const depositStages=depositStagesFromEnv(env);
+  const depositChain=depositStages==='rpc'?createDepositRpc({endpoints:depositRpcFromEnv(env,event),fetch:ledgerOverrides?.depositRpcFetch??fetch,now,log:event}):null;
+  ledgerDeposits=createDeposits({db,key:env.ONECLICK_JWT?.trim()||undefined,verifier:ledgerVerifier,accountOf:ledgerAccountOf,catalog,networks:ledgerDepositNetworks,stages:depositStages,
+   chain:depositChain,usdcIds:ledgerUsdcIds,minDeposit:minDepositFromEnv(env),sweepMs:depositSweepMsFromEnv(env),
    fetch:ledgerOverrides?.depositFetch??fetch,now,log:event});
  }
 

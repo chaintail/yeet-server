@@ -20,7 +20,17 @@
 //   found / preparing   only from 1Click's own status of the set (GET /v0/status of the set's internal account: a new
 //               deposit transaction or amount; PROCESSING, a new NEAR transaction or SUCCESS). They are never
 //               inferred: when 1Click reports nothing the stage goes from waiting to ready.
+//   detected    YEET_LEDGER_DEPOSIT_STAGES=rpc: the deposit's own network shows USDC arriving at the person's deposit
+//               address (deposit-rpc.mjs: Folio's watcher logic). It only ever adds a stage: `ready` is read from the
+//               ledger exactly as before, with or without it, and a failed or missing RPC leaves waiting -> ready.
 // A trade of the account moves the same balances, so any trade activity since the last look re-bases the snapshot.
+//
+// WHEN THE NETWORK IS READ (rpc). As Folio does it: reading starts when the person opens the Add funds card and backs
+// off with the time since (CHAIN_SCHEDULE: every 10 s for 2 minutes, 20 s to 10 minutes, 60 s to 30 minutes, then
+// without the card every 5 minutes to 2 hours and every 30 minutes to 24 hours, then not at all); a read that fails
+// waits 30 s, doubling to 10 minutes. Once a deposit is seen the network is not asked again for that watch. A sweep
+// (every YEET_LEDGER_DEPOSIT_SWEEP_HOURS, default 24) reads the USDC sitting at every stored deposit address in
+// batches and starts the same watch for an address that holds some and was not being watched.
 import {createHash} from 'node:crypto';
 import {USDC_SOL_TOKEN_ID} from '../intents/constants.mjs';
 import {formatUnits} from '../trade/router.mjs';
@@ -29,10 +39,16 @@ export const ONECLICK_URL='https://1click.chaindefuser.com';
 export const SET_DEADLINE='2038-01-01T00:00:00.000Z';
 export const ANY_ASSET='1cs_v1:any',SAME_ASSET='1cs_v1:original';
 export const RETRY_MS=10*60_000,READY_HOLD_MS=2*60_000,WATCH_MAX_MS=24*60*60_000,LOOK_TTL_MS=4_000,STATUS_TTL_MS=8_000;
-export const STEPS_STATUS=Object.freeze(['waiting','found','preparing','ready']),STEPS_BALANCE=Object.freeze(['waiting','ready']);
+export const STEPS_STATUS=Object.freeze(['waiting','found','preparing','ready']),STEPS_BALANCE=Object.freeze(['waiting','ready']),STEPS_RPC=Object.freeze(['waiting','detected','ready']);
+/** [age of the watch below which it applies, the time between two reads of the network]. Past the last: no read. */
+export const CHAIN_SCHEDULE=Object.freeze([[2*60_000,10_000],[10*60_000,20_000],[30*60_000,60_000],[2*60*60_000,5*60_000],[24*60*60_000,30*60_000]]);
+/** The card asks every 10 s; a call after a silence longer than this is the person opening the card again. */
+export const CHAIN_REOPEN_MS=60_000,CHAIN_FAIL_START_MS=30_000,CHAIN_FAIL_CAP_MS=600_000,SWEEP_MS=24*60*60_000,TICK_LOOKS=5;
+export const chainInterval=ageMs=>CHAIN_SCHEDULE.find(([until])=>ageMs<until)?.[1]??null;
+export const chainFailWait=failures=>Math.min(CHAIN_FAIL_CAP_MS,CHAIN_FAIL_START_MS*2**Math.min(5,Math.max(1,failures)-1));
 /** Card network name -> [1Click blockchain name, the address shape]. Solana first: the route trades from USDC sent there. */
 const NETWORKS=Object.freeze({solana:['sol',/^[1-9A-HJ-NP-Za-km-z]{32,44}$/],base:['base',/^0x[0-9a-fA-F]{40}$/]});
-const ACCOUNT=/^[0-9a-f]{64}$/;
+const ACCOUNT=/^[0-9a-f]{64}$/,TX_ID=/^(0x[0-9a-f]{64}|[1-9A-HJ-NP-Za-km-z]{64,90})$/;
 
 const SCHEMA=`
 CREATE TABLE IF NOT EXISTS ledger_deposit_address(
@@ -57,7 +73,20 @@ CREATE TABLE IF NOT EXISTS ledger_deposit_watch(
   stage TEXT NOT NULL,
   coin TEXT,
   arrived_raw TEXT,
-  done_at INTEGER) STRICT;`;
+  done_at INTEGER) STRICT;
+CREATE TABLE IF NOT EXISTS ledger_deposit_chain(
+  account_id TEXT NOT NULL,
+  network TEXT NOT NULL,
+  address TEXT NOT NULL,                     -- the deposit address read (the stored set's, for this network)
+  cursor TEXT,                               -- JSON baseline of deposit-rpc.mjs; null: to be taken at the next read
+  opened_at INTEGER NOT NULL,                -- when the person opened the card (or the sweep started the watch)
+  asked_at INTEGER NOT NULL,                 -- the card's last call
+  next_at INTEGER NOT NULL,
+  failures INTEGER NOT NULL DEFAULT 0,
+  seen_at INTEGER, seen_raw TEXT, seen_tx TEXT,
+  sweep_raw TEXT, sweep_at INTEGER,          -- what the last sweep found sitting at the address
+  PRIMARY KEY(account_id,network)) STRICT;
+CREATE TABLE IF NOT EXISTS ledger_deposit_sweep(id INTEGER PRIMARY KEY CHECK(id=1), ran_at INTEGER NOT NULL) STRICT;`;
 
 /** The one request a set is made with. `account` is the person's own ledger account, on both sides. */
 export const setRequest=account=>({dry:false,swapType:'ANY_INPUT',originAsset:ANY_ASSET,depositType:'INTENTS',destinationAsset:SAME_ASSET,amount:'0',slippageTolerance:50,
@@ -87,12 +116,27 @@ export function depositNetworksFromEnv(env){
  if(!list.length||list.some(n=>!Object.hasOwn(NETWORKS,n))||new Set(list).size!==list.length)throw Error('Invalid YEET_LEDGER_DEPOSIT_NETWORKS (solana, or solana,base)');
  return list;
 }
-/** YEET_LEDGER_DEPOSIT_STAGES: `status` (default: 1Click's status of the set may show the two middle stages) or
- * `balance` (the ledger balance alone: waiting, ready). */
+/** YEET_LEDGER_DEPOSIT_STAGES: `status` (default: 1Click's status of the set may show the two middle stages),
+ * `balance` (the ledger balance alone: waiting, ready) or `rpc` (the deposit's own network adds `detected`). */
 export function depositStagesFromEnv(env){
  const v=env.YEET_LEDGER_DEPOSIT_STAGES?.trim().toLowerCase()||'status';
- if(v!=='status'&&v!=='balance')throw Error('Invalid YEET_LEDGER_DEPOSIT_STAGES (status or balance)');
+ if(v!=='status'&&v!=='balance'&&v!=='rpc')throw Error('Invalid YEET_LEDGER_DEPOSIT_STAGES (status, balance or rpc)');
  return v;
+}
+/** YEET_MIN_DEPOSIT_USDC: the least to send in one deposit, as the card and the model state it (default 5; 0: none
+ * stated). Information only: nothing here or anywhere refuses a smaller deposit. Returns '5' or null. */
+export function minDepositFromEnv(env){
+ const v=env.YEET_MIN_DEPOSIT_USDC?.trim()||'5';
+ if(!/^(0|[1-9]\d{0,5})(\.\d{1,2})?$/.test(v))throw Error('Invalid YEET_MIN_DEPOSIT_USDC (a USDC amount like 5)');
+ const n=v.includes('.')?v.replace(/0+$/,'').replace(/\.$/,''):v;
+ return Number(n)>0?n:null;
+}
+/** YEET_LEDGER_DEPOSIT_SWEEP_HOURS: hours between two sweeps of every stored deposit address (default 24; 0: none). */
+export function depositSweepMsFromEnv(env){
+ const v=env.YEET_LEDGER_DEPOSIT_SWEEP_HOURS?.trim();
+ if(!v)return SWEEP_MS;
+ if(!/^\d{1,3}$/.test(v))throw Error('Invalid YEET_LEDGER_DEPOSIT_SWEEP_HOURS (0..999)');
+ return Number(v)*60*60_000;
 }
 
 const short=(v,n=160)=>String(v??'').replace(/\s+/g,' ').slice(0,n);
@@ -138,9 +182,15 @@ export function stageFromStatus(base,cur){
  * `key` = the 1Click partner key (undefined: nothing can be made, and funding answers "not available").
  * `verifier` = core/intents/verifier.mjs (holdings or balances), `accountOf(solanaAddress)` = the ledger account.
  * `symbolOf(tokenId)` names a token for the "other coin" line (null: not named).
+ * `chain` = deposit-rpc.mjs createDepositRpc (stages `rpc`; null or without an endpoint for an offered network: the
+ * balance alone). `usdcIds` = the ledger token ids that count as the person's USDC (Solana's; Base's too when Base
+ * is offered). `minDeposit` = the stated minimum ('5') or null.
  */
-export function createDeposits({db,key,verifier,accountOf,catalog=[],networks=['solana'],stages='status',fetch=globalThis.fetch,now=Date.now,log=()=>{},baseUrl=ONECLICK_URL,timeoutMs=15_000,retryMs=RETRY_MS}){
+export function createDeposits({db,key,verifier,accountOf,catalog=[],networks=['solana'],stages='status',fetch=globalThis.fetch,now=Date.now,log=()=>{},baseUrl=ONECLICK_URL,timeoutMs=15_000,retryMs=RETRY_MS,
+ chain=null,usdcIds=[USDC_SOL_TOKEN_ID],minDeposit=null,sweepMs=SWEEP_MS}){
  db.exec(SCHEMA);
+ const watched=stages==='rpc'&&chain?networks.filter(n=>chain.has(n)):[];
+ const usdcOf=bal=>usdcIds.reduce((a,id)=>a+big(bal[id]),0n);
  const call=key?oneClick({key,fetch,baseUrl,timeoutMs}):null;
  const flights=new Map(),looks=new Map(),statuses=new Map();
  const rowOf=accountId=>db.prepare('SELECT * FROM ledger_deposit_address WHERE account_id=?').get(accountId)??null;
@@ -241,11 +291,11 @@ export function createDeposits({db,key,verifier,accountOf,catalog=[],networks=['
  const hasActivity=db.prepare("SELECT 1 FROM trades WHERE account_id=? AND (status IN('signing','submitted','settling') OR updated_at>=?) LIMIT 1");
  /** {token id: raw string} of everything the account holds, USDC always present. */
  async function snapshot(account){
-  const out={[USDC_SOL_TOKEN_ID]:'0'};
+  const out=Object.fromEntries(usdcIds.map(id=>[id,'0']));
   if(typeof verifier.holdings==='function'){for(const h of await verifier.holdings(account))out[h.tokenId]=h.amount.toString();return out}
   // a verifier without enumeration (tests): USDC and the catalogue coins
-  const ids=[...new Set([USDC_SOL_TOKEN_ID,...coins.map(c=>c.assetId)])],bal=await verifier.balances(account,ids);
-  ids.forEach((id,i)=>{if(bal[i]>0n||id===USDC_SOL_TOKEN_ID)out[id]=bal[i].toString()});
+  const ids=[...new Set([...usdcIds,...coins.map(c=>c.assetId)])],bal=await verifier.balances(account,ids);
+  ids.forEach((id,i)=>{if(bal[i]>0n||usdcIds.includes(id))out[id]=bal[i].toString()});
   return out;
  }
  async function readStatus(row){
@@ -260,20 +310,82 @@ export function createDeposits({db,key,verifier,accountOf,catalog=[],networks=['
   statuses.set(row.account_id,{at:now(),value});if(statuses.size>500)statuses.delete(statuses.keys().next().value);
   return value;
  }
+ const big=v=>{try{return BigInt(v??'0')}catch{return 0n}};
  const symbolOf=id=>{const c=coins.find(e=>e.assetId===id);if(c&&/^[A-Za-z0-9$.]{1,16}$/.test(c.symbol))return c.symbol;
   // an omni token id names its chain: nep141:sol.omft.near is the chain's own coin
   const m=/^nep141:([a-z]{2,8})\.omft\.near$/.exec(id);return m?m[1].toUpperCase():null};
- const big=v=>{try{return BigInt(v??'0')}catch{return 0n}};
- const steps=()=>stages==='status'&&call?[...STEPS_STATUS]:[...STEPS_BALANCE];
- const answer=(w,cur)=>({steps:steps(),stage:w.stage,...(w.stage==='ready'&&w.arrived_raw?{arrived_usdc:formatUnits(big(w.arrived_raw),6)}:{}),...(w.stage==='other_coin'&&w.coin?{coin:w.coin}:{}),usdc_raw:big(cur[USDC_SOL_TOKEN_ID])});
+ const steps=()=>watched.length?[...STEPS_RPC]:stages==='status'&&call?[...STEPS_STATUS]:[...STEPS_BALANCE];
+ /** What the network showed for this watch: {amount_raw, tx} of the first network that saw a deposit, or null. */
+ const seenOf=accountId=>{const r=db.prepare('SELECT seen_raw,seen_tx FROM ledger_deposit_chain WHERE account_id=? AND seen_at IS NOT NULL ORDER BY seen_at LIMIT 1').get(accountId);return r?{amount_raw:r.seen_raw,tx:r.seen_tx}:null};
+ const detectedOf=accountId=>{const d=seenOf(accountId);return {...(d?.amount_raw&&big(d.amount_raw)>0n?{detected_usdc:formatUnits(big(d.amount_raw),6)}:{}),...(TX_ID.test(d?.tx??'')?{detected_tx:d.tx}:{})}};
+ const answer=(w,cur)=>({steps:steps(),stage:w.stage,...(w.stage==='ready'&&w.arrived_raw?{arrived_usdc:formatUnits(big(w.arrived_raw),6)}:{}),...(w.stage==='detected'?detectedOf(w.account_id):{}),...(w.stage==='other_coin'&&w.coin?{coin:w.coin}:{}),usdc_raw:usdcOf(cur)});
+
+ // ---- the deposit's own network (stages rpc) ----
+ const chainRow=(accountId,network)=>db.prepare('SELECT * FROM ledger_deposit_chain WHERE account_id=? AND network=?').get(accountId,network)??null;
+ const chainFlights=new Map();
+ /** The addresses of a stored set on the networks that are read: [{network,address}]. */
+ function targetsOf(row){
+  if(!watched.length||!row)return [];
+  let a;try{a=JSON.parse(row.addresses)}catch{return []}
+  return (networksOf(a,watched)?.networks)??[];
+ }
+ /** A new watch begins (the person's, or the sweep's): a fresh baseline, nothing seen, the schedule from its start. */
+ function chainOpen(accountId,targets,at){
+  for(const t of targets)db.prepare(`INSERT INTO ledger_deposit_chain(account_id,network,address,cursor,opened_at,asked_at,next_at,failures) VALUES(?,?,?,NULL,?,?,?,0)
+    ON CONFLICT(account_id,network) DO UPDATE SET address=excluded.address,cursor=NULL,opened_at=excluded.opened_at,asked_at=excluded.asked_at,next_at=excluded.next_at,failures=0,seen_at=NULL,seen_raw=NULL,seen_tx=NULL`)
+   .run(accountId,t.network,t.address,at,at,at);
+ }
+ /** One read of one network when it is due. Never throws: a failure waits (30 s doubling to 10 min). */
+ async function chainRead(accountId,t,at){
+  const c=chainRow(accountId,t.network);
+  if(!c||c.seen_at!==null||c.address!==t.address||at<c.next_at)return;
+  const age=at-c.opened_at,every=chainInterval(age);
+  if(every===null)return;
+  let cursor=null;try{cursor=c.cursor?JSON.parse(c.cursor):null}catch{cursor=null}
+  try{
+   if(!cursor){
+    const mark=await chain.mark(t.network,t.address);
+    db.prepare('UPDATE ledger_deposit_chain SET cursor=?,next_at=?,failures=0 WHERE account_id=? AND network=? AND opened_at=?').run(JSON.stringify(mark),at+every,accountId,t.network,c.opened_at);
+    return;
+   }
+   const r=await chain.look(t.network,t.address,cursor,{sinceMs:Math.max(0,at-c.next_at)+2*every});
+   const seen=r.seen?[at,r.seen.amount_raw??null,r.seen.tx??null]:[null,null,null];
+   db.prepare('UPDATE ledger_deposit_chain SET cursor=?,next_at=?,failures=0,seen_at=?,seen_raw=?,seen_tx=? WHERE account_id=? AND network=? AND opened_at=?').run(JSON.stringify(r.cursor),at+every,...seen,accountId,t.network,c.opened_at);
+   if(r.seen)log({event:'ledger_deposit_detected',account:accountId,network:t.network,usdc_raw:r.seen.amount_raw??null,tx:short(r.seen.tx??'',100)||null});
+  }catch(e){
+   const failures=c.failures+1;
+   db.prepare('UPDATE ledger_deposit_chain SET failures=?,next_at=? WHERE account_id=? AND network=? AND opened_at=?').run(failures,at+chainFailWait(failures),accountId,t.network,c.opened_at);
+   log({event:'ledger_deposit_rpc_look_failed',account:accountId,network:t.network,failures,why:short(e?.message,80)});
+  }
+ }
+ /** Every due network of one account, one flight at a time. */
+ function chainLook(accountId,targets,at){
+  if(!targets.length)return Promise.resolve();
+  if(!chainFlights.has(accountId))chainFlights.set(accountId,Promise.all(targets.map(t=>chainRead(accountId,t,at))).catch(()=>{}).finally(()=>chainFlights.delete(accountId)));
+  return chainFlights.get(accountId);
+ }
+ /** The card asked: the person is looking. A call after a silence is the card opened again: the schedule restarts. */
+ function chainAsked(accountId,targets,at,fresh){
+  if(!targets.length)return;
+  const rows=targets.map(t=>chainRow(accountId,t.network));
+  if(fresh||rows.some((c,i)=>!c||c.address!==targets[i].address)){chainOpen(accountId,targets,at);return}
+  const reopened=rows.some(c=>at-c.asked_at>CHAIN_REOPEN_MS||at<c.asked_at);
+  // a failure's wait in progress is kept (Folio: a signal never reads faster than the backoff allows)
+  db.prepare(`UPDATE ledger_deposit_chain SET asked_at=?${reopened?',opened_at=?,next_at=CASE WHEN failures>0 THEN next_at ELSE min(next_at,?) END':''} WHERE account_id=?`).run(...(reopened?[at,at,at,accountId]:[at,accountId]));
+ }
  /** One look at the account for the Add funds card: {steps, stage, arrived_usdc?, coin?, usdc_raw}. Throws when the
   * ledger cannot be read (the caller then answers without a watch). */
  async function watch(accountId,account,row){
   const at=now(),seen=looks.get(accountId);
   if(seen&&at-seen.at<LOOK_TTL_MS&&at>=seen.at)return seen.value;
-  const [cur,status]=await Promise.all([snapshot(account),setStatus(row).catch(()=>null)]);
+  const isFresh=w=>!w||(w.done_at!==null&&at-w.done_at>READY_HOLD_MS)||(w.done_at===null&&at-w.started_at>WATCH_MAX_MS)||at<w.started_at;
+  // The deposit's own network (stages rpc), read beside the ledger and never instead of it: while a watch is open
+  // and nothing was seen yet, on the schedule. Whatever happens there, the ledger read below decides `ready`.
+  const targets=targetsOf(row),before=targets.length?db.prepare('SELECT * FROM ledger_deposit_watch WHERE account_id=?').get(accountId)??null:null;
+  if(targets.length&&(isFresh(before)||before.done_at===null))chainAsked(accountId,targets,at,isFresh(before));
+  const [cur,status]=await Promise.all([snapshot(account),setStatus(row).catch(()=>null),targets.length&&(isFresh(before)||before.done_at===null)?chainLook(accountId,targets,at):null]);
   let w=db.prepare('SELECT * FROM ledger_deposit_watch WHERE account_id=?').get(accountId)??null;
-  const fresh=!w||(w.done_at!==null&&at-w.done_at>READY_HOLD_MS)||(w.done_at===null&&at-w.started_at>WATCH_MAX_MS)||at<w.started_at;
+  const fresh=isFresh(w);
   if(fresh){
    w={account_id:accountId,started_at:at,checked_at:at,base:JSON.stringify(cur),status_base:status?JSON.stringify(status):null,stage:'waiting',coin:null,arrived_raw:null,done_at:null};
   }else if(w.done_at===null){
@@ -282,15 +394,18 @@ export function createDeposits({db,key,verifier,accountOf,catalog=[],networks=['
    // A trade of this account moved the same balances: what it changed is not a deposit.
    if(hasActivity.get(accountId,w.checked_at)){base={...cur};if(status)statusBase=status}
    else{
-    const up=big(cur[USDC_SOL_TOKEN_ID])-big(base[USDC_SOL_TOKEN_ID]);
+    // USDC is every token id that counts as the person's USDC (Base's too when Base is offered): each one's own rise
+    const up=usdcIds.reduce((a,id)=>{const d=big(cur[id])-big(base[id]);return d>0n?a+d:a},0n);
     if(up>0n){w.stage='ready';w.arrived_raw=up.toString();w.coin=null;w.done_at=at;log({event:'ledger_deposit_arrived',account:accountId,usdc_raw:up.toString()})}
     else{
-     const other=Object.keys(cur).find(id=>id!==USDC_SOL_TOKEN_ID&&big(cur[id])>big(base[id]));
+     const other=Object.keys(cur).find(id=>!usdcIds.includes(id)&&big(cur[id])>big(base[id]));
      if(other){if(w.stage!=='other_coin')log({event:'ledger_deposit_other_coin',account:accountId,token:short(other,80)});w.stage='other_coin';w.coin=symbolOf(other)}
      else if(w.stage!=='other_coin'){
       const s=stageFromStatus(statusBase,status);
       // never backwards: a later look that shows less keeps the stage already reached
       if(s&&STEPS_STATUS.indexOf(s)>STEPS_STATUS.indexOf(w.stage))w.stage=s;
+      // the network saw the USDC arrive at the deposit address: one stage more, never a condition of `ready`
+      if(w.stage==='waiting'&&targets.length&&seenOf(accountId))w.stage='detected';
      }
      // a balance that fell (a trade spent it) lowers the mark, so a later deposit still shows as a rise
      for(const id of Object.keys(base))if(big(cur[id])<big(base[id]))base[id]=cur[id]??'0';
@@ -307,9 +422,44 @@ export function createDeposits({db,key,verifier,accountOf,catalog=[],networks=['
   return value;
  }
 
+ // ---- the sweep: every stored deposit address, whether or not its person ever opened the card ----
+ let sweeping=null;
+ /** Reads the USDC sitting at every stored address of the read networks (Solana: 100 addresses a call) and writes
+  * what it finds to the log: USDC at an address nobody has a card open for (`ledger_deposit_sweep_found`: someone
+  * sent without opening the card; the ledger credits it by itself), and USDC that sat there at the last sweep too
+  * (`ledger_deposit_sitting`: 1Click has not moved it on, the operator's to look at). It changes no watch and no
+  * balance. Returns {addresses, holding, found, sitting}. */
+ async function sweep(at){
+  let addresses=0,holding=0,found=0,sitting=0;
+  const rows=db.prepare("SELECT * FROM ledger_deposit_address WHERE state='ready' AND recipient=ledger_account AND refund_to=ledger_account ORDER BY account_id").all();
+  for(const network of watched){
+   const list=rows.flatMap(r=>targetsOf(r).filter(t=>t.network===network).map(t=>({accountId:r.account_id,...t})));
+   if(!list.length)continue;
+   let bal;
+   try{bal=await chain.balances(network,list.map(x=>x.address))}catch(e){log({event:'ledger_deposit_sweep_failed',network,why:short(e?.message,80)});continue}
+   addresses+=list.length;
+   for(const [i,x] of list.entries()){
+    const raw=(bal[i]??0n).toString(),c=chainRow(x.accountId,network);
+    if(raw!=='0'){
+     holding+=1;
+     const w=db.prepare('SELECT done_at FROM ledger_deposit_watch WHERE account_id=?').get(x.accountId)??null;
+     const open=!!c&&c.address===x.address&&at-c.asked_at<=CHAIN_SCHEDULE[2][0]&&at>=c.asked_at&&!!w&&w.done_at===null;
+     if(c?.sweep_at!=null&&c.sweep_raw===raw&&c.address===x.address){sitting+=1;log({event:'ledger_deposit_sitting',account:x.accountId,network,usdc_raw:raw,since:new Date(c.sweep_at).toISOString()})}
+     else if(!open){found+=1;log({event:'ledger_deposit_sweep_found',account:x.accountId,network,usdc_raw:raw})}
+    }
+    // a row for an address nobody watched yet: no baseline, no schedule (the card opening starts both)
+    db.prepare(`INSERT INTO ledger_deposit_chain(account_id,network,address,cursor,opened_at,asked_at,next_at,failures,sweep_raw,sweep_at) VALUES(?,?,?,NULL,0,0,0,0,?,?)
+      ON CONFLICT(account_id,network) DO UPDATE SET sweep_raw=excluded.sweep_raw,sweep_at=CASE WHEN ledger_deposit_chain.sweep_raw=excluded.sweep_raw AND ledger_deposit_chain.sweep_at IS NOT NULL THEN ledger_deposit_chain.sweep_at ELSE excluded.sweep_at END`)
+     .run(x.accountId,network,x.address,raw,at);
+   }
+  }
+  log({event:'ledger_deposit_sweep',addresses,holding,found,sitting});
+  return {addresses,holding,found,sitting};
+ }
+
  return {
   /** Whether a set can be made at all (the partner key is configured). */
-  enabled:!!call,networks:[...networks],
+  enabled:!!call,networks:[...networks],watched:[...watched],
   ensure,watch,rowOf,
   /** yeet_fund for an account on the ledger route. Card payments are not offered: they land in the person's wallet,
    * not in their ledger account. Returns {methods, card_deposit?, watch?, usdc_raw?}; never throws. */
@@ -319,8 +469,32 @@ export function createDeposits({db,key,verifier,accountOf,catalog=[],networks=['
    let w=null;
    try{w=await watch(accountId,set.account,set.row)}catch(e){log({event:'ledger_deposit_watch_failed',account:accountId,error:short(e?.message,120)})}
    const {usdc_raw,...shown}=w??{};
-   return {methods:['crypto'],card_deposit:set.deposit,...(w?{watch:shown,usdc_raw}:{})};
+   return {methods:['crypto'],card_deposit:set.deposit,...(minDeposit?{min_deposit_usdc:minDeposit}:{}),...(w?{watch:shown,usdc_raw}:{})};
   },
+  /** The stated minimum for one deposit ('5'), or null. Information only. */
+  minDeposit,
+  /** Background work (the pipeline's tick): the due network reads of watches nobody has a card open for, a few at a
+   * time, and the sweep when it is due. Never throws. */
+  async tick(){
+   if(!watched.length)return {looked:0,swept:null};
+   const at=now();let looked=0;
+   const due=db.prepare(`SELECT c.account_id FROM ledger_deposit_chain c JOIN ledger_deposit_watch w ON w.account_id=c.account_id
+     WHERE c.seen_at IS NULL AND c.next_at<=? AND ?-c.opened_at<? AND w.done_at IS NULL GROUP BY c.account_id ORDER BY min(c.next_at) LIMIT ?`).all(at,at,CHAIN_SCHEDULE.at(-1)[0],TICK_LOOKS);
+   for(const d of due){
+    const row=rowOf(d.account_id);if(row?.state!=='ready')continue;
+    await chainLook(d.account_id,targetsOf(row),at);looked+=1;
+    if(seenOf(d.account_id))db.prepare("UPDATE ledger_deposit_watch SET stage='detected' WHERE account_id=? AND stage='waiting' AND done_at IS NULL").run(d.account_id);
+   }
+   let swept=null;
+   const last=db.prepare('SELECT ran_at FROM ledger_deposit_sweep WHERE id=1').get()?.ran_at??null;
+   if(sweepMs>0&&!sweeping&&(last===null||at-last>=sweepMs||at<last)){
+    db.prepare('INSERT INTO ledger_deposit_sweep(id,ran_at) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET ran_at=excluded.ran_at').run(at);
+    sweeping=sweep(at).catch(e=>{log({event:'ledger_deposit_sweep_failed',why:short(e?.message,80)});return null}).finally(()=>{sweeping=null});
+    swept=await sweeping;
+   }
+   return {looked,swept};
+  },
+  sweep:()=>sweep(now()),
   /** Operator view of a stored set (ops/ledger-route-check.mjs): never the internal account's key material, there is none. */
   describe(accountId){const r=rowOf(accountId);if(!r)return null;let a=[];try{a=JSON.parse(r.addresses??'[]')}catch{}
    return {account_id:r.account_id,ledger_account:r.ledger_account,state:r.state,source:r.source,correlation_id:r.correlation_id,internal_address:r.internal_address,created_at:r.created_at,last_error:r.last_error,
