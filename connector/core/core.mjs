@@ -19,7 +19,7 @@ import {winnerOf} from './trade/pnl.mjs';
 import {boardAnswer} from './xp/boards.mjs';
 import {TERMS_VERSION,REQUIRED_IDS,termsObject,checkAcceptance,termsOpen,termsLinkFor} from './terms.mjs';
 import {requireLinkKey,withLinkToken} from '#shared/link-token.mjs';
-import {acceptanceOf,recordAcceptance,useTermsLink,referralOf,decideReferral,referralCode} from './terms-store.mjs';
+import {acceptanceOf,recordAcceptance,acceptViaLink,referralOf,decideReferral,referralCode} from './terms-store.mjs';
 import {createAccountLogin,withCardAccount,hintFor} from './account-login.mjs';
 import {hasScope} from '#scope-catalog';
 // Accounts are created on the first verified sign-in (identity-store.mjs). The identity app is Privy in
@@ -211,12 +211,19 @@ app.post('/terms/accept',async(q,r)=>{
   console.log(JSON.stringify({event:'terms_refused',account:q.subject,version:String(b.version).slice(0,20),reason:check.reason,missing:check.missing,source}));
   return r.status(403).json({...failure('TERMS_REQUIRED'),terms:termsOf(q.subject),reason:check.reason,missing:check.missing});
  }
- if(viaLink&&!useTermsLink(b.token_id,q.subject)){
-  console.log(JSON.stringify({event:'terms_link_reused',account:q.subject}));
-  return r.status(409).json({error:'LINK_USED',terms:termsOf(q.subject)});
+ // The link path: the token id and the acceptance go in together or not at all (terms-store.mjs acceptViaLink).
+ let record,fresh;
+ if(viaLink){
+  const out=acceptViaLink({accountId:q.subject,tokenId:b.token_id,version:TERMS_VERSION,statements:check.confirmed});
+  if(out.used){
+   console.log(JSON.stringify({event:'terms_link_reused',account:q.subject}));
+   return r.status(409).json({error:'LINK_USED',terms:termsOf(q.subject)});
+  }
+  ({record,fresh}=out);
+ }else{
+  const session=source==='chat'&&typeof b.session==='string'?b.session.slice(0,200):null;
+  ({record,fresh}=recordAcceptance({accountId:q.subject,version:TERMS_VERSION,statements:check.confirmed,source,clientId:q.role==='mcp'?q.principal.client:'terms-page',session}));
  }
- const session=source==='chat'&&typeof b.session==='string'?b.session.slice(0,200):null;
- const {record,fresh}=recordAcceptance({accountId:q.subject,version:TERMS_VERSION,statements:check.confirmed,source,clientId:q.role==='mcp'?q.principal.client:viaLink?TERMS_LINK:'terms-page',session});
  console.log(JSON.stringify({event:'terms_accepted',account:q.subject,version:record.version,statements:record.statements,accepted_at:record.accepted_at,source:record.source,client:record.client_id,session:record.session,fresh}));
  const terms=withTermsLink(termsObject(record),q.subject);
  if(q.role==='as')return r.json({terms});

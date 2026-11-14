@@ -35,8 +35,8 @@ export function acceptanceOf(accountId,version){
 export const TERMS_SOURCES=Object.freeze(['chat','page','terms-link']);
 const TOKEN_ID=/^[A-Za-z0-9_-]{16,32}$/;
 /**
- * Marks a terms link token used. Returns true the first time, false when that id was used before (by any account).
- * Throws on a malformed id.
+ * Marks a terms link token used, by itself. Returns true the first time, false when that id was used before (by any
+ * account). Throws on a malformed id. The acceptance path uses acceptViaLink (one transaction), not this.
  */
 export function useTermsLink(tokenId,accountId,{now=Date.now()}={}){
  if(typeof tokenId!=='string'||!TOKEN_ID.test(tokenId))throw Error('Invalid token id');
@@ -44,6 +44,27 @@ export function useTermsLink(tokenId,accountId,{now=Date.now()}={}){
  const conn=database();
  conn.prepare('DELETE FROM terms_links_used WHERE used_at<?').run(now-24*3600_000);
  return conn.prepare('INSERT OR IGNORE INTO terms_links_used VALUES(?,?,?)').run(tokenId,accountId,now).changes===1;
+}
+/**
+ * The link path, as ONE transaction: the token id is marked used AND the acceptance is recorded, or neither is.
+ * A token that was used before records nothing ({used: true}). Anything that fails in between (a full disk, a
+ * refused row) rolls the token back too, so a failed acceptance never burns the person's link.
+ * -> {used: true, record: null} | {used: false, record, fresh}
+ */
+export function acceptViaLink({tokenId,accountId,version,statements,now=Date.now()}){
+ if(typeof tokenId!=='string'||!TOKEN_ID.test(tokenId))throw Error('Invalid token id');
+ if(!validAccount(accountId))throw Error('Invalid account');
+ const conn=database();
+ conn.exec('BEGIN IMMEDIATE');
+ try{
+  conn.prepare('DELETE FROM terms_links_used WHERE used_at<?').run(now-24*3600_000);
+  if(conn.prepare('INSERT OR IGNORE INTO terms_links_used VALUES(?,?,?)').run(tokenId,accountId,now).changes!==1){conn.exec('COMMIT');return {used:true,record:null}}
+  const r=conn.prepare('INSERT OR IGNORE INTO terms_acceptances VALUES(?,?,?,?,?,?,?)').run(accountId,version,JSON.stringify(statements),now,'terms-link','terms-link',null);
+  const record=row(conn.prepare('SELECT * FROM terms_acceptances WHERE account_id=? AND version=?').get(accountId,version));
+  if(!record)throw Error('Acceptance not recorded');
+  conn.exec('COMMIT');
+  return {used:false,record,fresh:r.changes===1};
+ }catch(e){conn.exec('ROLLBACK');throw e}
 }
 /** Records an acceptance; the first one for (account, version) stands. Returns {record, fresh}. */
 export function recordAcceptance({accountId,version,statements,source,clientId=null,session=null,now=Date.now()}){

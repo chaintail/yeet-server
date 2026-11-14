@@ -13,7 +13,7 @@ const { termsRoutes, TERMS_DONE, TERMS_ALREADY } = await import("../terms-page.m
 const { hintReader, EXPIRED_LINK_LINE } = await import("../account-bound.mjs");
 const { deriveLinkKey, mintLinkToken, verifyLinkToken } = await import("#shared/link-token.mjs");
 const { TERMS_VERSION, REQUIRED_IDS, STATEMENTS, termsObject, checkAcceptance, termsLinkFor } = await import("../../core/terms.mjs");
-const { acceptanceOf, recordAcceptance, useTermsLink } = await import("../../core/terms-store.mjs");
+const { acceptanceOf, recordAcceptance, useTermsLink, acceptViaLink } = await import("../../core/terms-store.mjs");
 
 const key = deriveLinkKey("k".repeat(40));
 const A = "yeet-privy-AAAAAAAAAAAAAAAAAAAAAA", B = "yeet-privy-BBBBBBBBBBBBBBBBBBBBBB";
@@ -32,8 +32,8 @@ async function core(route, account, body) {
     const confirmed = viaLink ? body.confirmed.filter((id) => REQUIRED_IDS.includes(id)) : body.confirmed;
     const check = body.version === version ? checkAcceptance({ version: TERMS_VERSION, confirmed }) : { ok: false, reason: "version" };
     if (!check.ok) return { status: 403, body: { error: "TERMS_REQUIRED", reason: check.reason, terms: terms() } };
-    if (viaLink && !useTermsLink(body.token_id, account)) return { status: 409, body: { error: "LINK_USED", terms: terms() } };
-    recordAcceptance({ accountId: account, version: TERMS_VERSION, statements: check.confirmed, source: viaLink ? "terms-link" : "page", clientId: viaLink ? "terms-link" : "terms-page" });
+    if (viaLink) { if (acceptViaLink({ tokenId: body.token_id, accountId: account, version: TERMS_VERSION, statements: check.confirmed }).used) return { status: 409, body: { error: "LINK_USED", terms: terms() } }; }
+    else recordAcceptance({ accountId: account, version: TERMS_VERSION, statements: check.confirmed, source: "page", clientId: "terms-page" });
     return { status: 200, body: { terms: terms() } };
   }
   return { status: 404, body: null };
@@ -218,4 +218,30 @@ test("the terms changed while the page was open: nothing is recorded and the tok
     assert.equal(acceptanceOf(C, TERMS_VERSION), null);
     assert.equal(useTermsLink(id, C), true, "a refused acceptance did not spend the token");
   } finally { version = TERMS_VERSION; }
+});
+
+test("N3: the token and the acceptance are one transaction: a failed acceptance does not burn the link", async () => {
+  const D = "yeet-privy-DDDDDDDDDDDDDDDDDDDDDD", id = "txid000000000001";
+  // The acceptance cannot be written (here: statements that cannot be stored), AFTER the token row went in:
+  // everything rolls back.
+  assert.throws(() => acceptViaLink({ tokenId: id, accountId: D, version: TERMS_VERSION, statements: [10n] }), TypeError);
+  assert.equal(acceptanceOf(D, TERMS_VERSION), null, "nothing was recorded");
+  // The same token still works: it was not marked used by the failed try.
+  const first = acceptViaLink({ tokenId: id, accountId: D, version: TERMS_VERSION, statements: [...REQUIRED_IDS], now: 1_800_000_000_000 });
+  assert.equal(first.used, false); assert.equal(first.fresh, true);
+  assert.equal(first.record.source, "terms-link"); assert.equal(first.record.client_id, "terms-link"); assert.equal(first.record.accepted_at, 1_800_000_000_000);
+  // And then it is used: a second call records nothing and changes nothing.
+  assert.deepEqual(acceptViaLink({ tokenId: id, accountId: D, version: TERMS_VERSION, statements: [...REQUIRED_IDS], now: 1_800_000_009_000 }), { used: true, record: null });
+  assert.equal(acceptanceOf(D, TERMS_VERSION).accepted_at, 1_800_000_000_000);
+  // A fresh token after the acceptance: the first acceptance stands (fresh: false), and that token is used too.
+  const second = acceptViaLink({ tokenId: "txid000000000002", accountId: D, version: TERMS_VERSION, statements: [...REQUIRED_IDS], now: 1_800_000_010_000 });
+  assert.equal(second.used, false); assert.equal(second.fresh, false); assert.equal(second.record.accepted_at, 1_800_000_000_000);
+  assert.equal(useTermsLink("txid000000000002", D), false);
+  assert.throws(() => acceptViaLink({ tokenId: "short", accountId: D, version: TERMS_VERSION, statements: [] }), /Invalid token id/);
+  assert.throws(() => acceptViaLink({ tokenId: "txid000000000003", accountId: "nobody", version: TERMS_VERSION, statements: [] }), /Invalid account/);
+  // The core's route calls exactly this, and no longer marks the token on its own first.
+  const { readFileSync } = await import("node:fs");
+  const coreSrc = readFileSync(new URL("../../core/core.mjs", import.meta.url), "utf8");
+  assert.match(coreSrc, /acceptViaLink\(\{accountId:q\.subject,tokenId:b\.token_id,version:TERMS_VERSION,statements:check\.confirmed\}\)/);
+  assert.doesNotMatch(coreSrc, /useTermsLink/);
 });
