@@ -3,6 +3,8 @@
 //   YEET_MIN_SKEET_USDC  minimum USDC a SELL brings in per coin (default 0.5) -> AMOUNT_TOO_SMALL with its own
 //                        sentence. Separate from the buy minimum on purpose: a coin bought at the 3 USDC minimum is
 //                        worth less than 3 after costs, and must still be sellable. Used by skeetPlan only.
+//   YEET_SKEET_WARN_USDC a SELL that is allowed but brings in less than this per coin (default 1) carries the
+//                        warning LEG_SMALL: swap fees take a big part of so small a sale (proposals.mjs view).
 //   BUY caps by XP tier (TIER_DEFAULTS below; per trade and per UTC day)  -> LIMIT_EXCEEDED
 //   YEET_MAX_TRADE_USDC / YEET_DAILY_CAP_USDC  optional global ceilings over every tier (default: the VIP caps).
 //                        Set to the old 25 / 50 they would clamp Winner and VIP: leave them unset in production.
@@ -71,6 +73,7 @@ export function limitsFromEnv(env=process.env){
  return Object.freeze({
   minLegRaw:usdcEnv(env,'YEET_MIN_LEG_USDC','3'),
   minSkeetRaw:usdcEnv(env,'YEET_MIN_SKEET_USDC','0.5'),
+  skeetWarnRaw:usdcEnv(env,'YEET_SKEET_WARN_USDC','1'),
   tiers,
   // Optional global ceilings (the old flat caps): when set they also clamp every tier (capsFor).
   maxTradeRaw:usdcEnv(env,'YEET_MAX_TRADE_USDC',fmt(big(tiers.map(t=>t.maxTradeRaw)))),
@@ -143,11 +146,9 @@ export function recordSpend(db,accountId,ms,addRaw){
  db.prepare('INSERT INTO daily_spend(account_id,day,usdc_raw) VALUES(?,?,?) ON CONFLICT(account_id,day) DO UPDATE SET usdc_raw=excluded.usdc_raw').run(accountId,day,(prior+addRaw).toString());
 }
 
-/** AMOUNT_TOO_SMALL for a SELL, in product voice (contract failure.message): the coins whose sale would bring in less
- * than the sell minimum, the minimum itself, and what works. `small`: [{symbol, percent}] of those coins. Selling all
- * of it is offered only when some of them was asked for in part. */
-export function skeetTooSmall(limits,small){
- const names=small.map(l=>l.symbol),what=names.length===1?names[0]:`${names.slice(0,-1).join(', ')} and ${names.at(-1)}`;
- const all=small.every(l=>l.percent===100);
- return `That much ${what} is too small to sell right now: a sale has to bring in at least ${fmt(limits.minSkeetRaw)} USDC per coin. ${all?'Add to the position first, then sell.':'Sell 100% of it, or add to the position first.'}`;
+/** AMOUNT_TOO_SMALL for a SELL, in product voice (contract failure.message; a card prints it as it is, so it names
+ * no network): the sale is too small, the minimum in force, and why (owner, 2026-11-14: a sale under the minimum does
+ * not cover the swap fees, and those are not YEET's). What works instead is the guidance's part (mcp/guidance.mjs). */
+export function skeetTooSmall(limits){
+ return `This is too small to sell right now. A sale under ${fmt(limits.minSkeetRaw)} USDC would not cover the swap fees. These are network fees, not YEET fees.`;
 }

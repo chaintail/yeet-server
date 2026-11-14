@@ -310,21 +310,24 @@ test('limit refusals: which limit, the numbers from the core sentence, what work
  const small=JSON.parse(toolError({error:'AMOUNT_TOO_SMALL'}).content[0].text);
  assert.match(small.message,new RegExp(`\\(${minLeg} USDC\\)`));
  assert.equal(small.guidance,'YEET errors.AMOUNT_TOO_SMALL.');
- // A SELL under the sell minimum (core/trade/limits.mjs skeetTooSmall): the core's sentence with the coin and the
- // limit in force reaches the model and the card copy, and the guidance offers selling all or adding to the position.
+ 
+ 
+ 
  const sellLimits=limitsFromEnv({}),sellMsg=skeetTooSmall(sellLimits,[{symbol:'WIF',percent:25}]);
- assert.equal(sellMsg,'That much WIF is too small to sell right now: a sale has to bring in at least 0.5 USDC per coin. Sell 100% of it, or add to the position first.');
- assert.equal(skeetTooSmall(limitsFromEnv({YEET_MIN_SKEET_USDC:'2'}),[{symbol:'WIF',percent:100},{symbol:'BOME',percent:100}]),'That much WIF and BOME is too small to sell right now: a sale has to bring in at least 2 USDC per coin. Add to the position first, then sell.');
+ assert.equal(sellMsg,'This is too small to sell right now. A sale under 0.5 USDC would not cover the swap fees. These are network fees, not YEET fees.');
+ assert.equal(skeetTooSmall(limitsFromEnv({YEET_MIN_SKEET_USDC:'2'}),[{symbol:'WIF',percent:100},{symbol:'BOME',percent:100}]),'This is too small to sell right now. A sale under 2 USDC would not cover the swap fees. These are network fees, not YEET fees.');
  const sell=toolError({error:'AMOUNT_TOO_SMALL',message:sellMsg},ALL_P2,{tool:'skeet_propose'}),sellBody=JSON.parse(sell.content[0].text);
  assert.equal(sellBody.message,sellMsg);assert.equal(sellBody.guidance,COPY.errors.AMOUNT_TOO_SMALL_sell);
- assert.match(sellBody.guidance,/YEET/);
+ assert.equal(sellBody.guidance,'YEET errors.AMOUNT_TOO_SMALL_sell.');
  assert.doesNotMatch(sellBody.guidance.replace('100%',''),/\d/,'no number of its own: the minimum is the one in message');
  assert.equal(sell._meta['yeet/failure'].message,sellMsg,'the card gets the same sentence');
+ // What a card prints names no network; only the guidance for the model may name the swap network.
+ assert.doesNotMatch(sellMsg,/NEAR|Intents|Base|Solana/);
  assert.doesNotMatch(sellMsg+sellBody.guidance,/3 USDC|more parts/,'never the buy wording');
  assert.deepEqual(withUserMessage(failure('AMOUNT_TOO_SMALL'),{userMessage:sellMsg}).message,sellMsg);
  assert.equal(withUserMessage(failure('AMOUNT_TOO_SMALL'),{}).message,small.message,'a buy keeps the catalogue sentence');
  rules('AMOUNT_TOO_SMALL sell',sellBody.guidance);
- for(const text of [trade,daily,vip,small.guidance,sellBody.guidance,sellMsg])assert.doesNotMatch(text,VOICE);
+ for(const text of [trade,daily,vip,small.guidance,sellBody.guidance.replace('NEAR Intents',''),sellMsg])assert.doesNotMatch(text,VOICE);
  // Through the tool error the model reads: the core sentence and the guidance together.
  const v=JSON.parse(toolError({error:'LIMIT_EXCEEDED',message:dailyMsg}).content[0].text);
  assert.equal(v.message,dailyMsg);assert.match(v.guidance,/YEET/);

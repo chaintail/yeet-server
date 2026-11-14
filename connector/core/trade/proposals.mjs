@@ -91,6 +91,8 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
   const warnings=[];
   if(bps>COST_WARN_BPS)warnings.push('COST_HIGH');
   if(p.direction==='yeet'&&legs.some(l=>BigInt(l.amount_in_raw)<2n*limits.minLegRaw))warnings.push('LEG_SMALL');
+  // A sale that is allowed but small (a coin brings in less than limits.skeetWarnRaw USDC): swap fees take a big part of it.
+  if(p.direction==='skeet'&&legs.some(l=>BigInt(l.dry_out_raw)<limits.skeetWarnRaw))warnings.push('LEG_SMALL');
   for(const w of extraWarnings)if(!warnings.includes(w))warnings.push(w);
   return {
    proposal_id:p.id,revision,direction:p.direction,

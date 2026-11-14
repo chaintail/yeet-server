@@ -68,6 +68,8 @@ export const COPY=Object.freeze({
  propose_skeet:{
   base:"YEET propose_skeet.base.",
   cost_high:"YEET propose_skeet.cost_high: {cost_pct}.",
+
+  small:"YEET propose_skeet.small.",
  },
  execute_trade:{
   awaiting_signature:"YEET execute_trade.awaiting_signature.",
@@ -229,7 +231,8 @@ function proposal(r){
  const w=new Set(r.warnings??[]);
  if(r.direction==='skeet'){
   const c=COPY.propose_skeet;
-  return join(c.base,w.has('COST_HIGH')?fill(c.cost_high,{cost_pct:r.totals?.cost_pct}):'');
+
+  return join(c.base,w.has('LEG_SMALL')?c.small:w.has('COST_HIGH')?fill(c.cost_high,{cost_pct:r.totals?.cost_pct}):'');
  }
  const c=COPY.propose_yeet;
  const f=fundingOf(r),both=r.funding&&typeof r.funding.base_usdc==='string'&&typeof r.funding.solana_usdc==='string';
