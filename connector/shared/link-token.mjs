@@ -34,14 +34,29 @@ export const LINK_TOKEN_MAX=400;
 const ACCOUNT=/^yeet-privy-[a-zA-Z0-9_-]{1,80}$/;
 const SHAPE=/^v1\.([A-Za-z0-9_-]{8,300})\.([A-Za-z0-9_-]{43})$/;
 
-/** The base key from the shared secret's text. */
+export const LINK_SECRET_MIN=16;
+/** The base key from the shared secret's text. Throws on a missing or short secret; the message never holds it. */
 export function deriveLinkKey(sharedSecret){
- if(typeof sharedSecret!=='string'||sharedSecret.length<16)throw Error('Link token secret unavailable');
+ if(typeof sharedSecret!=='string'||sharedSecret.length<LINK_SECRET_MIN)throw Error(`Link token key unavailable: the core-as service secret is missing or shorter than ${LINK_SECRET_MIN} characters`);
  return createHmac('sha256',sharedSecret).update(LINK_TOKEN_LABEL).digest();
 }
 let cached;
 /** The base key of this process (from /secrets/core-as), read once. */
 export function linkKey(){return cached??=deriveLinkKey(secret('core-as'))}
+/**
+ * Called once when the core and the sign-in server start. Both mint or verify link tokens, and a key that cannot be
+ * derived would make the terms link and the account binding vanish without a word, so the service refuses to start
+ * instead. One log line says why; the secret is never printed. Returns the key.
+ */
+export function requireLinkKey(service,{read=()=>secret('core-as'),log=console.error}={}){
+ let text;
+ try{text=read()}catch{text=undefined}
+ try{return deriveLinkKey(text)}
+ catch(e){
+  log(JSON.stringify({event:'link_key_unavailable',service,reason:typeof text==='string'?'core-as is too short':'core-as could not be read',min_length:LINK_SECRET_MIN}));
+  throw Error(`${service}: ${e.message}`);
+ }
+}
 const purposeKey=(key,purpose)=>createHmac('sha256',key).update(purpose).digest();
 const mac=(key,purpose,body)=>createHmac('sha256',purposeKey(key,purpose)).update(`v1.${body}`).digest();
 

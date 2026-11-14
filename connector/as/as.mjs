@@ -66,10 +66,12 @@ import {
 } from "#shared/common.mjs";
 import { issuableScopes } from "./scopes.mjs";
 import { loginMethods } from "./login-methods.mjs";
-import { linkKey, verifyLinkToken } from "#shared/link-token.mjs";
+import { requireLinkKey, verifyLinkToken } from "#shared/link-token.mjs";
 configuredRefreshWindow();
 // YEET_LOGIN_METHODS (login-methods.mjs): a wrong value stops the server here, not at the first sign-in.
 loginMethods();
+// The key the page link tokens are verified with (shared/link-token.mjs). No usable key: the server does not start.
+const LINK_KEY = requireLinkKey("as");
 const publicBase = process.env.PUBLIC_BASE_URL || AS;
 if (
   PUBLIC &&
@@ -406,7 +408,7 @@ const loginFields = (bound = null, again = false) =>
     ? `<div id="privy-login"${bound ? ` data-bound="1" data-methods="${bound.methods.join(",")}"${again ? ' data-again="1"' : ""}` : ""}><p role="status">Loading secure sign in…</p></div><script type="module" src="/account/privy-login/login.js"></script>`
     : credentials();
 // Signed hints on account-bound links (shared/link-token.mjs purpose `hint`): verified here, never trusted from the page.
-const readHint = hintReader((t) => verifyLinkToken(linkKey(), t, { purpose: "hint" }));
+const readHint = hintReader((t) => verifyLinkToken(LINK_KEY, t, { purpose: "hint" }));
 const expectedAccount = expectedReader((route, account) => coreSend(route, account, secret("core-as")));
 // Public values only: the sign-in page needs the app id.
 app.get("/account/identity-config", (_q, r) =>
@@ -690,7 +692,7 @@ app.post(USERNAME_PATH, formBody, async (q, r) => {
 // through Privy funding (Coinbase Onramp). Needs a YEET sign-in session and the Privy sign-in.
 fundRoutes(app, { enabled: () => process.env.PRIVY_LOGIN === "1", session, hint: readHint, expected: expectedAccount, lookup: lookupAccount, originOK });
 // The YEET terms as a first-party page with checkboxes (terms-page.mjs): the same record as yeet_accept_terms.
-termsRoutes(app, { session, originOK, equal, formBody, hint: readHint, linkToken: (t) => { try { return verifyLinkToken(linkKey(), t, { purpose: "terms" }); } catch { return null; } }, core: (route, account, body) => coreSend(route, account, secret("core-as"), body), document: authDocument });
+termsRoutes(app, { session, originOK, equal, formBody, hint: readHint, linkToken: (t) => { try { return verifyLinkToken(LINK_KEY, t, { purpose: "terms" }); } catch { return null; } }, core: (route, account, body) => coreSend(route, account, secret("core-as"), body), document: authDocument });
 // Card signing (sign-page.mjs): the signer script the trade card loads, and the first-party signing page with its two
 // routes. The page's caller is the Privy user signed in on the page, matched to the account already linked to it.
 signRoutes(app, {

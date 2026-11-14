@@ -18,7 +18,7 @@ import {overview,totalUsdc,welcomeSuggestions} from './overview.mjs';
 import {winnerOf} from './trade/pnl.mjs';
 import {boardAnswer} from './xp/boards.mjs';
 import {TERMS_VERSION,termsObject,checkAcceptance,termsOpen,termsLinkFor} from './terms.mjs';
-import {linkKey,withLinkToken} from '#shared/link-token.mjs';
+import {requireLinkKey,withLinkToken} from '#shared/link-token.mjs';
 import {acceptanceOf,recordAcceptance,referralOf,decideReferral,referralCode} from './terms-store.mjs';
 import {createAccountLogin,withCardAccount,hintFor,methodsOf} from './account-login.mjs';
 import {hasScope} from '#scope-catalog';
@@ -167,8 +167,10 @@ const signHint=(ctx,facts)=>hintFor(ctx.accountId,facts,{key:pageKey()});
 function knownHint(accountId){try{const did=didFor(accountId),facts=did?logins().peek(did):null;return facts?hintFor(accountId,facts,{key:pageKey()}):null}catch{return null}}
 /** The account's funding page link (waits for Privy once, 4 s at most; then cached). */
 async function fundLink(accountId){try{const did=didFor(accountId),facts=did?await logins()(did):null;return fundUrlWithHint(facts?hintFor(accountId,facts,{key:pageKey()}):null)}catch{return fundUrlWithHint(null)}}
-// The key the page links are signed with (shared/link-token.mjs: derived from core-as). Without it the links are plain.
-const pageKey=()=>{try{return linkKey()}catch{return null}};
+// The key the page links are signed with (shared/link-token.mjs: derived from core-as). Checked when the core starts:
+// with no usable key the core does not start, rather than hand out links that bind nothing.
+const LINK_KEY=requireLinkKey('core');
+const pageKey=()=>LINK_KEY;
 // terms.page_url is this account's own link: the terms page opens on the statements and Accept with no sign-in.
 // It also carries the account's sign-in hint when the methods are already known (never waiting for Privy), so a
 // link that has expired still offers the right methods.

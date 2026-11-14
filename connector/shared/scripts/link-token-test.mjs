@@ -77,8 +77,8 @@ test('wrong account: the account is what the mac covers; a token for A is never 
 test('another key (another deployment, or a rotated secret) refuses every token',()=>{
  const other=deriveLinkKey('t'.repeat(40));
  assert.equal(verifyLinkToken(other,terms(),{purpose:'terms',now:T0}),null);
- assert.throws(()=>deriveLinkKey(''),/secret unavailable/);
- assert.throws(()=>deriveLinkKey(undefined),/secret unavailable/);
+ assert.throws(()=>deriveLinkKey(''),/Link token key unavailable/);
+ assert.throws(()=>deriveLinkKey(undefined),/Link token key unavailable/);
  assert.equal(verifyLinkToken(Buffer.alloc(0),terms(),{purpose:'terms',now:T0}),null);
 });
 
@@ -106,4 +106,20 @@ test('withLinkToken adds one query parameter',()=>{
  assert.equal(withLinkToken('https://x.example/sign?a=1','h','tok'),'https://x.example/sign?a=1&h=tok');
  assert.equal(withLinkToken('https://x.example/fund','h',null),'https://x.example/fund');
  assert.equal(withLinkToken(null,'h','tok'),null);
+});
+
+test('start-up check: a missing or short core-as secret stops the service with one clear line and never prints the secret',async()=>{
+ const {requireLinkKey,LINK_SECRET_MIN}=await import('../link-token.mjs');
+ assert.equal(LINK_SECRET_MIN,16);
+ assert.deepEqual(requireLinkKey('core',{read:()=>SECRET,log:()=>{throw Error('nothing to log')}}),key);
+ for(const [bad,reason] of [['short-secret','core-as is too short'],['','core-as is too short'],[undefined,'core-as could not be read']]){
+  const lines=[];
+  assert.throws(()=>requireLinkKey('as',{read:()=>bad,log:l=>lines.push(l)}),/^Error: as: Link token key unavailable: the core-as service secret is missing or shorter than 16 characters$/);
+  assert.deepEqual(lines.map(l=>JSON.parse(l)),[{event:'link_key_unavailable',service:'as',reason,min_length:16}]);
+  if(bad)assert.ok(!lines.join('').includes(bad),'the secret is not in the log line');
+ }
+ // The secret file cannot be read at all.
+ const lines=[];
+ assert.throws(()=>requireLinkKey('core',{read:()=>{throw Error('ENOENT /secrets/core-as')},log:l=>lines.push(l)}),/core: Link token key unavailable/);
+ assert.equal(JSON.parse(lines[0]).reason,'core-as could not be read');
 });
