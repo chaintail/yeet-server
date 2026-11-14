@@ -13,7 +13,7 @@ import {fakeRpc,keyFile} from './base/test-support.mjs';
 import {USDC_SOLANA} from './solana/message.mjs';
 import {balanceLowMessage,forcedBuyChain,BALANCE_TTL_MS} from './funding.mjs';
 import {failure,withUserMessage} from '../failure.mjs';
-import {failureWithFundUrl} from '../fund-link.mjs';
+import {failureWithFundUrl,homeAnswer,depositFor} from '../fund-link.mjs';
 import {toolError} from '../../mcp/errors.mjs';
 import {guidanceFor} from '../../mcp/guidance.mjs';
 import {contract,toolSchemas,zodSchema} from '../../mcp/tool-contract.mjs';
@@ -66,8 +66,8 @@ test('both funded: the larger balance pays; the proposal, the home answer and th
  const home=await f.p.home(ALICE);
  assert.deepEqual(home.funding,{base_usdc:'80',solana_usdc:'30',chosen:'base'});
  assert.equal(home.ready,'ready');assert.equal(home.wallets.base.usdc,'80');
- valid('yeet_home',home);
- assert.match(guidanceFor('yeet_home',home),/they hold 80 USDC on Base and 30 USDC on Solana, and Base pays the next basket/);
+ valid('yeet_home',homeAnswer(home));assert.equal(homeAnswer(home).usdc,'110','one number: both networks');assert.equal('wallets' in homeAnswer(home),false);
+ assert.match(guidanceFor('yeet_home',homeAnswer(home)),/they hold 80 USDC on Base and 30 USDC on Solana, and Base pays the next basket/);
  const {prop,x,origin}=await buy(f);
  assert.deepEqual(prop.funding,{base_usdc:'80',solana_usdc:'30',chosen:'base'});assert.equal(prop.lands_on,'solana');
  assert.deepEqual(prop.warnings.filter(w=>w==='BALANCE_LOW'),[]);
@@ -127,7 +127,7 @@ test('neither network covers the basket alone: BALANCE_LOW says what one basket 
  // Home: nothing on either network reaches the minimum per coin -> needs_funds.
  const empty=world({base:1,sol:2});
  const home=await empty.p.home(ALICE);
- assert.equal(home.ready,'needs_funds');assert.deepEqual(home.funding,{base_usdc:'1',solana_usdc:'2',chosen:null});valid('yeet_home',home);
+ assert.equal(home.ready,'needs_funds');assert.deepEqual(home.funding,{base_usdc:'1',solana_usdc:'2',chosen:null});valid('yeet_home',homeAnswer(home));assert.equal(homeAnswer(home).usdc,'3');
 });
 
 test('YEET_BUY_CHAIN forces one network (the override); unset, empty or auto is the automatic choice',async()=>{
@@ -178,8 +178,8 @@ test('a balance that cannot be read counts as 0 and is said so; the trade goes o
  f.balances.baseUsdc=async()=>{throw Error('rpc down')};
  const home=await f.p.home(ALICE);
  assert.deepEqual(home.funding,{base_usdc:null,solana_usdc:'15',chosen:'solana'});
- assert.equal(home.wallets.base.usdc,null);assert.equal(home.ready,'ready');valid('yeet_home',home);
- assert.match(guidanceFor('yeet_home',home),/ready to YEET with 15 USDC on Solana; their Base balance could not be read just now/);
+ assert.equal(home.wallets.base.usdc,null);assert.equal(home.ready,'ready');valid('yeet_home',homeAnswer(home));assert.equal(homeAnswer(home).usdc,'15');
+ assert.match(guidanceFor('yeet_home',homeAnswer(home)),/ready to YEET with 15 USDC on Solana; their Base balance could not be read just now/);
  const {prop,x,origin}=await buy(f);
  assert.deepEqual(prop.funding,{base_usdc:null,solana_usdc:'15',chosen:'solana'});
  assert.deepEqual(prop.warnings.filter(w=>w==='BALANCE_LOW'),[]);valid('yeet_propose',strip(prop));
@@ -233,4 +233,26 @@ test('the BALANCE_LOW sentence fits the contract message and never invents a num
  // A card prints this sentence as it is: no network in it, whatever the balances.
  for(const args of [{base:usdc(1),sol:usdc(2),open:['sol','base']},{base:usdc(9),sol:usdc(2),open:['sol']},{base:null,sol:null,open:[]}])assert.doesNotMatch(balanceLowMessage({total:usdc(500),...args}),/Base|Solana|network|chain/i);
  assert.ok(m.length<=contract.$defs.failure.properties.message.maxLength);
+});
+
+// The Add funds card (yeet_fund, card-only addresses): which networks it offers, and which one first. Only a network
+// whose USDC can pay a YEET, and first the one a new account's first buy spends from.
+test('deposit networks: automatic offers both with Solana first (a tie pays from Solana); an override, or a pause, offers one',async()=>{
+ const auto=world({base:0,sol:0});
+ assert.deepEqual(auto.p.funding.deposits(),['sol','base']);
+ const w=await auto.p.wallets.require(ALICE.accountId);
+ assert.deepEqual(depositFor(w,auto.p.funding.deposits()),{default:'solana',networks:[{network:'solana',address:w.solana.address},{network:'base',address:w.base.address}]});
+ // Why Solana leads: the same USDC on both networks is a tie, and the tie pays from Solana.
+ const tie=world({base:20,sol:20});
+ assert.equal((await buy(tie)).origin,'sol');
+ // USDC sent to the default network pays a new account's first buy.
+ const first=world({base:0,sol:20});
+ assert.equal((await buy(first)).origin,'sol');
+ // An override: only that network (USDC on the other one could not pay a buy).
+ assert.deepEqual(world({base:0,sol:0,env:{YEET_BUY_CHAIN:'base'}}).p.funding.deposits(),['base']);
+ assert.deepEqual(world({base:0,sol:0,env:{YEET_BUY_CHAIN:'sol'}}).p.funding.deposits(),['sol']);
+ // A paused network is not offered; with everything paused both are, Solana first.
+ assert.deepEqual(world({base:0,sol:0,env:{YEET_SOLANA_PAUSE:'1'}}).p.funding.deposits(),['base']);
+ assert.deepEqual(world({base:0,sol:0,env:{YEET_BASE_PAUSE:'1'}}).p.funding.deposits(),['sol']);
+ assert.deepEqual(world({base:0,sol:0,env:{YEET_BASE_PAUSE:'1',YEET_SOLANA_PAUSE:'1'}}).p.funding.deposits(),['sol','base']);
 });

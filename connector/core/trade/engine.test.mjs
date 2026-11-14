@@ -5,6 +5,9 @@ import {z} from 'zod';
 import {fakeEngine,fakeOneClick,fakeSigner,fakeBalances,fakeClock,BASE_WALLET,SOL_WALLET} from './fakes.mjs';
 import {ReceiptSchema,CATALOG} from './router.mjs';
 import {toolSchemas,zodSchema} from '../../mcp/tool-contract.mjs';
+import {limitsFromEnv} from './limits.mjs';
+import {homeAnswer,portfolioAnswer} from '../fund-link.mjs';
+import {guidanceFor} from '../../mcp/guidance.mjs';
 
 const alice={accountId:'yeet-privy-alice',clientId:'https://chatgpt.com/oauth/client.json'};
 const bob={accountId:'yeet-privy-bob',clientId:alice.clientId};
@@ -274,17 +277,86 @@ test('B-1 wallet checks at the tap: BALANCE_LOW and WALLET_NOT_READY; yeet_home 
  signer.signerState='granted';
  await code(exec(engine,alice,p),'BALANCE_LOW');
  balances.usdcRaw=1_000_000n;
- const home=await engine.home(alice);out('yeet_home').parse(home);
+ const home=await engine.home(alice);out('yeet_home').parse(homeAnswer(home));assert.equal(homeAnswer(home).usdc,'1');
  assert.equal(home.ready,'needs_funds');assert.equal(home.wallets.base.usdc,'1');assert.equal(home.xp,null);
  balances.usdcRaw=100_000_000n;
  assert.equal((await engine.home(alice)).ready,'ready');
+});
+
+// A real trap: the sell check used the 3 USDC BUY minimum, so a coin bought at that minimum (worth about 2.9 USDC after
+// costs) could never be sold. A sale has its own, lower minimum (YEET_MIN_SKEET_USDC, default 0.5 USDC out per coin).
+test('SKEET minimum: a holding worth 2.9 USDC sells; one worth 0.3 USDC is refused with its own sentence; buys keep the 3 USDC minimum',async()=>{
+ const wif=CATALOG.find(c=>c.symbol==='WIF'),bome=CATALOG.find(c=>c.symbol==='BOME');
+ const hold=(c,raw)=>({mint:c.address,raw,decimals:c.decimals,tokenAccount:'GfBdV2GY25Q5MAfyj9wxX7SiJh8yeJP55sA7WA2jM4fw',tokenProgram:'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'});
+ const refused=async(p,want)=>{try{await p;assert.fail('not refused')}catch(e){assert.equal(e.code,'AMOUNT_TOO_SMALL');assert.equal(e.userMessage,want);return e}};
+ assert.equal(limitsFromEnv({}).minSkeetRaw,500_000n);assert.equal(limitsFromEnv({}).minLegRaw,3_000_000n);
+ assert.equal(limitsFromEnv({YEET_MIN_SKEET_USDC:'1.25'}).minSkeetRaw,1_250_000n);assert.throws(()=>limitsFromEnv({YEET_MIN_SKEET_USDC:'half'}),/Invalid YEET_MIN_SKEET_USDC/);
+ // Worth 2.9 USDC (under the buy minimum, over the sell minimum): all of it sells.
+ {
+  const {engine,signer}=await fakeEngine({balances:fakeBalances({holdings:[hold(wif,2_900_000n)]})});
+  const p=await engine.skeet(alice,{request_id:'m1',legs:[{symbol:'WIF',percent:100}]});
+  assert.equal(p.direction,'skeet');assert.equal(p.legs[0].amount_in,'2.9');
+  assert.ok(Number(p.legs[0].est_out)<3&&Number(p.legs[0].est_out)>2.8,p.legs[0].est_out);
+  const again=await engine.quote(alice,{proposal_id:p.proposal_id});assert.equal(again.revision,2,'and its quote refreshes');
+  const r=await exec(engine,alice,again);assert.equal(r.status,'submitted');assert.equal(signer.sent[0].amountRaw,'2900000');
+  // Part of it that still brings in 0.5 USDC or more sells too; a part under it is refused, with selling all as the way out.
+  const part=await engine.skeet(alice,{request_id:'m2',legs:[{symbol:'WIF',percent:50}]});assert.equal(part.legs[0].amount_in,'1.45');
+ }
+ {
+  const {engine}=await fakeEngine({balances:fakeBalances({holdings:[hold(wif,2_900_000n)]})});
+  const e=await refused(engine.skeet(alice,{request_id:'m3',legs:[{symbol:'WIF',percent:10}]}),'This is too small to sell right now. A sale under 0.5 USDC would not cover the swap fees. These are network fees, not YEET fees.');
+  assert.equal(e.detail,'skeet leg under the sell minimum');
+ }
+ // Worth 0.3 USDC: refused even at 100%, and then selling all is not offered as the way out.
+ {
+  const {engine}=await fakeEngine({balances:fakeBalances({holdings:[hold(wif,300_000n)]})});
+  await refused(engine.skeet(alice,{request_id:'m4',legs:[{symbol:'WIF',percent:100}]}),'This is too small to sell right now. A sale under 0.5 USDC would not cover the swap fees. These are network fees, not YEET fees.');
+ }
+ // The number in the sentence is the limit in force, never a constant; only the coins under it are named.
+ {
+  const {engine}=await fakeEngine({env:{YEET_LIVE:'1',YEET_MIN_SKEET_USDC:'1'},balances:fakeBalances({holdings:[hold(wif,5_000_000n),hold(bome,5_000_000n)]})});
+  const p=await engine.skeet(alice,{request_id:'m5',legs:[{symbol:'WIF',percent:100},{symbol:'BOME',percent:100}]}).then(v=>({ok:v}),e=>({e}));
+  // Whichever of the two coins is under 1 USDC out in the recorded quotes is named, with the 1 from the setting.
+  if(p.e){assert.equal(p.e.code,'AMOUNT_TOO_SMALL');assert.match(p.e.userMessage,/^This is too small to sell right now\. A sale under 1 USDC would not cover the swap fees\. These are network fees, not YEET fees\.$/)}
+  else for(const l of p.ok.legs)assert.ok(Number(l.est_out)>=1,`${l.symbol} ${l.est_out}`);
+  await refused(engine.skeet(alice,{request_id:'m5b',legs:[{symbol:'WIF',percent:10}]}),'This is too small to sell right now. A sale under 1 USDC would not cover the swap fees. These are network fees, not YEET fees.');
+ }
+ // A sale that is allowed but small (owner, 2026-11-14): under YEET_SKEET_WARN_USDC (default 1 USDC out per coin) the
+ // quote carries the warning LEG_SMALL and the guidance has the heads-up; from 1 USDC up there is none.
+ {
+  assert.equal(limitsFromEnv({}).skeetWarnRaw,1_000_000n);assert.equal(limitsFromEnv({YEET_SKEET_WARN_USDC:'2.5'}).skeetWarnRaw,2_500_000n);assert.throws(()=>limitsFromEnv({YEET_SKEET_WARN_USDC:'one'}),/Invalid YEET_SKEET_WARN_USDC/);
+  const HEADS='YEET propose_skeet.small.';
+  const {engine}=await fakeEngine({balances:fakeBalances({holdings:[hold(wif,2_900_000n)]})});
+  // 0.3 USDC out: refused (under the 0.5 minimum).
+  await refused(engine.skeet(alice,{request_id:'w0',legs:[{symbol:'WIF',percent:10}]}),'This is too small to sell right now. A sale under 0.5 USDC would not cover the swap fees. These are network fees, not YEET fees.');
+  // About 0.85 USDC out: allowed, with the warning, on the proposal and on its refreshed quote.
+  const smallSale=await engine.skeet(alice,{request_id:'w1',legs:[{symbol:'WIF',percent:30}]});
+  assert.ok(Number(smallSale.legs[0].est_out)>=0.5&&Number(smallSale.legs[0].est_out)<1,smallSale.legs[0].est_out);
+  assert.ok(smallSale.warnings.includes('LEG_SMALL'),JSON.stringify(smallSale.warnings));out('skeet_propose').parse(strip(smallSale));
+  assert.ok((await engine.quote(alice,{proposal_id:smallSale.proposal_id})).warnings.includes('LEG_SMALL'));
+  assert.equal(guidanceFor('skeet_propose',smallSale),`YEET propose_skeet.base. ${HEADS}`);
+  // 1 USDC out or more: no warning, no heads-up.
+  const fine=await engine.skeet(alice,{request_id:'w2',legs:[{symbol:'WIF',percent:50}]});
+  assert.ok(Number(fine.legs[0].est_out)>=1,fine.legs[0].est_out);assert.equal(fine.warnings.includes('LEG_SMALL'),false);
+  assert.doesNotMatch(guidanceFor('skeet_propose',fine),/Heads up/);
+  // The threshold is the setting: at 2 USDC the same 50% sale is warned.
+  const strict=await fakeEngine({env:{YEET_LIVE:'1',YEET_SKEET_WARN_USDC:'2'},balances:fakeBalances({holdings:[hold(wif,2_900_000n)]})});
+  assert.ok((await strict.engine.skeet(alice,{request_id:'w3',legs:[{symbol:'WIF',percent:50}]})).warnings.includes('LEG_SMALL'));
+  // A buy near its own minimum keeps its own meaning of LEG_SMALL and never gets the sale's heads-up.
+  assert.doesNotMatch(guidanceFor('yeet_propose',{direction:'yeet',warnings:['LEG_SMALL'],totals:{cost_pct:1}}),/Heads up/);
+ }
+ // A buy still needs 3 USDC per coin.
+ {
+  const {engine}=await fakeEngine();
+  await code(engine.propose(alice,{request_id:'m6',amount_usdc:'2.9',legs:[{symbol:'WIF',parts:1}]}),'AMOUNT_TOO_SMALL');
+ }
 });
 
 test('SKEET: percent of holdings, sold to USDC on Base through the same tap; portfolio lists holdings',async()=>{
  const wif=CATALOG.find(c=>c.symbol==='WIF');
  const balances=fakeBalances({holdings:[{mint:wif.address,raw:8_000_000n,decimals:6,tokenAccount:'GfBdV2GY25Q5MAfyj9wxX7SiJh8yeJP55sA7WA2jM4fw',tokenProgram:'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'}]});
  const {engine,signer}=await fakeEngine({balances});
- const port=await engine.portfolio(alice);out('yeet_portfolio').parse(port);
+ const port=await engine.portfolio(alice);out('yeet_portfolio').parse(portfolioAnswer(port));assert.doesNotMatch(JSON.stringify(portfolioAnswer(port)),/address/);
  assert.deepEqual(port.solana.holdings.map(h=>[h.symbol,h.amount]),[['WIF','8']]);
  const p=await engine.skeet(alice,{request_id:'s1',legs:[{symbol:'WIF',percent:50}]});
  out('skeet_propose').parse(strip(p));

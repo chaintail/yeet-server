@@ -33,8 +33,8 @@ export function enabledMethods(appConfig) {
 /**
  * The methods a page offers when the server names none: Google and Apple. The server's list is YEET_LOGIN_METHODS
  * (as/login-methods.mjs), sent with /account/identity-config and on the trade page; a page opened from an
- * account-bound link gets that account's own methods instead. Email is off by default because Privy never merges an
- * email-code user into a Google user: one person using both would hold two YEET accounts.
+ * account-bound link gets that account's own methods instead. Email is off by default because one person using an
+ * emailed code and Google could hold two YEET accounts, and YEET never merges accounts.
  */
 export const DEFAULT_OFFERED = Object.freeze(["google", "apple"]);
 

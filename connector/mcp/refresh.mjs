@@ -7,10 +7,12 @@
 //     call they make (contract $defs.card_build). The server's own card build is vendor/yeet-win/PINNED.
 //   - A card from before build ids existed: a call to a card-only tool (execute_trade, submit_trade_signature,
 //     daily_spin, lucky_spin) that carries no `card_build` can only come from such a card.
-//   - It cannot see the tool list ChatGPT holds. A call for a tool or an argument this server no longer has is refused
-//     by the protocol layer before any YEET code runs; no tool or field has been removed so far. A NEW tool missing on
-//     the client side is not visible from here at all. The card covers part of that gap: it marks itself stale when
-//     the host answers that a tool it calls is unknown, and when a result's `_meta['yeet/build']` differs from its own.
+//   - The tool list ChatGPT holds, at the entry call only: yeet_overview's schema allows one `app_version` (the
+//     contract's tools version), so the model's call names the list it was made from (classifyToolsVersion below).
+//     Elsewhere it stays invisible: a call for a tool or an argument this server no longer has is refused by the
+//     protocol layer before any YEET code runs, and a NEW tool missing on the client side is not visible at all. The
+//     card covers part of that gap: it marks itself stale when the host answers that a tool it calls is unknown, and
+//     when a result's `_meta['yeet/build']` differs from its own.
 //
 // What happens: the conversation is remembered as stale (key: the account and ChatGPT's anonymized conversation id
 // `_meta["openai/session"]`, or the account alone), and the next result the MODEL reads (a call without `card_build`)
@@ -19,7 +21,7 @@
 import {readFileSync} from 'node:fs';
 import {contract,META_KEYS} from './tool-contract.mjs';
 
-/** Where the person manages apps in ChatGPT and what to do there: the contract's one constant (`x-yeet-app`). */
+/** Where the person manages apps in ChatGPT and what to do there, and the tools version: the contract's one constant (`x-yeet-app`). */
 export const APP=Object.freeze(contract['x-yeet-app']);
 export const BUILD_META_KEY=META_KEYS.build;
 const SHA=/^[0-9a-f]{7,40}$/;
@@ -46,12 +48,38 @@ export function createStaleness({build=CARD_BUILD,now=Date.now,ttlMs=TTL_MS,max=
    if(stale&&!live(key)){seen.set(key,{at:now(),told:false});if(seen.size>max)seen.delete(seen.keys().next().value)}
    return stale;
   },
+  /** The conversation runs on another tool list than this server's (classifyToolsVersion). `told`: the model is told
+   * in this very answer, so take() stays false for it. */
+  mark(key,{told=false}={}){
+   const v=live(key);
+   if(v){if(told)v.told=true;return}
+   seen.set(key,{at:now(),told});if(seen.size>max)seen.delete(seen.keys().next().value);
+  },
   isStale:key=>!!live(key),
   /** True once per key while it is stale: the caller then tells the model. */
   take(key){const v=live(key);if(!v||v.told)return false;v.told=true;return true},
   size:()=>seen.size,
  };
 }
+// The tool list ChatGPT holds (contract x-yeet-app, yeet-win docs/CARDS.md "Tools version"): yeet_overview's schema
+// allows one `app_version`, the current tools version, and the model copies it. So the entry call says which tool
+// list the conversation runs on:
+//   current   the value this server advertises: nothing to do
+//   outdated  a value advertised before (tools_versions_past): the list is older than the server. Refresh only.
+//   missing   no value: a list from before the property existed
+//   malformed not a tools version at all
+//   unknown   a well-formed value this server never advertised (a newer list after a roll-back, or an invented one)
+// missing, malformed and unknown are never refused: the overview answers as always, with the soft refresh hint.
+export const TOOLS_VERSIONS=Object.freeze({current:APP.tools_version,past:Object.freeze([...(APP.tools_versions_past??[])])});
+const TOOLS_VERSION=/^tools-[1-9][0-9]{0,5}$/;
+export function classifyToolsVersion(value,{current,past}=TOOLS_VERSIONS){
+ if(value===undefined)return 'missing';
+ if(typeof value!=='string'||!TOOLS_VERSION.test(value))return 'malformed';
+ if(value===current)return 'current';
+ return past.includes(value)?'outdated':'unknown';
+}
+/** What the log keeps of the value: a well-formed version as it is, otherwise only its type. */
+export const loggedVersion=v=>typeof v==='string'&&TOOLS_VERSION.test(v)?v:v===undefined?null:`(${v===null?'null':typeof v})`;
 /** The process's one record (a server object is made per request; this outlives them). */
 export const staleness=createStaleness();
 /** account + conversation, as far as ChatGPT names the conversation. */

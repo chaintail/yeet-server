@@ -66,8 +66,11 @@ The flow:
 1. (This passage quotes ChatGPT-facing wording that is not part of this repository.)
 
 `TERMS_REQUIRED` is sent as an error result (the tools' output schemas are closed objects, and an error result is the
-only shape every tool can return without loosening them) whose `structuredContent` repeats the refusal, so a card that
-only reads `window.openai.toolOutput` sees it. The cards draw their one line for it, never an error card.
+only shape every tool can return without loosening them): `isError`, the JSON text (error, message, terms, missing
+ids, guidance) and no `structuredContent`, which an MCP client checks against the tool's success-only output schema.
+A card reads the text; where the host hands it only `window.openai.toolOutput`, it reads the card-only
+`_meta["yeet/failure"]` (error, message, `terms.mode`, `terms.page_url`). The cards draw their one line for it, never
+an error card.
 
 ### The fallback page and the one switch
 

@@ -31,6 +31,7 @@ export const COPY=Object.freeze({
   lead_checkin:", YEET yeet_overview.lead_checkin.",
   lead_paused:", YEET yeet_overview.lead_paused.",
  },
+
  yeet_home:{
   paused:"YEET yeet_home.paused.",
   paused_no_wheel:"YEET yeet_home.paused_no_wheel.",
@@ -45,8 +46,18 @@ export const COPY=Object.freeze({
   ready_funding_unread:"YEET yeet_home.ready_funding_unread: {usdc} {network} {other}.",
   ready:"YEET yeet_home.ready.",
  },
+
  yeet_coins:{
   list:"YEET yeet_coins.list.",
+  unpriced:"YEET yeet_coins.unpriced.",
+ },
+
+ yeet_coin:{
+  head:"YEET yeet_coin.head: {symbol}.",
+  head_held:"YEET yeet_coin.head_held: {symbol}.",
+  head_unpriced:"YEET yeet_coin.head_unpriced: {symbol}.",
+  about:"YEET yeet_coin.about.",
+  tail:"YEET yeet_coin.tail.",
  },
 
  propose_yeet:{
@@ -59,12 +70,16 @@ export const COPY=Object.freeze({
 
   balance_low_funding:"YEET propose_yeet.balance_low_funding: {base} {solana}.",
   cost_high:"YEET propose_yeet.cost_high: {cost_pct}.",
+
+  first_buy:", YEET propose_yeet.first_buy: {per_trade} {daily} {min}.",
   risk:"YEET propose_yeet.risk.",
  },
 
  propose_skeet:{
   base:"YEET propose_skeet.base.",
   cost_high:"YEET propose_skeet.cost_high: {cost_pct}.",
+
+  small:"YEET propose_skeet.small.",
  },
  execute_trade:{
   awaiting_signature:"YEET execute_trade.awaiting_signature.",
@@ -110,14 +125,18 @@ export const COPY=Object.freeze({
  },
 
  yeet_fund:{
-  zero:"YEET yeet_fund.zero.",
-  some:"YEET yeet_fund.some: {usdc}.",
-  unread:"YEET yeet_fund.unread.",
+  choose:"YEET yeet_fund.choose.",
+  crypto:"YEET yeet_fund.crypto.",
+  card:"YEET yeet_fund.card.",
  },
 
  yeet_checkin:{
   open:"YEET yeet_checkin.open.",
   done:"YEET yeet_checkin.done: {days} {s}.",
+ },
+
+ streak:{
+  reminder:"YEET streak.reminder: {streak_days}.",
  },
  daily_spin:{
   set:"YEET daily_spin.set: {xp_won} {coin} {bonus}.",
@@ -144,6 +163,9 @@ export const COPY=Object.freeze({
  },
 
  errors:{
+
+  LIMIT_EXCEEDED_trade:"YEET errors.LIMIT_EXCEEDED_trade: {tier}.",
+  LIMIT_EXCEEDED_daily:"YEET errors.LIMIT_EXCEEDED_daily: {tier} {hours} {s}.",
   LIMIT_EXCEEDED_Noob:"YEET errors.LIMIT_EXCEEDED_Noob: {winner_xp} {vip_over_xp}.",
   LIMIT_EXCEEDED_Winner:"YEET errors.LIMIT_EXCEEDED_Winner: {vip_over_xp}.",
   LIMIT_EXCEEDED_VIP:"YEET errors.LIMIT_EXCEEDED_VIP.",
@@ -153,9 +175,14 @@ export const COPY=Object.freeze({
   BALANCE_LOW:"YEET errors.BALANCE_LOW.",
 
   BALANCE_LOW_usdc:"YEET errors.BALANCE_LOW_usdc.",
-  TEMPORARILY_UNAVAILABLE:"YEET errors.TEMPORARILY_UNAVAILABLE_no_send.",
+
+  TEMPORARILY_UNAVAILABLE:"YEET errors.TEMPORARILY_UNAVAILABLE.",
+
+  TEMPORARILY_UNAVAILABLE_no_send:"YEET errors.TEMPORARILY_UNAVAILABLE_no_send.",
   COST_TOO_HIGH:"YEET errors.COST_TOO_HIGH.",
   AMOUNT_TOO_SMALL:"YEET errors.AMOUNT_TOO_SMALL.",
+
+  AMOUNT_TOO_SMALL_sell:"YEET errors.AMOUNT_TOO_SMALL_sell.",
   CONFIRMATION_REQUIRED:"YEET errors.CONFIRMATION_REQUIRED.",
   REQUOTE_REQUIRED:"YEET errors.REQUOTE_REQUIRED.",
   COIN_NOT_SUPPORTED:"YEET errors.COIN_NOT_SUPPORTED.",
@@ -163,6 +190,8 @@ export const COPY=Object.freeze({
   PARTS_EMPTY:"YEET errors.PARTS_EMPTY.",
   WALLET_NOT_READY:"YEET errors.WALLET_NOT_READY.",
   REAUTH_REQUIRED:"YEET errors.REAUTH_REQUIRED.",
+
+  APP_OUTDATED:"YEET errors.APP_OUTDATED: {url} {steps}.",
   USERNAME_TAKEN:"YEET errors.USERNAME_TAKEN.",
   USERNAME_NOT_ALLOWED:"YEET errors.USERNAME_NOT_ALLOWED.",
  },
@@ -176,6 +205,10 @@ export function fill(template,vars={}){
  return template.replace(/\{([a-z_]+)\}/g,(_m,k)=>{if(vars[k]===undefined||vars[k]===null)throw Error(`guidance slot ${k}`);return String(vars[k])});
 }
 const plural=n=>n===1?'':'s';
+
+const MAX_LENGTH=500;
+
+export const hoursToReset=(ms=Date.now())=>Math.max(1,Math.ceil((86_400_000-(ms%86_400_000))/3_600_000));
 const join=(...parts)=>parts.filter(Boolean).join(' ');
 const hasWheel=ctx=>!ctx||!ctx.tools||ctx.tools.has('daily_spin');
 const hasLucky=ctx=>!ctx||!ctx.tools||ctx.tools.has('lucky_wheel');
@@ -198,21 +231,32 @@ function home(r,ctx){
   if(typeof f.base_usdc==='string'&&typeof f.solana_usdc==='string')return fill(c.ready_funding,{base:f.base_usdc,solana:f.solana_usdc,network:netName(f.chosen)});
   if(positive(usdcOf(f,f.chosen)))return fill(c.ready_funding_unread,{usdc:usdcOf(f,f.chosen),network:netName(f.chosen),other:otherOf(f.chosen)});
  }
- const usdc=r.wallets?.base?.usdc;
+ const usdc=r.usdc;
  return positive(usdc)?fill(c.ready_usdc,{usdc}):c.ready;
+}
+const amount=v=>typeof v==='string'&&/^\d+(\.\d+)?$/.test(v);
+
+export function firstBuy(r){
+ const l=r?.limits;
+ if(r?.direction!=='yeet'||!l||!amount(l.per_trade_usdc)||!amount(l.daily_limit_usdc)||!amount(l.left_today_usdc)||!amount(r.min_leg_usdc))return null;
+ return Number(l.left_today_usdc)===Number(l.daily_limit_usdc)?{per_trade:l.per_trade_usdc,daily:l.daily_limit_usdc,min:r.min_leg_usdc}:null;
 }
 function proposal(r){
  const w=new Set(r.warnings??[]);
  if(r.direction==='skeet'){
   const c=COPY.propose_skeet;
-  return join(c.base,w.has('COST_HIGH')?fill(c.cost_high,{cost_pct:r.totals?.cost_pct}):'');
+
+  return join(c.base,w.has('LEG_SMALL')?c.small:w.has('COST_HIGH')?fill(c.cost_high,{cost_pct:r.totals?.cost_pct}):'');
  }
  const c=COPY.propose_yeet;
  const f=fundingOf(r),both=r.funding&&typeof r.funding.base_usdc==='string'&&typeof r.funding.solana_usdc==='string';
  const low=both?fill(c.balance_low_funding,{base:r.funding.base_usdc,solana:r.funding.solana_usdc}):c.balance_low;
  const note=w.has('SIGNER_MISSING')?c.signer_missing:w.has('BALANCE_LOW')?low:w.has('COST_HIGH')?fill(c.cost_high,{cost_pct:r.totals?.cost_pct}):'';
  const head=!f?c.base:usdcOf(f,otherOf(f.chosen).toLowerCase())===null?fill(c.base_funded_unread,{network:netName(f.chosen),other:otherOf(f.chosen)}):fill(c.base_funded,{network:netName(f.chosen)});
- return join(head,note,c.risk);
+
+ const first=w.has('SIGNER_MISSING')||w.has('BALANCE_LOW')?null:firstBuy(r);
+ const intro=first?join(`${head.slice(0,-1)}${fill(c.first_buy,first)}.`,note,c.risk):'';
+ return intro&&intro.length<=MAX_LENGTH?intro:join(head,note,c.risk);
 }
 function trade(r,ctx){
  const c=COPY.trade,skeet=r.direction==='skeet',left=(r.sign_requests??[]).length;
@@ -241,6 +285,8 @@ function portfolio(r){
  if(r.base?.usdc===null)return c.usdc_unread;
  return positive(r.base?.usdc)?fill(c.usdc_only,{usdc:r.base.usdc}):c.empty;
 }
+
+const reminder=days=>Number.isInteger(days)&&days>=2?fill(COPY.streak.reminder,{streak_days:days}):'';
 function spin(r,ctx){
  const c=COPY.daily_spin,s=r.stamp;
  const head=!s?fill(c.xp_only,r)
@@ -248,7 +294,7 @@ function spin(r,ctx){
   :fill(c.stamp,{coin:s.coin,filled:s.filled,slots:s.slots,xp_won:r.xp_won});
  const left=r.spins_available??0;
 
- return join(head,left>0?fill(c.more_spins,{left,s:plural(left)}):hasLucky(ctx)&&r.spin_reason!=='trade_bonus'?c.lucky:c.done);
+ return join(head,left>0?fill(c.more_spins,{left,s:plural(left)}):hasLucky(ctx)&&r.spin_reason!=='trade_bonus'?c.lucky:c.done,left>0?'':reminder(r.streak_days));
 }
 function lucky(r){
  const c=COPY.lucky,l=r?.lucky;
@@ -270,6 +316,12 @@ export function termsGuidance(terms,reason){
  if(reason==='version')return terms?.mode==='page'?c.due_page:c.version;
  return terms?.mode==='page'?c.due_page:fill(c.due_chat,{url:APP.manage_url});
 }
+
+function coinGuidance(r){
+ const c=COPY.yeet_coin,symbol=/^[A-Z0-9]{2,12}$/.test(r.symbol??'')?r.symbol:'the coin';
+ const head=r.price_usd===null||r.price_usd===undefined?c.head_unpriced:r.holding?c.head_held:c.head;
+ return join(fill(head,{symbol}),r.description||r.website?c.about:null,c.tail);
+}
 const BY_TOOL={
  yeet_overview:overviewGuidance,
  yeet_terms:r=>r.terms?.accepted?COPY.terms.accepted:termsGuidance(r.terms),
@@ -277,7 +329,8 @@ const BY_TOOL={
  yeet_referral:r=>r.status==='applied'?fill(COPY.referral.applied,{code:r.code}):r.status==='skipped'?COPY.referral.skipped:COPY.referral.open,
  apply_referral:r=>r.status==='applied'?fill(COPY.referral.applied,{code:r.code}):COPY.referral.skipped,
  yeet_home:home,
- yeet_coins:()=>COPY.yeet_coins.list,
+ yeet_coins:r=>(r.coins??[]).some(c=>c.price_usd!==null&&c.price_usd!==undefined)?COPY.yeet_coins.list:COPY.yeet_coins.unpriced,
+ yeet_coin:coinGuidance,
  yeet_propose:proposal,yeet_quote:proposal,skeet_propose:proposal,
  execute_trade:execute,
  submit_trade_signature:trade,trade_status:trade,
@@ -288,8 +341,8 @@ const BY_TOOL={
   if(r.board&&r.board!=='xp')return empty?c.result_empty:Number.isInteger(r.me?.rank)?fill(c.result_ranked,{rank:r.me.rank}):c.result_unranked;
   return Number.isInteger(r.me?.rank)?fill(c.ranked,{rank:r.me.rank,xp:r.me.xp}):c.unranked;
  },
- yeet_fund:r=>r.usdc===null?COPY.yeet_fund.unread:positive(r.usdc)?fill(COPY.yeet_fund.some,{usdc:r.usdc}):COPY.yeet_fund.zero,
- yeet_checkin:r=>{const c=r.checkin??{},left=Number.isInteger(c.spins_available)?c.spins_available:c.spin_available?1:0;return left>0?COPY.yeet_checkin.open:fill(COPY.yeet_checkin.done,{days:c.streak_days,s:plural(c.streak_days)})},
+ yeet_fund:r=>r.method==='crypto'?COPY.yeet_fund.crypto:r.method==='card'?COPY.yeet_fund.card:COPY.yeet_fund.choose,
+ yeet_checkin:r=>{const c=r.checkin??{},left=Number.isInteger(c.spins_available)?c.spins_available:c.spin_available?1:0;return left>0?COPY.yeet_checkin.open:join(fill(COPY.yeet_checkin.done,{days:c.streak_days,s:plural(c.streak_days)}),reminder(c.streak_days))},
  daily_spin:spin,
  yeet_set_username:r=>fill(COPY.yeet_set_username.set,{username:r.username}),
  yeet_profile:()=>COPY.yeet_set_username.profile,
@@ -303,14 +356,22 @@ export function guidanceFor(name,result,ctx){
  try{return f(result,ctx)}catch{return undefined}
 }
 
-export function refusalGuidance(code,message,ctx,{terms,reason}={}){
+export const MAY_SEND=new Set(['execute_trade','submit_trade_signature','trade_status']);
+
+export function refusalGuidance(code,message,ctx,{terms,reason,tool,now=Date.now}={}){
  const e=COPY.errors;
+ if(code==='TEMPORARILY_UNAVAILABLE')return typeof tool==='string'&&!MAY_SEND.has(tool)?e.TEMPORARILY_UNAVAILABLE_no_send:e.TEMPORARILY_UNAVAILABLE;
  if(code==='TERMS_REQUIRED')return termsGuidance(terms,reason);
+ if(code==='APP_OUTDATED')return fill(e.APP_OUTDATED,{url:APP.manage_url,steps:APP.refresh_steps});
  if(code==='LIMIT_EXCEEDED'){
   const tier=typeof message==='string'?message.match(/\bas a (Noob|Winner|VIP)\b/)?.[1]:undefined;
-  return fill(tier?e[`LIMIT_EXCEEDED_${tier}`]:e.LIMIT_EXCEEDED,TIER_XP);
+  const kind=typeof message!=='string'?undefined:/\bper-trade limit\b/.test(message)?'trade':/\bdaily limit\b/.test(message)?'daily':undefined;
+  if(!tier||!kind)return e.LIMIT_EXCEEDED;
+  const hours=hoursToReset(now());
+  return join(fill(e[`LIMIT_EXCEEDED_${kind}`],{tier,hours,s:plural(hours)}),fill(e[`LIMIT_EXCEEDED_${tier}`],TIER_XP));
  }
  if(code==='TRADING_PAUSED'&&!hasWheel(ctx))return e.TRADING_PAUSED_no_wheel;
  if(code==='BALANCE_LOW'&&typeof message==='string'&&/you can trade up to/.test(message))return e.BALANCE_LOW_usdc;
+ if(code==='AMOUNT_TOO_SMALL'&&typeof message==='string'&&/too small to sell right now/.test(message))return e.AMOUNT_TOO_SMALL_sell;
  return e[code];
 }

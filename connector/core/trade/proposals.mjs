@@ -3,7 +3,7 @@
 // returns the same proposal, a different payload under the same request_id is INVALID_ARGUMENT. Every answer carries
 // a new one-time confirm code that the connector moves to the card-only `_meta`.
 import {buildYeetPlan,buildSkeetPlan,PlanValidationError,PlanQuoteError,CATALOG,findToken,parseUnits,formatUnits,splitByParts,MAX_PARTS} from './router.mjs';
-import {checkKillSwitch,checkLegCount,checkBasket,checkCost,checkDaily,costBps,COST_WARN_BPS,capsFor,capsView} from './limits.mjs';
+import {checkKillSwitch,checkLegCount,checkBasket,checkCost,checkDaily,costBps,COST_WARN_BPS,capsFor,capsView,skeetTooSmall} from './limits.mjs';
 import {refuse,sha256,newId,iso,usd,usdRaw,TradeError} from './util.mjs';
 import {tx} from './db.mjs';
 
@@ -93,6 +93,8 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
   const warnings=[];
   if(bps>COST_WARN_BPS)warnings.push('COST_HIGH');
   if(p.direction==='yeet'&&legs.some(l=>BigInt(l.amount_in_raw)<2n*limits.minLegRaw))warnings.push('LEG_SMALL');
+  // A sale that is allowed but small (a coin brings in less than limits.skeetWarnRaw USDC): swap fees take a big part of it.
+  if(p.direction==='skeet'&&legs.some(l=>BigInt(l.dry_out_raw)<limits.skeetWarnRaw))warnings.push('LEG_SMALL');
   for(const w of extraWarnings)if(!warnings.includes(w))warnings.push(w);
   return {
    proposal_id:p.id,revision,direction:p.direction,
@@ -150,8 +152,14 @@ export function createProposals({db,client,limits,wallets,codes,now=Date.now,cat
   });
  }
  async function skeetPlan(w,legs,slippage,accountId){
-  const plan=await routed(()=>buildSkeetPlan({legs:legs.map(l=>({symbol:l.symbol,amount:l.amount})),recipientBase:w.base.address,refundSol:w.solana.address,slippageBps:slippage,dry:true},deps(accountId)));
-  if(plan.legs.some(l=>BigInt(l.amountOut)<limits.minLegRaw))refuse('AMOUNT_TOO_SMALL','skeet leg under minimum');
+  let plan;
+  try{plan=await routed(()=>buildSkeetPlan({legs:legs.map(l=>({symbol:l.symbol,amount:l.amount})),recipientBase:w.base.address,refundSol:w.solana.address,slippageBps:slippage,dry:true},deps(accountId)))}
+  // The route itself found an amount too low: the same sentence as under our own sell minimum, never the buy wording.
+  catch(e){if(e?.code==='AMOUNT_TOO_SMALL'&&!e.userMessage)e.userMessage=skeetTooSmall(limits,legs);throw e}
+  // The sell minimum (limits.minSkeetRaw), never the buy minimum: a coin bought at the buy minimum is worth less than
+  // it after costs and must still be sellable. The refusal carries its own sentence (which coin, the minimum, what works).
+  const small=legs.filter((_l,i)=>BigInt(plan.legs[i].amountOut)<limits.minSkeetRaw);
+  if(small.length)throw Object.assign(new TradeError('AMOUNT_TOO_SMALL','skeet leg under the sell minimum'),{userMessage:skeetTooSmall(limits,small)});
   return plan;
  }
  const slippageOf=s=>{if(s===undefined||s===null)return 100;if(!Number.isInteger(s)||s<50||s>300)refuse('INVALID_ARGUMENT','slippage');return s};

@@ -23,6 +23,8 @@ Object.assign(process.env,{
 for(const name of ['PUBLIC_MODE','PRIVY_LOGIN','MOCK_PASSWORD_LOGIN','PUBLIC_BASE_URL','COOKIE_SECURE','TRUST_PROXY'])delete process.env[name];
 // https://cimd.test/<name> answers with fixture client metadata documents (as.mjs, TEST only).
 process.env.CIMD_TEST_FIXTURES='1';
+// No market data lookups from the suite (core/market.mjs): prices are null, as when the source is down.
+process.env.YEET_MARKET_DATA='off';
 // oidc-provider's notices about defaults it wants changed, and its warning about a body parsed upstream.
 const providerNotices=[];
 for(const level of ['info','warn']){const orig=console[level];console[level]=(m,...rest)=>{if(String(m).includes('oidc-provider'))providerNotices.push(String(m));orig(m,...rest)}}
@@ -34,7 +36,7 @@ after(async()=>{
  rmSync(root,{recursive:true,force:true});
 });
 
-const LISTED=['apply_referral','execute_trade','skeet_propose','submit_trade_signature','trade_status','yeet_accept_terms','yeet_coins','yeet_fund','yeet_home','yeet_overview','yeet_portfolio','yeet_profile','yeet_propose','yeet_quote','yeet_referral','yeet_set_username','yeet_terms'];
+const LISTED=['apply_referral','execute_trade','skeet_propose','submit_trade_signature','trade_status','yeet_accept_terms','yeet_coin','yeet_coins','yeet_fund','yeet_home','yeet_overview','yeet_portfolio','yeet_profile','yeet_propose','yeet_quote','yeet_referral','yeet_set_username','yeet_terms'];
 const SCOPES=['openid','offline_access','yeet:read','yeet:write','yeet:prepare'];
 const local=url=>{const u=new URL(url,ORIGIN);return u.origin===ORIGIN?`${AS}${u.pathname}${u.search}`:u.href};
 function jar(){const c=new Map();return {header:()=>[...c].map(([k,v])=>`${k}=${v}`).join('; '),add(r){for(const s of r.headers.getSetCookie()){const p=s.split(';')[0],i=p.indexOf('=');c.set(p.slice(0,i),p.slice(i+1))}}}}
@@ -192,6 +194,22 @@ test('A-4: a signed-in, consented token lists the P0 and P1 tools over HTTP, exe
  const call=async(name,args)=>(await (await rpc({jsonrpc:'2.0',id:3,method:'tools/call',params:{name,arguments:args}},tok.access_token)).json()).result;
  const coins=await call('yeet_coins',{});
  assert.equal(coins.isError,undefined);assert.ok(coins.structuredContent.coins.some(c=>c.symbol==='WIF'));
+ // yeet_coin over HTTP, through the core route and its scope: one coin by a symbol as a person writes it. No market data
+ // in this process and no wallet: every number is null, nothing is held, the limits and the three follow-ups are there.
+ const one=await call('yeet_coin',{symbol:' $wif '});
+ assert.equal(one.isError,undefined,JSON.stringify(one.content));
+ assert.deepEqual([one.structuredContent.symbol,one.structuredContent.name,one.structuredContent.price_usd,one.structuredContent.holding,one.structuredContent.as_of],['WIF','dogwifhat',null,null,null]);
+ assert.deepEqual(one.structuredContent.suggestions.map(s=>s.label),['Research WIF deeper','YEET WIF','What else is moving?']);
+ assert.deepEqual(one.structuredContent.limits,coins.structuredContent.limits);
+ assert.match(one.structuredContent.guidance,/YEET/);
+ const tool=tools.find(t=>t.name==='yeet_coin');
+ assert.equal(tool._meta['openai/outputTemplate'],'ui://yeet/coin-v1.html');assert.equal(tool.annotations.readOnlyHint,true);assert.deepEqual(tool._meta.securitySchemes,[{type:'oauth2',scopes:['yeet:read']}]);
+ for(const unknown of ['DOGE','USDT','not a coin','../portfolio']){
+  const no=await call('yeet_coin',{symbol:unknown});
+  assert.equal(no.isError,true,unknown);assert.equal(Object.hasOwn(no,'structuredContent'),false);
+  const body=JSON.parse(no.content[0].text);
+  assert.equal(body.error,'COIN_NOT_SUPPORTED',unknown);assert.equal(body.retryable,false);assert.match(body.guidance,/YEET/);
+ }
  // No Privy credentials in this process: the default delegated adapter cannot find wallets.
  const home=await call('yeet_home',{});
  assert.equal(home.isError,true);assert.equal(JSON.parse(home.content[0].text).error,'WALLET_NOT_READY');
@@ -451,10 +469,11 @@ test('a registered client that never completes an authorization expires after 1 
 test('terms in the chat, end to end: gated until accepted, the overview answers, a missing statement and an old version are refused, then everything works',async()=>{
  const {TERMS_VERSION,REQUIRED_IDS,STATEMENTS}=await import('../core/terms.mjs');
  const tok=await signIn({identity:'DEV:did:privy:acceptance-terms',terms:false});
- const call=async(name,args={})=>(await (await rpc({jsonrpc:'2.0',id:31,method:'tools/call',params:{name,arguments:args}},tok.access_token)).json()).result;
+ const TOOLS_VERSION=(await import('../mcp/tool-contract.mjs')).contract['x-yeet-app'].tools_version;   // the model copies it from the schema
+ const call=async(name,args={})=>(await (await rpc({jsonrpc:'2.0',id:31,method:'tools/call',params:{name,arguments:name==='yeet_overview'?{app_version:TOOLS_VERSION,...args}:args}},tok.access_token)).json()).result;
  const refused=r=>{assert.equal(r.isError,true);return JSON.parse(r.content[0].text)};
  // Every tool that does something for the person is refused with the terms; nothing reaches the engine.
- for(const [name,args] of [['yeet_home',{}],['yeet_coins',{}],['yeet_portfolio',{}],['yeet_fund',{}],['yeet_referral',{}],['trade_status',{trade_id:'t_abcdefghij0123456789'}],
+ for(const [name,args] of [['yeet_home',{}],['yeet_coins',{}],['yeet_coin',{symbol:'WIF'}],['yeet_portfolio',{}],['yeet_fund',{}],['yeet_referral',{}],['trade_status',{trade_id:'t_abcdefghij0123456789'}],
   ['yeet_propose',{request_id:'11111111-1111-4111-8111-111111111111',amount_usdc:'20',legs:[{symbol:'WIF',parts:10}]}],['execute_trade',{proposal_id:'p_abcdefghij0123456789',revision:1,confirm:'a'.repeat(43)}]]){
   const b=refused(await call(name,args));
   assert.equal(b.error,'TERMS_REQUIRED',name+': '+JSON.stringify(b).slice(0,160));assert.equal(b.terms.accepted,false);assert.equal(b.terms.version,TERMS_VERSION);
@@ -676,4 +695,66 @@ test('no oidc-provider default TTL notices and no upstream-parsed body warning',
  await token();
  const bad=providerNotices.filter(m=>/ttl\.(Interaction|Session|Grant|IdToken|RefreshToken)|already parsed request body|rpInitiatedLogout/.test(m));
  assert.deepEqual(bad,[]);
+});
+
+test('the email step of the connect screen: the note is for one Privy user; a sign-in by anyone else is refused and creates nothing',async()=>{
+ const {accountCount}=await import('../core/identity-store.mjs');
+ const {CHANGED_LINE}=await import('../as/signup-email.mjs');
+ const ALICE='DEV:did:privy:acceptance-step-alice',MALLORY='DEV:did:privy:acceptance-step-mallory';
+ const start=(identity_token,origin=ORIGIN)=>fetch(AS+'/account/email-step',{method:'POST',headers:{'content-type':'application/json',origin},body:JSON.stringify({identity_token})});
+ const before=accountCount();
+ // The note: for a verified caller on this origin only, and nobody is created by asking for it.
+ assert.equal((await start(ALICE,'https://evil.example')).status,403);
+ assert.equal((await start('not-a-credential')).status,401);
+ let r=await start(ALICE);assert.equal(r.status,200);assert.equal(r.headers.get('cache-control'),'no-store');
+ const {step}=await r.json();assert.match(step,/^e1\./);
+ assert.equal(accountCount(),before,'the step creates no account');
+ // The connect sign-in, with the note on the form.
+ const login=async(identity,note)=>{
+  const cookies=jar();
+  const go=async(url,init={})=>{const x=await fetch(local(url),{redirect:'manual',...init,headers:{cookie:cookies.header(),...init.headers}});cookies.add(x);return x};
+  const auth=new URL(AS+'/auth');
+  auth.search=new URLSearchParams({client_id:'local-chatgpt-fixture',response_type:'code',redirect_uri:'http://127.0.0.1:38314/callback',code_challenge:'x'.repeat(43),code_challenge_method:'S256',scope:SCOPES.join(' '),resource:ORIGIN,state:'s1'});
+  const page=(await go(auth.href)).headers.get('location');
+  const d=await (await go(page)).json();assert.equal(d.prompt,'login');
+  return go(page,{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded',origin:ORIGIN},body:new URLSearchParams({csrf:d.csrf,identity_token:identity,...(note===undefined?{}:{email_step:note})})});
+ };
+ // Another Privy user than the one the step was started by: refused before anyone is resolved.
+ r=await login(MALLORY,step);assert.equal(r.status,409);
+ let text=await r.text();assert.ok(text.includes(CHANGED_LINE));assert.doesNotMatch(text,/did:privy|yeet-privy-/);
+ assert.equal(accountCount(),before,'nobody was created for the other user');
+ // A note that does not verify is refused, never dropped.
+ r=await login(ALICE,step+'x');assert.equal(r.status,409);
+ r=await login(ALICE,'');assert.equal(r.status,409);
+ assert.equal(accountCount(),before);
+ // The same person, whether they entered the code or skipped: the sign-in goes on as it always did.
+ r=await login(ALICE,step);assert.equal(r.status,303);
+ assert.equal(accountCount(),before+1);
+ // Now the account exists: a new note names it, and still only its own user passes.
+ const again=(await (await start(ALICE)).json()).step;
+ r=await login(MALLORY,again);assert.equal(r.status,409);
+ r=await login(ALICE,again);assert.equal(r.status,303);
+ assert.equal(accountCount(),before+1);
+ // No note at all: the sign-in as before (a person for whom the step is off, or never shown).
+ r=await login('DEV:did:privy:acceptance-step-plain');assert.equal(r.status,303);
+ // The plain sign-in page holds the same check.
+ const cookies=jar();
+ const html=await (async()=>{const x=await fetch(AS+'/account/login',{headers:{cookie:cookies.header()}});cookies.add(x);return x.text()})();
+ const csrf=html.match(/name="csrf" value="([0-9a-f]+)"/)[1];
+ const plain=(identity_token,note)=>fetch(AS+'/account/login',{method:'POST',redirect:'manual',headers:{cookie:cookies.header(),origin:ORIGIN,'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf,identity_token,email_step:note})});
+ r=await plain(MALLORY,again);assert.equal(r.status,409);assert.ok((await r.text()).includes(CHANGED_LINE));
+ r=await plain(ALICE,again);assert.equal(r.status,302);
+ // The setting off: the route is gone (the page is told with /account/identity-config and never asks).
+ // A form from a page that was still open carries a note: it is not read. Every sign-in that was refused above
+ // goes through exactly as it did before the step existed.
+ process.env.YEET_SIGNUP_EMAIL_STEP='0';
+ try{
+  assert.equal((await start(ALICE)).status,404);
+  r=await login(MALLORY,again);assert.equal(r.status,303);
+  r=await login(ALICE,step+'x');assert.equal(r.status,303);
+  r=await login(ALICE,'');assert.equal(r.status,303);
+  r=await plain(ALICE,'nonsense');assert.equal(r.status,302);
+ }finally{delete process.env.YEET_SIGNUP_EMAIL_STEP}
+ r=await login(ALICE,step+'x');assert.equal(r.status,409);
+ assert.equal((await start(ALICE)).status,200);
 });

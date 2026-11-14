@@ -24,19 +24,68 @@ async function connect(callCore,{scope=allScopes.join(' '),meta}={}){
  const client=new Client({name:'terms-test',version:'1'});
  const [a,b]=InMemoryTransport.createLinkedPair();
  await server.connect(a);await client.connect(b);
- return {client,close:async()=>{await client.close();await server.close()},call:(name,args={})=>client.callTool({name,arguments:args,...(meta?{_meta:meta}:{})})};
+ // The model's own entry call carries the current tools version, as its schema tells it to.
+ return {client,close:async()=>{await client.close();await server.close()},call:(name,args={})=>client.callTool({name,arguments:name==='yeet_overview'?{app_version:contract['x-yeet-app'].tools_version,...args}:args,...(meta?{_meta:meta}:{})})};
 }
 const refuse=(extra={})=>{throw {error:'TERMS_REQUIRED',terms:due(),...extra}};
 
 test('contract: the terms tools; accepting is not read-only and asks for the host’s approval; a card can never accept',()=>{
  const a=contract.tools.yeet_accept_terms,t=contract.tools.yeet_terms;
- assert.deepEqual(a.annotations,{readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:false});
+ // It adds one record and a first acceptance stands: a write that destroys nothing.
+ assert.deepEqual(a.annotations,{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false});
  assert.equal(a.visible,true);assert.equal(a.widgetAccessible,false);assert.equal(a.card,null);
  assert.deepEqual(t.annotations,{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false});
  assert.match(a.description,/YEET/);assert.match(a.description,/YEET/);
  assert.match(a.description,/YEET/);
  assert.match(instructions,/yeet_accept_terms/);
  assert.doesNotThrow(()=>zodSchema(z,contract.$defs.failure).parse({error:'TERMS_REQUIRED',message:'Accept the YEET terms in the chat to continue.',retryable:false,terms:due(),missing:['risk'],guidance:COPY.terms.missing}));
+});
+
+// Review 2026-11-14, item 2: a TERMS_REQUIRED result that carried structuredContent was rejected by an MCP client with
+// -32602 (it checks any structuredContent against the tool's output schema, error or not). Every tool the contract
+// lets answer TERMS_REQUIRED is called through a client that has read tools/list, so the SDK client applies exactly
+// that check, and the same rules are applied here by hand against the advertised schema.
+const ARGS={yeet_coin:{symbol:'WIF'},yeet_accept_terms:{version:TERMS_VERSION,confirmed:REQUIRED_IDS},apply_referral:{skip:true},trade_status:{trade_id:'t_abcdefghij0123456789'},
+ yeet_propose:{request_id:'11111111-1111-4111-8111-111111111111',amount_usdc:'20',legs:[{symbol:'WIF',parts:10}]},yeet_quote:{proposal_id:'p_abcdefghij0123456789'},
+ skeet_propose:{request_id:'22222222-2222-4222-8222-222222222222',legs:[{symbol:'WIF',percent:100}]},
+ execute_trade:{proposal_id:'p_abcdefghij0123456789',revision:1,confirm:'a'.repeat(43)},
+ submit_trade_signature:{trade_id:'t_abcdefghij0123456789',leg:0,attempt_id:'a'.repeat(64),signed:'AQID'},
+ lucky_spin:{lucky_id:'l_abcdefghij0123456789'},yeet_set_username:{username:'kat_king'}};
+test('a TERMS_REQUIRED result of every tool passes an MCP client’s output schema rules: an error, the text, no structuredContent',async()=>{
+ const server=createMcpServer({token:{scope:allScopes.join(' '),sub:'yeet-privy-a'},callCore:async()=>refuse(),env:{YEET_P2:'1'}});
+ const client=new Client({name:'schema-rules',version:'1'});const [a,b]=InMemoryTransport.createLinkedPair();await server.connect(a);await client.connect(b);
+ try{
+  const {tools}=await client.listTools();   // the client now holds every tool's output schema and checks results against it
+  const gated=Object.entries(contract.tools).filter(([,t])=>t.errors.includes('TERMS_REQUIRED')).map(([n])=>n);
+  assert.deepEqual(gated.sort(),Object.keys(contract.tools).filter(n=>n!=='yeet_overview'&&n!=='yeet_terms').sort());
+  assert.deepEqual(tools.map(t=>t.name).sort(),Object.keys(contract.tools).sort());
+  for(const name of gated){
+   const listed=tools.find(t=>t.name===name);assert.equal(listed.outputSchema.type,'object',name);
+   const input=zodSchema(z,contract.tools[name].inputSchema).safeParse(ARGS[name]??{});assert.ok(input.success,`${name}: the arguments of this check are valid`);
+   // The SDK client throws McpError -32602 here when structuredContent is present and does not fit.
+   const r=await client.callTool({name,arguments:ARGS[name]??{}});
+   assert.equal(r.isError,true,name);
+   assert.equal(Object.hasOwn(r,'structuredContent'),false,`${name}: an error result carries no structuredContent`);
+   // The client's rules, by hand: with an output schema, structuredContent is required unless isError, and checked whenever present.
+   if(r.structuredContent!==undefined)assert.ok(zodSchema(z,contract.tools[name].outputSchema).safeParse(r.structuredContent).success,name);
+   assert.equal(r.content.length,1,name);assert.equal(r.content[0].type,'text',name);
+   const body=JSON.parse(r.content[0].text);
+   assert.equal(body.error,'TERMS_REQUIRED',`${name}: ${r.content[0].text.slice(0,160)}`);assert.equal(typeof body.message,'string');assert.equal(body.terms.version,TERMS_VERSION);
+   assert.equal(body.guidance,termsGuidance(due()),name);
+   assert.doesNotThrow(()=>zodSchema(z,contract.$defs.failure).parse(body),name);
+  }
+  // The other way round: the check does bite. A structuredContent of that shape fails every one of these output schemas.
+  for(const name of gated)assert.equal(zodSchema(z,contract.tools[name].outputSchema).safeParse({error:'TERMS_REQUIRED',message:'x',retryable:false,terms:due()}).success,false,name);
+ }finally{await client.close();await server.close()}
+});
+test('yeet_accept_terms answering TERMS_REQUIRED (statements missing) carries the missing ids in the text only',async()=>{
+ const {call,close}=await connect(async()=>refuse({missing:['risk'],reason:'missing'}));
+ try{
+  const r=await call('yeet_accept_terms',{version:TERMS_VERSION,confirmed:REQUIRED_IDS});
+  assert.equal(r.isError,true);assert.equal(Object.hasOwn(r,'structuredContent'),false);
+  const body=JSON.parse(r.content[0].text);assert.deepEqual(body.missing,['risk']);assert.equal(body.guidance,COPY.terms.missing);
+  assert.equal(r._meta['yeet/failure'].missing,undefined,'the card draws one line; ids stay in the text');
+ }finally{await close()}
 });
 
 test("YEET text.",async()=>{
@@ -55,8 +104,9 @@ test("YEET text.",async()=>{
    for(const s of body.terms.statements)assert.match(s.url,/^https:\/\//,`${name} ${s.id}: its link`);
    assert.equal(body.terms.page_url,PAGE);assert.equal(body.terms.mode,'chat');
    assert.equal(body.guidance,termsGuidance(due()));
-   // The same refusal for a card that only reads window.openai.toolOutput.
-   assert.deepEqual(r.structuredContent,body,name);
+   // No structuredContent on an error (the output schema describes the success only). Card only: what a card draws.
+   assert.equal(Object.hasOwn(r,'structuredContent'),false,name);
+   assert.deepEqual(r._meta,{'yeet/failure':{error:'TERMS_REQUIRED',message:body.message,terms:{mode:'chat',page_url:PAGE}}},name);
    assert.doesNotThrow(()=>zodSchema(z,contract.$defs.failure).parse(body),name);
   }
  }finally{await close()}
@@ -261,9 +311,12 @@ test('the profile is the model’s to manage: yeet_profile reads name, XP, tier 
 
 test("YEET text.",()=>{
  assert.match(instructions,/YEET/);
- // Every tool named there re-renders the current state: read-only, or idempotent on the same proposal.
- for(const n of ['trade_status','yeet_checkin','lucky_wheel','yeet_fund','yeet_referral'])assert.equal(contract.tools[n].annotations.readOnlyHint,true,n);
- assert.equal(contract.tools.yeet_quote.annotations.idempotentHint,true);assert.ok(contract.tools.yeet_quote.card&&contract.tools.yeet_quote.visible);
+ // Every tool named there re-renders the current state and destroys nothing. Three are plain reads. The status may
+ // credit XP once and the lucky wheel saves today's wheel once (not read-only, the same again on a repeat); a quote
+ // saves a new revision each time (review 2026-11-14, item 4: the hints say what a call does).
+ for(const n of ['yeet_checkin','yeet_fund','yeet_referral'])assert.equal(contract.tools[n].annotations.readOnlyHint,true,n);
+ for(const n of ['trade_status','lucky_wheel'])assert.deepEqual(contract.tools[n].annotations,{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},n);
+ assert.deepEqual(contract.tools.yeet_quote.annotations,{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false});assert.ok(contract.tools.yeet_quote.card&&contract.tools.yeet_quote.visible);
  const all=Object.values(COPY).flatMap(g=>Object.values(g));
  for(const t of all)assert.doesNotMatch(t,/card above|above card|earlier message|previous message|scroll (up|back)/i,t.slice(0,60));
 });

@@ -5,7 +5,7 @@ import {createWalletEnsurer,walletSetupConfig,walletSetupMessage} from './trade/
 import express from 'express';
 import {introspectBearer,validatePrincipal} from '#shared/introspection.mjs';
 import {secret,equal,read,write,port,TEST,DEV_APP_ID} from '#shared/common.mjs';
-import {coins} from './coins.mjs';
+import {coins,coin,symbolOf} from './coins.mjs';
 import {unavailable,failure,withUserMessage} from './failure.mjs';
 import {tradeEngine,onTradeSettled} from './trade/runtime.mjs';
 import {ledgerConfig} from './ledger-route/config.mjs';
@@ -14,7 +14,7 @@ import {xpRuntime,p2On,homeXp,homeXpKeys,checkSpinTable} from './xp/xp.mjs';
 import {createAvailability,quoteProbe} from './xp/availability.mjs';
 import {z} from 'zod';
 import {toolSchemas,zodSchema,contract} from '../mcp/tool-contract.mjs';
-import {homeWithFundUrl,failureWithFundUrl,fundAnswer,fundUrlWithHint} from './fund-link.mjs';
+import {homeWithFundUrl,failureWithFundUrl,fundAnswer,fundUrlWithHint,homeAnswer,portfolioAnswer,depositFor} from './fund-link.mjs';
 import {versionInfo} from './version.mjs';
 import {overview,totalUsdc,welcomeSuggestions} from './overview.mjs';
 import {winnerOf} from './trade/pnl.mjs';
@@ -136,6 +136,7 @@ export const ROUTE_SCOPES=Object.freeze([
  ['GET',/^\/overview$/,'yeet:read'],
  ['GET',/^\/home$/,'yeet:read'],
  ['GET',/^\/coins$/,'yeet:read'],
+ ['GET',/^\/coins\/[A-Z0-9]{2,12}$/,'yeet:read'],
  ['POST',/^\/proposals$/,'yeet:write'],
  ['POST',/^\/proposals\/skeet$/,'yeet:write'],
  ['POST',/^\/proposals\/p_[a-z0-9]{20}\/quote$/,'yeet:write'],
@@ -260,7 +261,28 @@ app.post('/wallets/ensure',async(q,r)=>{
  try{r.json(await walletEnsurer.ensure(q.subject,didFor(q.subject)))}
  catch(e){const code=typeof e?.code==='string'?e.code:'WALLET_SETUP_FAILED';r.status(502).json({code,chain:e?.chain??null,privy_status:e?.status??null,message:walletSetupMessage(code)})}
 });
-app.get('/coins',(_q,r)=>r.json(coins()));
+// yeet_coins: the catalogue with live prices (coins.mjs, market.mjs). A price that cannot be read is null, never an error.
+app.get('/coins',async(_q,r)=>{try{r.json(await coins())}catch(e){console.error(JSON.stringify({event:'coins_failed',error:String(e?.message??e).slice(0,200)}));unavailable(r)}});
+// yeet_coin: one coin. What the person holds of it comes from the portfolio read when that answers within 2.5 s;
+// otherwise the coin is shown without a holding. An unknown symbol is the contract's COIN_NOT_SUPPORTED.
+const HOLDING_MS=2500;
+async function holdingOf(ctx,symbol){
+ let timer;
+ try{
+  const bag=await Promise.race([tradeEngine().then(e=>e.portfolio(ctx)),new Promise((_,no)=>{timer=setTimeout(()=>no(Error('timeout')),HOLDING_MS)})]);
+  const h=(bag?.solana?.holdings??[]).find(x=>x.symbol===symbol);
+  return h&&Number(h.amount)>0?{amount:h.amount,usd:h.usd??null}:null;
+ }catch{return null}finally{clearTimeout(timer)}
+}
+app.get('/coins/:symbol',async(q,r)=>{
+ if(q.role!=='mcp')return r.sendStatus(403);
+ const symbol=symbolOf(q.params.symbol);
+ try{
+  const view=symbol?await coin(symbol,{holding:await holdingOf({accountId:q.subject,clientId:q.principal.client},symbol)}):null;
+  if(!view)return r.status(409).json(failure('COIN_NOT_SUPPORTED'));
+  r.json(view);
+ }catch(e){console.error(JSON.stringify({event:'coin_failed',error:String(e?.message??e).slice(0,200)}));unavailable(r)}
+});
 // Trade engine (lane B). Only the connector reaches these routes; each answer is the tool's structuredContent, plus
 // `confirm` for the card-only `_meta` where the contract has one. A refusal is the contract `failure` shape.
 const inputs=Object.fromEntries(Object.entries(toolSchemas).map(([n,s])=>[n,zodSchema(z,s.input)]));
@@ -281,7 +303,8 @@ function trade(tool,fn){
 }
 app.get('/home',trade('yeet_home',async(e,ctx)=>{
  const raw=await e.home(ctx);
- const home=homeWithFundUrl(raw,raw?.ready==='needs_funds'?await fundLink(ctx.accountId):undefined);
+ // No wallets and no address in the answer (fund-link.mjs homeAnswer): one USDC number.
+ const home=homeAnswer(homeWithFundUrl(raw,raw?.ready==='needs_funds'?await fundLink(ctx.accountId):undefined));
  if(!p2On())return home;
  return {...home,xp:xpSafe('home',()=>homeXp(xpRuntime().summary(ctx.accountId),HOME_XP_KEYS),null),recent_wins:xpSafe('wins',()=>xpRuntime().recentWins(),[])};
 }));
@@ -307,7 +330,10 @@ app.get('/overview',trade('yeet_overview',(e,ctx)=>overviewFor(e,ctx,{card:true}
 // yeet_fund: the funding card. All USDC as one number (read fresh: the card asks again after the funding page).
 app.get('/fund',trade('yeet_fund',async(e,ctx)=>{
  const home=await e.home(ctx),f=home.funding;
- return fundAnswer(f?totalUsdc(f.base_usdc,f.solana_usdc):totalUsdc(home.wallets?.base?.usdc),await fundLink(ctx.accountId));
+ // The account's own deposit addresses, for the card only (card_deposit; the connector moves it to _meta). They are
+ // the bound account's (ctx.accountId is the token's subject), read by e.home from the wallet directory.
+ const deposit=depositFor(home.wallets,e.funding?.deposits?.());
+ return {...fundAnswer(f?totalUsdc(f.base_usdc,f.solana_usdc):totalUsdc(home.wallets?.base?.usdc),await fundLink(ctx.accountId)),...(deposit?{card_deposit:deposit}:{})};
 }));
 // lucky_id (optional): the caller's own lucky wheel, spun today, else INVALID_ARGUMENT. The proposal is linked to it;
 // the bonus is decided when the trade settles (lucky.settle), since yeet_quote can still change coins and amount.
@@ -334,7 +360,7 @@ app.get('/trades/:id',trade(null,statusCard((e,ctx,_a,q)=>{
  if(view.direction==='yeet')xpSafe('lucky_status',()=>luckyClaim(e,ctx.accountId,view.trade_id,view));
  return {...view,xp_award:xpSafe('trade',()=>xpRuntime().tradeAward(ctx.accountId,view),null)};
 })));
-app.get('/portfolio',trade('yeet_portfolio',(e,ctx)=>e.portfolio(ctx)));
+app.get('/portfolio',trade('yeet_portfolio',async(e,ctx)=>portfolioAnswer(await e.portfolio(ctx))));
 // The first-party signing page (as/sign-page.mjs, CARD-SIGNING.md section 2.5). Only the sign-in server reaches these,
 // and only after it verified the person's Privy access token and looked up the account already linked to it: that
 // account is `x-yeet-subject` (checked to exist and not be suspended above). The engine then answers only for a trade

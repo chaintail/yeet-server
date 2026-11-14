@@ -1,5 +1,10 @@
 // Server-side trade limits (port plan 2.3 item 4 and risk 3). Every refusal is one catalogue code.
-//   YEET_MIN_LEG_USDC    minimum USDC per coin (default 3)         -> AMOUNT_TOO_SMALL
+//   YEET_MIN_LEG_USDC    minimum USDC per coin of a BUY (default 3) -> AMOUNT_TOO_SMALL
+//   YEET_MIN_SKEET_USDC  minimum USDC a SELL brings in per coin (default 0.5) -> AMOUNT_TOO_SMALL with its own
+//                        sentence. Separate from the buy minimum on purpose: a coin bought at the 3 USDC minimum is
+//                        worth less than 3 after costs, and must still be sellable. Used by skeetPlan only.
+//   YEET_SKEET_WARN_USDC a SELL that is allowed but brings in less than this per coin (default 1) carries the
+//                        warning LEG_SMALL: swap fees take a big part of so small a sale (proposals.mjs view).
 //   BUY caps by XP tier (TIER_DEFAULTS below; per trade and per UTC day)  -> LIMIT_EXCEEDED
 //   YEET_MAX_TRADE_USDC / YEET_DAILY_CAP_USDC  optional global ceilings over every tier (default: the VIP caps).
 //                        Set to the old 25 / 50 they would clamp Winner and VIP: leave them unset in production.
@@ -67,6 +72,8 @@ export function limitsFromEnv(env=process.env){
  const tiers=tiersFromEnv(env);
  return Object.freeze({
   minLegRaw:usdcEnv(env,'YEET_MIN_LEG_USDC','3'),
+  minSkeetRaw:usdcEnv(env,'YEET_MIN_SKEET_USDC','0.5'),
+  skeetWarnRaw:usdcEnv(env,'YEET_SKEET_WARN_USDC','1'),
   tiers,
   // Optional global ceilings (the old flat caps): when set they also clamp every tier (capsFor).
   maxTradeRaw:usdcEnv(env,'YEET_MAX_TRADE_USDC',fmt(big(tiers.map(t=>t.maxTradeRaw)))),
@@ -137,4 +144,11 @@ export function checkDaily(db,limits,accountId,ms,addRaw,xp){
 export function recordSpend(db,accountId,ms,addRaw){
  const day=utcDay(ms),prior=spentToday(db,accountId,ms);
  db.prepare('INSERT INTO daily_spend(account_id,day,usdc_raw) VALUES(?,?,?) ON CONFLICT(account_id,day) DO UPDATE SET usdc_raw=excluded.usdc_raw').run(accountId,day,(prior+addRaw).toString());
+}
+
+/** AMOUNT_TOO_SMALL for a SELL, in product voice (contract failure.message; a card prints it as it is, so it names
+ * no network): the sale is too small, the minimum in force, and why (owner, 2026-11-14: a sale under the minimum does
+ * not cover the swap fees, and those are not YEET's). What works instead is the guidance's part (mcp/guidance.mjs). */
+export function skeetTooSmall(limits){
+ return `This is too small to sell right now. A sale under ${fmt(limits.minSkeetRaw)} USDC would not cover the swap fees. These are network fees, not YEET fees.`;
 }

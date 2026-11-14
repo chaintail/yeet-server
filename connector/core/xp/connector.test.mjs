@@ -51,6 +51,10 @@ const checked=new Set();
 after(()=>{for(const n of PASS_THROUGH)assert.ok(checked.has(n),`no successful ${n} call was compared with core`)});
 
 const SCOPES=['openid','offline_access','yeet:read','yeet:write','yeet:prepare'];
+// An address, not a transaction id (those are longer): 0x and 40 hex digits, or 32 to 44 base58 characters, standing alone.
+const EVM_ADDRESS=/(?<![0-9a-fA-F])0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/,SOL_ADDRESS=/(?<![1-9A-HJ-NP-Za-km-z])[1-9A-HJ-NP-Za-km-z]{32,44}(?![1-9A-HJ-NP-Za-km-z])/;
+const scanned=new Set();
+after(()=>{for(const n of ['yeet_home','yeet_portfolio','yeet_fund','yeet_overview','yeet_propose','trade_status','yeet_leaderboard','yeet_checkin'])assert.ok(scanned.has(n),`no ${n} result was scanned for addresses`)});
 const {CARD_BUILD,APP}=await import('../../mcp/refresh.mjs');
 const CARD_ONLY=new Set(['execute_trade','submit_trade_signature','daily_spin','lucky_spin']);
 const local=url=>{const u=new URL(url,ORIGIN);return u.origin===ORIGIN?`${AS}${u.pathname}${u.search}`:u.href};
@@ -80,6 +84,14 @@ async function signIn(did){
   // Card-only tools are called as a current card calls them: with the build of the vendored cards (mcp/refresh.mjs).
   const args=CARD_ONLY.has(name)&&!('card_build' in input)?{...input,card_build:CARD_BUILD}:input;
   const result=(await (await rpc({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}},token.access_token)).json()).result;
+  // ChatGPT never reads an address: nothing the model sees of any result (structuredContent, content) of a tool it
+  // can call holds an EVM or a Solana address. Card-only _meta is not scanned (the Add funds card's addresses ride there).
+  if(!CARD_ONLY.has(name)&&result){
+   // A signed link token (shared/link-token.mjs: v1.<payload>.<43 characters>) is random text, not an address.
+   const read=JSON.stringify([result.structuredContent??null,result.content??null]).replace(/v1\.[A-Za-z0-9_-]{8,300}\.[A-Za-z0-9_-]{43}/g,'v1.token');
+   assert.doesNotMatch(read,EVM_ADDRESS,`${name}: an EVM address where the model reads`);assert.doesNotMatch(read,SOL_ADDRESS,`${name}: a Solana address where the model reads`);
+   scanned.add(name);
+  }
   if(PASS_THROUGH.has(name)&&result&&!result.isError){
    const {confirm:_c,...sent}=lastCore??{};
    // The connector adds one field for the model, the agent guidance (mcp/guidance.mjs); everything else is core's.
@@ -210,11 +222,38 @@ test('YEET_P2=1 end to end: home -> spin -> leaderboard, then a settled trade sh
  const fund=await alice.call('yeet_fund');
  assert.equal(fund.isError,undefined,JSON.stringify(fund.content));
  assert.deepEqual(fund.structuredContent.presets,['10','25','50','100']);assert.match(fund.structuredContent.usdc,/^[0-9]+(\.[0-9]+)?$/);
- assert.match(fund.content[0].text,/^They have [0-9.]+ USDC\. The funding card is up\.$/);
- assert.ok(!JSON.stringify(fund.structuredContent).match(/0x|Base|Solana|wallet/));
+ assert.match(fund.content[0].text,/YEET/);
+ assert.ok(!JSON.stringify(fund.structuredContent).match(/0x|Base|Solana|wallet/));assert.equal('method' in fund.structuredContent,false);
+ assert.equal(fund.structuredContent.guidance,'YEET yeet_fund.choose.');
+ // The deposit addresses: the account's own, as the engine's wallet directory holds them (the record /account/wallets
+ // answers the funding page from), card-only in _meta, Solana first (the network a first YEET spends from).
+ const own=await (await tradeEngine()).wallets.require(alice.sub);
+ // In this runtime only the Solana driver is ready, so only Solana can pay a YEET and only its address is offered.
+ assert.deepEqual((await tradeEngine()).funding.deposits(),['sol']);
+ const deposit={default:'solana',networks:[{network:'solana',address:own.solana.address}]};
+ assert.deepEqual(fund._meta['yeet/deposit'],deposit);
+ assert.match(own.solana.address,SOL_ADDRESS);assert.match(own.base.address,EVM_ADDRESS);
+ // method picks the card's view and rides back; the model's text and guidance follow it; the addresses stay in _meta.
+ const send=await alice.call('yeet_fund',{method:'crypto'});
+ assert.equal(send.isError,undefined,JSON.stringify(send.content));assert.equal(send.structuredContent.method,'crypto');assert.deepEqual(send._meta['yeet/deposit'],deposit);
+ assert.match(send.content[0].text,/YEET/);
+ assert.match(send.structuredContent.guidance,/YEET/);assert.match(send.structuredContent.guidance,/YEET/);
+ assert.equal(send.content[1].text,send.structuredContent.guidance);
+ const pay=await alice.call('yeet_fund',{method:'card'});
+ assert.equal(pay.structuredContent.method,'card');assert.match(pay.content[0].text,/YEET/);assert.match(pay.structuredContent.guidance,/where they pay by card/);
+ assert.equal((await alice.call('yeet_fund',{method:'wire'})).isError,true,'only crypto or card');
+ for(const r of [fund,send,pay])for(const a of [own.solana.address,own.base.address])assert.ok(!JSON.stringify([r.structuredContent,r.content]).includes(a.slice(0,8)),'no part of an address where the model reads');
+ // The portfolio and the home answer carry no address either; no other tool gets the deposit block.
+ const bag=await alice.call('yeet_portfolio');
+ assert.equal(bag.isError,undefined,JSON.stringify(bag.content));assert.deepEqual(Object.keys(bag.structuredContent.solana),['holdings']);assert.deepEqual(Object.keys(bag.structuredContent.base),['usdc']);
+ const again=await alice.call('yeet_home');
+ assert.equal('wallets' in again.structuredContent,false);assert.match(again.structuredContent.usdc,/^[0-9]+(\.[0-9]+)?$/);
+ for(const r of [bag,again])assert.equal(r._meta?.['yeet/deposit'],undefined);
 
  // yeet_overview, the entry tool: the person in one answer, USDC as one number, no wallet or network, the follow-ups.
- const o=await alice.call('yeet_overview');
+ // The model copies app_version from the tool's schema (the contract's tools version).
+ const toolsVersion=JSON.parse(readFileSync(new URL('../../vendor/yeet-win/contracts/yeet-tools.json',import.meta.url),'utf8'))['x-yeet-app'].tools_version;
+ const o=await alice.call('yeet_overview',{app_version:toolsVersion});
  assert.equal(o.isError,undefined,JSON.stringify(o.content));
  const ov=o.structuredContent;
  assert.equal(ov.username,handle(alice.sub));assert.equal(ov.xp,total);assert.equal(ov.streak_days,1);assert.equal(ov.checkin_open,false);

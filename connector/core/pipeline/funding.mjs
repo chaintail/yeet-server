@@ -73,8 +73,15 @@ export function createFunding({env,wallets,drivers,catalog,now=Date.now,ttlMs=BA
  }
  /** The contract `funding` object: both balances and the network that would pay `total`. */
  const view=(bal,total)=>{const c=pick(bal,total);return {base_usdc:bal.base===null?null:usd(formatUnits(bal.base,6)),solana_usdc:bal.sol===null?null:usd(formatUnits(bal.sol,6)),chosen:c?NETWORK[c]:null}};
+ /** The networks the Add funds card offers for a USDC transfer, the default first. Only a network whose USDC can pay
+  * a YEET is offered, so money never lands where a buy cannot spend it:
+  *   YEET_BUY_CHAIN=sol|base   that network alone (USDC on the other one could not pay a buy)
+  *   automatic                 every open network (not paused, driver ready), Solana first: pick() gives a tie to
+  *                             Solana (CHAINS order), so a new account's first buy spends what was sent there
+  *   nothing open (trading paused, a driver down)   both, Solana first: the address is the person's own either way */
+ const deposits=()=>{const f=forced();if(f)return [f];const o=open();return o.length?o:[...CHAINS]};
  return {
-  balances,forced,open,pick,view,
+  balances,forced,open,pick,view,deposits,
   /** execute_trade without an override: the network that pays `total`, read fresh. Refuses when none can. */
   async choose(w,total){
    const bal=await balances(w,{fresh:true}),usable=open();
