@@ -159,14 +159,14 @@ test('yeet_overview is not gated: it answers with terms.accepted false, the term
  }finally{await close()}
 });
 
-test('after the terms: the overview offers the win code once, first; once applied or skipped it is gone',async()=>{
+test('after the terms: no win code button on the overview (owner ruling 2026-11-14), open, applied or skipped',async()=>{
  let referral={status:'open',code:null,default_code:'WIN'};
  const {call,close}=await connect(async()=>view(done(),referral));
  try{
   let d=(await call('yeet_overview')).structuredContent;
   assert.equal(d.terms.accepted,true);assert.equal(d.referral_open,true);
-  assert.deepEqual(d.suggestions[0],{id:'referral',label:'Got a win code?',say:'I have a win code'});
-  assert.match(d.guidance,/YEET/);
+  assert.ok(!d.suggestions.some(s=>s.id==='referral'),'open: the core still lists it, the connector leaves it out');
+  assert.doesNotMatch(d.guidance,/win code/);
   assert.match(d.guidance,/YEET/);
   for(const status of ['skipped','applied']){
    referral={status,code:status==='applied'?'WIN':null,default_code:'WIN'};
@@ -351,6 +351,7 @@ test('consent layout: the contract, verbatim parts; plain; no select-all or acce
   /YEET/,
   /YEET/,
   /YEET/,
+  /YEET/,
  ])assert.match(CONSENT,part);
  assert.doesNotMatch(CONSENT,/playful|degen|joke(?!s\))|riff|Style:/i);
  // Nowhere is a select-all or accept-all offered: every sentence that names one says there is none.
@@ -386,11 +387,12 @@ test('next steps once recorded: congratulate, then exactly four buttons (the whe
  assert.equal(nextNote(),four,'every tool there');
  assert.match(four,/YEET/);
  assert.match(four,/YEET/);
- assert.match(four,/YEET/);
+ // Owner ruling 2026-11-14: the tour is the first-steps note's (guidance firstNote); the next steps end with the closing line.
+ assert.doesNotMatch(four,/show me around/i);
  assert.match(four,/YEET/);
  const three=nextNote({tools:new Set(['yeet_coins','yeet_portfolio'])});
  assert.match(three,/exactly these three buttons/);assert.doesNotMatch(three,/wheel|yeet_checkin/,'never a button for a tool that is not registered');
- assert.doesNotMatch(four,/playful|degen|joke|riff/i);
+ assert.doesNotMatch(four.replace(UI.closing,''),/playful|degen|joke|riff/i,'plain apart from the closing line');
  // Through the server: the accept result carries it, after the guidance; the refusals and the other results never do.
  for(const env of [{},{YEET_P2:'1'}]){
   const server=createMcpServer({token:{scope:allScopes.join(' '),sub:'yeet-privy-a'},callCore:async route=>route==='/terms/accept'?{terms:done(),overview:view(done())}:route==='/overview'?view(done()):{terms:done()},env});

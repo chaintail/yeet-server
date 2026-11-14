@@ -66,7 +66,7 @@ test('model-visible catalog: titles and descriptions for every tool; data-not-in
  
  
  
- assert.ok(instructions.length>=450&&instructions.length<=4000,`instructions length ${instructions.length}`);
+ assert.ok(instructions.length>=450&&instructions.length<=5000,`instructions length ${instructions.length}`);
  assert.match(instructions,/YEET/);
  assert.match(instructions,/YEET/);
  assert.doesNotMatch(descriptions.yeet_home,/wallet/i);assert.match(descriptions.yeet_home,/YEET/);
@@ -74,11 +74,12 @@ test('model-visible catalog: titles and descriptions for every tool; data-not-in
  // Owner, voice 39611: the overview is the entry; a basket only after the person brought up a coin.
  assert.match(instructions,/YEET/);
  assert.match(instructions,/YEET/);
- assert.match(instructions,/YEET/);
+ // Independent review, 2026-11-14: no "buy it now?" nudge; a coin mention is answered first and is not a buy request.
+ assert.doesNotMatch(instructions,/buy it now/i);assert.match(instructions,/YEET/);assert.match(instructions,/YEET/);
  assert.doesNotMatch(instructions,/yeet me a win/i);
  // The cards report to the chat themselves; the model answers a report briefly and calls nothing for it.
  assert.match(instructions,/YEET/);
- assert.match(instructions,/call no tool for it\./);
+ assert.match(instructions,/YEET/);
  assert.match(descriptions.yeet_overview,/How do I win\?/);assert.match(descriptions.yeet_overview,/@yeet/);
  assert.match(descriptions.execute_trade,/Only the card can call this/);
 });
@@ -92,5 +93,5 @@ test('the core yeet_coins answer fits the published output schema and lists only
  assert.ok(value.coins.length>=1&&value.coins.length<=25);
  assert.ok(value.coins.some(c=>c.symbol==='WIF'&&c.kind==='meme'));
  assert.equal(tradable([{chain:'base',kind:'funding'},{chain:'solana',kind:'funding'},{chain:'solana',kind:'meme',symbol:'X'}]).length,1);
- assert.deepEqual(value.limits,{min_leg_usdc:'3',max_trade_usdc:'25',max_legs:5,default_usdc:'20'});
+ assert.deepEqual(value.limits,{min_leg_usdc:'3',max_trade_usdc:'500',max_legs:5,default_usdc:'20'});
 });

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {z} from 'zod';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
-import {COPY,UI,TIER_XP,GUIDED_TOOLS,STYLED_TOOLS,guidanceFor,styleFor,uiFor,updateNote,consentNote,nextNote,refusalGuidance,fill,firstBuy,hoursToReset} from '../guidance.mjs';
+import {COPY,UI,TIER_XP,GUIDED_TOOLS,STYLED_TOOLS,guidanceFor,styleFor,uiFor,updateNote,consentNote,nextNote,firstNote,newcomer,firstSpin,FIRST_YEET_XP,refusalGuidance,fill,firstBuy,hoursToReset} from '../guidance.mjs';
 import {createAgentMcpServer} from '../agent.mjs';
 import {createMcpServer} from '../tool-registration.mjs';
 import {CARD_BUILD} from '../refresh.mjs';
@@ -93,7 +93,7 @@ test('yeet_home: paused, wallet set-up, no USDC (with and without a spin), ready
 
 test('yeet_overview: offer the suggestions in order, never a coin; the lead follows the first suggestion; paused is said first',()=>{
  const S=(...ids)=>ids.map(id=>({id,label:'x',say:'y'}));
- const o=(suggestions,over={})=>({username:'Lucky Otter 42',usdc:'20',xp:5,tier:'Noob',streak_days:1,checkin_open:false,holdings_count:0,top_winner:null,trading:'live',suggestions,...over});
+ const o=(suggestions,over={})=>({username:'Lucky Otter 42',usdc:'20',xp:5,tier:'Noob',streak_days:1,checkin_open:false,holdings_count:2,top_winner:null,trading:'live',suggestions,...over});
  const plain=g('yeet_overview',o(S('discover','holdings','fund')));
  rules('overview',plain);
  assert.match(plain,/^Welcome Lucky Otter 42 in one short line/);assert.match(plain,/YEET/);
@@ -169,8 +169,8 @@ test('yeet_coin: one short line, the project’s own words as a claim, then the 
  const plain=g('yeet_coin',base);
  assert.equal(plain,`YEET text: ${COPY.yeet_coin.tail}.`);
  assert.match(plain,/YEET/);
- assert.match(plain,/YEET/);assert.match(plain,/general information and not advice/);assert.match(plain,/never predict a price/);assert.match(plain,/never recommend buying/);
- assert.doesNotMatch(plain,/project says/,'nothing to tell about the project when the result has neither description nor website');
+ assert.match(plain,/use your knowledge and browsing/);assert.match(plain,/general information, not advice/);assert.match(plain,/never predict a price/);assert.match(plain,/or recommend buying/);assert.match(plain,/YEET/);
+ assert.doesNotMatch(plain,/stated purpose/,'nothing to tell about the project when the result has neither description nor website');
  for(const about of [{description:'A dog in a hat.'},{website:'https://dogwifcoin.org/'}]){
   const t=g('yeet_coin',{...base,...about});
   assert.match(t,/YEET/);
@@ -216,9 +216,10 @@ test("YEET text.",()=>{
  assert.equal(g('submit_trade_signature',{trade_id:'t_abcdefghij0123456789',status:'signing',legs:[],sign_requests:[{},{}]}),"YEET text.");
  assert.equal(g('submit_trade_signature',{trade_id:'t_abcdefghij0123456789',status:'signing',legs:[],sign_requests:[{}]}),"YEET text.");
  const won=g('trade_status',status('success',{xp_award:{points:70,total:75}}));
- assert.equal(won,"YEET text.");
+ assert.equal(won,`YEET text: ${COPY.referral.moment}.`,'70 XP carries the First YEET bonus: the one light win code line');
+ assert.equal(g('trade_status',status('success',{xp_award:{points:20,total:95}})),"YEET text.");
  assert.equal(g('trade_status',status('success')),COPY.trade.success_yeet);
- assert.equal(g('trade_status',status('success',{xp_award:{points:70,total:75}}),P01),COPY.trade.success_yeet_no_wheel);
+ assert.equal(g('trade_status',status('success',{xp_award:{points:70,total:75}}),P01),`${COPY.trade.success_yeet_no_wheel} ${COPY.referral.moment}`);
  assert.match(g('trade_status',status('success',{direction:'skeet',xp_award:{points:10,total:85}})),/YEET/);
  assert.equal(g('trade_status',status('partial')),COPY.trade.partial);
  assert.equal(g('trade_status',status('refunded')),COPY.trade.refunded_yeet);
@@ -231,17 +232,21 @@ test('yeet_portfolio: empty, USDC only, coins (with and without a total), unread
  assert.equal(g('yeet_portfolio',pf([],'0','0')),COPY.yeet_portfolio.empty);
  assert.equal(g('yeet_portfolio',pf([],'12.5','12.5')),"YEET text.");
  assert.match(g('yeet_portfolio',pf([{symbol:'WIF',amount:'7',usd:'19'}],'1','20')),/YEET/);
+ assert.match(COPY.yeet_portfolio.holdings,/YEET/);
  assert.equal(g('yeet_portfolio',pf([{symbol:'WIF',amount:'7',usd:null}],'1',null)),COPY.yeet_portfolio.holdings);
  assert.equal(g('yeet_portfolio',pf([],null,null)),COPY.yeet_portfolio.usdc_unread);
 });
 
 test('yeet_leaderboard and yeet_set_username',()=>{
  assert.equal(g('yeet_leaderboard',{rows:[],me:{rank:3,xp:120}}),"YEET text.");
+ for(const k of ['ranked','unranked','result_ranked','result_unranked','coins'])assert.match(COPY.yeet_leaderboard[k],/YEET/,k);
+ for(const k of ['ranked','unranked'])assert.doesNotMatch(COPY.yeet_leaderboard[k],/a YEET/,k);
  assert.equal(g('yeet_leaderboard',{rows:[],me:{rank:null,xp:0}}),COPY.yeet_leaderboard.unranked);
+ assert.match(COPY.yeet_set_username.profile,/YEET/);
  assert.equal(g('yeet_set_username',{username:'kat_king'}),"YEET text.");
 });
 
-const spin=(over={})=>({xp_won:30,draw_xp:25,streak_xp:0,total:35,streak_days:1,next_spin_at:'2026-11-13T00:00:00Z',stamp:{coin:'BONK',count_after:3,slots:7,card:1,filled:3,set_completed:false},set_bonus_xp:0,spins_available:0,spin_reason:null,...over});
+const spin=(over={})=>({xp_won:30,draw_xp:25,streak_xp:0,total:135,streak_days:1,next_spin_at:'2026-11-13T00:00:00Z',stamp:{coin:'BONK',count_after:3,slots:7,card:1,filled:3,set_completed:false},set_bonus_xp:0,spins_available:0,spin_reason:null,...over});
 test('leaderboards from finished SKEETs and the coins board: ranked, not on it, empty; never a promise or a push to trade',()=>{
  const b=(board,rows,me={rank:null,xp:5})=>g('yeet_leaderboard',{rows,me,board,window:'today',unit:'usd',measure:'m'});
  const c=COPY.yeet_leaderboard;
@@ -257,6 +262,9 @@ test('leaderboards from finished SKEETs and the coins board: ranked, not on it, 
 });
 
 test('daily_spin: names the coin stamp and how many of 7, a completed set, more spins, the lucky wheel or tomorrow',()=>{
+ // A first daily spin (streak 1, under the First YEET bonus of XP before it): the one light win code line, last.
+ assert.equal(g('daily_spin',spin({total:35})),`Name the BONK stamp: 3 of 7 on their BONK card, plus 30 XP. YEET daily_spin.lucky. ${COPY.referral.moment}`);
+ assert.equal(firstSpin(spin({total:35})),true);assert.equal(firstSpin(spin({total:35,streak_days:2})),false);assert.equal(firstSpin(spin({total:30+FIRST_YEET_XP})),false);
  assert.equal(g('daily_spin',spin()),'Name the BONK stamp: 3 of 7 on their BONK card, plus 30 XP. YEET daily_spin.lucky.');
  assert.equal(g('daily_spin',spin({spins_available:2})),'Name the BONK stamp: 3 of 7 on their BONK card, plus 30 XP. They have 2 more spins today; offer it.');
  assert.equal(g('daily_spin',spin({spin_reason:'trade_bonus'})),`Name the BONK stamp: 3 of 7 on their BONK card, plus 30 XP. ${COPY.daily_spin.done}`);
@@ -555,13 +563,13 @@ test('style: never on the agent route (plain JSON, its own instructions)',async(
 
 // The layout notes (owner, 2026-11-14): how to present, as their own text block. The welcome is on the overview with
 // the terms accepted, nowhere else.
-const OV={username:'Lucky Otter 42',usdc:'20',xp:5,tier:'Noob',streak_days:1,checkin_open:true,holdings_count:0,top_winner:null,trading:'live',suggestions:[{id:'discover',label:'Discover a new coin to yeet',say:'Help me find a new coin to yeet'}]};
+const OV={username:'Lucky Otter 42',usdc:'20',xp:5,tier:'Noob',streak_days:1,checkin_open:true,holdings_count:2,top_winner:null,trading:'live',suggestions:[{id:'discover',label:'Discover a new coin to yeet',say:'Help me find a new coin to yeet'}]};
 test('welcome layout: username, the three-column summary, tier and the check-in, mobile-first native components, only returned values',()=>{
  const w=uiFor('yeet_overview',OV,ALL_P2);
  assert.equal(w,uiFor('yeet_overview',{...OV,terms:{accepted:true,mode:'chat'}},ALL_P2));
  assert.match(w,/YEET/);
  assert.match(w,/YEET/);
- assert.match(w,/YEET/);
+ assert.match(w,/YEET/);assert.ok(w.endsWith(UI.closing),'the closing line after the buttons');
  assert.doesNotMatch(uiFor('yeet_overview',OV,P01),/check-in/,'no check-in without the wheel tools');
  // Never on other results, and the consent flow replaces it while the terms are due.
  for(const name of GUIDED_TOOLS.filter(n=>!['yeet_overview','yeet_terms','yeet_accept_terms'].includes(n)))assert.equal(uiFor(name,{...OV,terms:{accepted:false,mode:'chat'}},ALL_P2),undefined,name);
@@ -570,8 +578,10 @@ test('welcome layout: username, the three-column summary, tier and the check-in,
  for(const bad of [null,undefined,'x'])assert.equal(uiFor('yeet_overview',bad),undefined);
  // Apart from the copy table: no layout note is inside a guidance string.
  for(const [label,text] of entries)for(const note of [w,consentNote(),nextNote(),updateNote()])assert.ok(!text.includes(note),label);
- // Plain where it must be: consent, next steps and the update card carry no joke or playful voice.
- for(const t of [consentNote(),nextNote(),updateNote()])assert.doesNotMatch(t,/playful|degen|riff|humou?r/i);
+ // Plain where it must be: consent and the update card carry no joke or playful voice; the next steps are plain apart
+ // from the one closing line in the model's own words (owner ruling, 2026-11-14).
+ for(const t of [consentNote(),updateNote()])assert.doesNotMatch(t,/playful|degen|riff|humou?r|closing line/i);
+ assert.doesNotMatch(nextNote().replace(UI.closing,''),/playful|degen|riff|humou?r/i);
 });
 
 test('welcome layout through the registered server: its own text block after the guidance, before the style reminder; never in structuredContent',async()=>{
@@ -586,7 +596,82 @@ test('welcome layout through the registered server: its own text block after the
 });
 
 test('the layout line is in the instructions with every opt-in, within the tested length',()=>{
- for(const env of [{},{YEET_HOW_IT_WORKS:'1'}]){const ins=instructionsFor(env);assert.ok(ins.includes(` ${LAYOUT_LINE} `));assert.ok(ins.length<=4000,String(ins.length))}
+ for(const env of [{},{YEET_HOW_IT_WORKS:'1'}]){const ins=instructionsFor(env);assert.ok(ins.includes(` ${LAYOUT_LINE} `));assert.ok(ins.length<=5000,String(ins.length))}
  assert.match(instructions,/they refresh YEET at https:\/\/chatgpt\.com\/plugins\?directoryTab=personal and say it again/);
  assert.doesNotMatch(instructions,/chatgpt\.com\/plugins(?!\?directoryTab=personal)/);
+});
+
+// Owner rulings (voice, 2026-11-14): the closing line after any button list, no win code button, the new-person flow.
+test('closing line: in the instructions and every button layout, never promising wins; consent ends at its controls',()=>{
+ assert.match(instructions,/YEET/);
+ assert.match(UI.closing,/YEET/);
+ assert.doesNotMatch(UI.closing,/W's|chase/i,'the example is the owner\'s illustration only, never sent as words to reuse');
+ const fresh={...OV,holdings_count:0};
+ for(const t of [nextNote(ALL_P2),nextNote(P01),firstNote(ALL_P2),uiFor('yeet_overview',OV,ALL_P2),uiFor('yeet_overview',fresh,ALL_P2)])assert.ok(t.includes(UI.closing),t.slice(0,60));
+ assert.ok(!consentNote().includes(UI.closing));assert.match(consentNote(),/YEET/);
+});
+
+test('no "Got a win code?" button: no lead for it, and the line comes after a first spin or first YEET and in the tour',async()=>{
+ assert.equal(COPY.yeet_overview.lead_referral,undefined);
+ for(const [label,text] of entries)assert.doesNotMatch(text,/Got a win code/,label);
+ for(const t of [nextNote(),firstNote()])assert.doesNotMatch(t,/Got a win code/);
+ assert.match(firstNote(),/YEET/);
+ const S=[{id:'referral',label:'Got a win code?',say:'I have a win code'},{id:'discover',label:'Discover a new coin to yeet',say:'Help me find a new coin to yeet'}];
+ const {client,close}=await connect(async()=>({...OV,suggestions:S}),{YEET_P2:'1'});
+ try{
+  const o=await client.callTool({name:'yeet_overview',arguments:{app_version:contract['x-yeet-app'].tools_version}});
+  assert.equal(o.isError,undefined,JSON.stringify(o.content));
+  assert.deepEqual(o.structuredContent.suggestions.map(s=>s.id),['discover']);
+  assert.doesNotMatch(JSON.stringify(o.content),/Got a win code|I have a win code/);assert.doesNotMatch(o.structuredContent.guidance,/win code/);
+ }finally{await close()}
+});
+
+test('new person: two buttons and the short tour instead of the standard buttons; a returning account gets the standard four',()=>{
+ const fresh={...OV,holdings_count:0};
+ assert.equal(newcomer(fresh),true);assert.equal(newcomer(OV),false);assert.equal(newcomer({...fresh,top_winner:{symbol:'WIF',pct:'4'}}),false);assert.equal(newcomer({...fresh,holdings_count:null}),false,'unread holdings: not new');
+ const f=firstNote(ALL_P2);
+ assert.match(f,/YEET/);
+ assert.match(f,/one step per reply/);assert.match(f,/YEET/);
+ // The tour's steps, in the owner's order.
+ const steps=["YEET steps.1.",'what YEET is','XP and their streak, the daily wheel',"YEET steps.4.",'adding money','limits for new accounts','win codes'];
+ let at=-1;for(const st of steps){const i=f.indexOf(st);assert.ok(i>at,st);at=i}
+ assert.doesNotMatch(firstNote(P01),/daily wheel \(one free spin/,'no wheel step without the wheel tools');
+ assert.match(f,/YEET/);assert.doesNotMatch(f,/\b\d+ USDC\b/,'no limit number of its own');
+ // After the tour or "I know my way": the standard four, also what nextNote shows.
+ const four="YEET four.";
+ assert.ok(f.includes(four));assert.ok(nextNote(ALL_P2).includes(four));assert.match(nextNote(ALL_P2),/exactly these four buttons/);assert.match(nextNote(P01),/exactly these three buttons/);
+ // The overview of someone with no landed trade: the welcome summary, then the first steps; its guidance points there.
+ const w=uiFor('yeet_overview',fresh,ALL_P2);assert.match(w,/^YEET welcome layout:/);assert.ok(w.includes(f));
+ assert.match(g('yeet_overview',fresh),/YEET/);
+ assert.doesNotMatch(g('yeet_overview',{...fresh,trading:'paused'}),/first-steps/,'paused says so first, with the suggestions');
+ // After the terms: new (no coin held) -> first steps, the username step only while the result offers the username.
+ const named=uiFor('yeet_accept_terms',{terms:{accepted:true},overview:{...fresh,suggestions:[{id:'how'}]}},ALL_P2);
+ const unnamed=uiFor('yeet_accept_terms',{terms:{accepted:true},overview:{...fresh,suggestions:[{id:'username'},{id:'how'}]}},ALL_P2);
+ assert.ok(named.startsWith('YEET first steps'));assert.doesNotMatch(named,/yeet_set_username/);assert.match(unnamed,/YEET/);
+ // A returning account that only re-accepts new terms, or a result without the overview: the standard four.
+ assert.equal(uiFor('yeet_accept_terms',{terms:{accepted:true},overview:OV},ALL_P2),nextNote(ALL_P2));
+ assert.equal(uiFor('yeet_accept_terms',{terms:{accepted:true},overview:null},ALL_P2),nextNote(ALL_P2));
+ assert.match(COPY.terms.recorded,/YEET/);
+});
+
+test('independent review: the removed contradictions and the trade, refusal and consent wording',()=>{
+ 
+ assert.doesNotMatch(instructions,/YEET/);assert.match(instructions,/YEET/);
+ // Consent.
+ assert.match(instructions,/YEET/);
+ assert.match(instructions,/YEET/);assert.match(instructions,/never invent checkbox events/);
+ assert.match(consentNote(),/YEET/);
+ assert.match(instructions,/YEET/);
+ // No buy nudge.
+ assert.doesNotMatch(instructions,/buy it now/i);for(const [label,text] of entries)assert.doesNotMatch(text,/buy it now/i,label);
+ assert.match(COPY.yeet_coins.list,/^Answer their question first/);assert.match(COPY.yeet_coins.list,/YEET/);assert.match(COPY.yeet_coins.list,/YEET/);
+ // Never choose for them.
+ for(const k of ['INVALID_ARGUMENT','PARTS_EMPTY'])assert.match(COPY.errors[k],/[Nn]ever choose/,k);
+ assert.match(COPY.errors.INVALID_ARGUMENT,/YEET/);
+ // Trades: what was received, each leg as the result says, no automatic retry.
+ for(const k of ['success_yeet','success_yeet_xp','success_yeet_no_wheel'])assert.match(COPY.trade[k],/YEET/,k);
+ assert.match(COPY.trade.partial,/YEET/);assert.match(COPY.trade.partial,/YEET/);
+ assert.doesNotMatch(COPY.trade.failed,/or try again/);assert.match(COPY.trade.failed,/without retrying on your own/);
+ // WALLET_NOT_READY and the unready account: one consistent line, never "nothing is needed".
+ for(const t of [COPY.errors.WALLET_NOT_READY,COPY.yeet_home.needs_signer]){assert.doesNotMatch(t,/nothing is needed/);assert.match(t,/YEET/)}
 });

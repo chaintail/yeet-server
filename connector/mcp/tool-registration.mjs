@@ -4,7 +4,7 @@ import {toolError} from './errors.mjs';
 import {toolSchemas,toolSpecs,zodSchema,registrationInput,META_KEYS} from './tool-contract.mjs';
 import {registerWidgets,toolMeta,CONFIRM_META_KEY} from './widgets.mjs';
 import {instructionsFor} from './instructions.mjs';
-import {guidanceFor,styleFor,uiFor,updateNote} from './guidance.mjs';
+import {guidanceFor,styleFor,uiFor,updateNote,newcomer} from './guidance.mjs';
 import {SIGNER_META_KEY,signerMetaFromEnv} from '#shared/signing.mjs';
 import {staleness as processStaleness,staleKey,appRefresh,withRefresh,BUILD_META_KEY,TOOLS_VERSIONS,classifyToolsVersion,loggedVersion} from './refresh.mjs';
 import {refreshGuidance} from './guidance.mjs';
@@ -119,7 +119,9 @@ export function overviewText(r){
  const win=r.top_winner?` Biggest winner: ${r.top_winner.symbol}, up ${r.top_winner.pct}% on their average YEET price.`:'';
  const open=r.checkin_open===true?' Today\'s daily check-in is still open.':'';
  const paused=r.trading==='paused'?' Trading is paused right now.':'';
- return `${r.username}: ${bits.join(', ')}.${open}${win}${paused} Offer next: ${r.suggestions.map(s=>`${s.label} ("${s.say}")`).join('; ')}.`;
+ // Someone with no landed trade yet gets the two first-steps buttons of the layout note, not the suggestions.
+ if(newcomer(r)&&r.trading!=='paused')return `${r.username}: ${bits.join(', ')}.${open}${paused} Offer next: the two first-steps buttons of the YEET layout note.`;
+ return `${r.username}: ${bits.join(', ')}.${open}${win}${paused} Offer next: ${r.suggestions.filter(s=>s?.id!=='referral').map(s=>`${s.label} ("${s.say}")`).join('; ')}.`;
 }
 /** yeet_checkin's text for the model: the streak, the XP and whether a spin is waiting. */
 export function checkinText(r){
@@ -223,6 +225,9 @@ export function createMcpServer({token,callCore,env=process.env,staleness=proces
     // approved on the YEET page, which reads its requests from core directly. Once the contract lists the kind the
     // request flows through. Every kind of the chain route is listed: nothing of it is ever cut.
     if(isObject)cutSignRequests(schemas.output,data);
+    // Owner ruling 2026-11-14: no "Got a win code?" button among the overview's suggestions; codes come up as a tour
+    // step and once after the first daily spin or first landed YEET (guidance.mjs). The field stays as the core sends it.
+    if(isObject&&name==='yeet_overview'&&Array.isArray(data.suggestions))data.suggestions=data.suggestions.filter(s=>s?.id!=='referral');
     // Agent guidance (guidance.mjs): for the model, in structuredContent (the card ignores it) and in the text it reads.
     const own=isObject?guidanceFor(name,data,ctx):undefined;
     const guidance=tellRefresh&&isObject?withRefresh(refreshGuidance(),own):own;

@@ -23,14 +23,17 @@ export const COPY=Object.freeze({
   open:"YEET referral.open.",
   applied:"YEET referral.applied: {code}.",
   skipped:"YEET referral.skipped.",
+
+  moment:"YEET referral.moment.",
  },
 
  yeet_overview:{
   base:"YEET yeet_overview.base: {username} {lead}.",
 
+  newcomer:"YEET yeet_overview.newcomer: {username}.",
+
   terms_chat:"YEET yeet_overview.terms_chat: {username} {url}.",
   terms_page:"YEET yeet_overview.terms_page: {username}.",
-  lead_referral:", YEET yeet_overview.lead_referral.",
   lead_none:" YEET yeet_overview.lead_none.",
   lead_fund:", YEET yeet_overview.lead_fund.",
   lead_checkin:", YEET yeet_overview.lead_checkin.",
@@ -289,10 +292,12 @@ function trade(r,ctx){
  switch(r.status){
   case 'signing':return left>0?fill(c.signing_more,{left,s:plural(left)}):skeet?c.settling_skeet:c.settling_yeet;
   case 'submitted':case 'settling':return skeet?c.settling_skeet:c.settling_yeet;
-  case 'success':
+  case 'success':{
    if(skeet){const network=netName(r.lands_on);return network?(points?fill(c.success_skeet_xp_on,{network,points}):fill(c.success_skeet_on,{network})):points?fill(c.success_skeet_xp,{points}):c.success_skeet}
-   if(!hasWheel(ctx))return c.success_yeet_no_wheel;
-   return points?fill(c.success_yeet_xp,{points}):c.success_yeet;
+   const moment=points>=FIRST_YEET_XP?COPY.referral.moment:'';
+   if(!hasWheel(ctx))return join(c.success_yeet_no_wheel,moment);
+   return join(points?fill(c.success_yeet_xp,{points}):c.success_yeet,moment);
+  }
   case 'partial':return c.partial;
   case 'refunded':return skeet?c.refunded_skeet:netName(r.funded_from)?fill(c.refunded_yeet_on,{network:netName(r.funded_from)}):c.refunded_yeet;
   default:return c.failed;
@@ -311,6 +316,10 @@ function portfolio(r){
  return positive(r.base?.usdc)?fill(c.usdc_only,{usdc:r.base.usdc}):c.empty;
 }
 
+export const FIRST_YEET_XP=50;
+
+export const firstSpin=r=>r?.streak_days===1&&Number.isFinite(Number(r.total))&&Number.isFinite(Number(r.xp_won))&&Number(r.total)-Number(r.xp_won)<FIRST_YEET_XP;
+
 const reminder=days=>Number.isInteger(days)&&days>=2?fill(COPY.streak.reminder,{streak_days:days}):'';
 function spin(r,ctx){
  const c=COPY.daily_spin,s=r.stamp;
@@ -319,7 +328,7 @@ function spin(r,ctx){
   :fill(c.stamp,{coin:s.coin,filled:s.filled,slots:s.slots,xp_won:r.xp_won});
  const left=r.spins_available??0;
 
- return join(head,left>0?fill(c.more_spins,{left,s:plural(left)}):hasLucky(ctx)&&r.spin_reason!=='trade_bonus'?c.lucky:c.done,left>0?'':reminder(r.streak_days));
+ return join(head,left>0?fill(c.more_spins,{left,s:plural(left)}):hasLucky(ctx)&&r.spin_reason!=='trade_bonus'?c.lucky:c.done,left>0?'':reminder(r.streak_days),firstSpin(r)?COPY.referral.moment:'');
 }
 function lucky(r){
  const c=COPY.lucky,l=r?.lucky;
@@ -328,10 +337,13 @@ function lucky(r){
  if(l.slice===null||l.slice===undefined||!l.wheel?.[l.slice])return c.ready;
  return fill(c.landed,{coin:l.wheel[l.slice].coin,amount:l.amount_usdc,lucky_id:l.lucky_id});
 }
+
+export const newcomer=o=>!!o&&typeof o==='object'&&o.holdings_count===0&&!o.top_winner;
 function overviewGuidance(r){
  const c=COPY.yeet_overview,first=r.suggestions?.[0]?.id;
  if(r.terms&&r.terms.accepted===false)return fill(r.terms.mode==='page'?c.terms_page:c.terms_chat,{username:r.username,url:REFRESH_URL});
- const lead=r.trading==='paused'?c.lead_paused:first==='referral'?c.lead_referral:first==='fund'?c.lead_fund:first==='checkin'?c.lead_checkin:c.lead_none;
+ if(newcomer(r)&&r.trading!=='paused')return fill(c.newcomer,{username:r.username});
+ const lead=r.trading==='paused'?c.lead_paused:first==='fund'?c.lead_fund:first==='checkin'?c.lead_checkin:c.lead_none;
  return fill(c.base,{username:r.username,lead});
 }
 
@@ -408,14 +420,22 @@ export function styleFor(name,result){
 }
 
 export const UI=Object.freeze({
- welcome:"YEET UI.welcome: {checkin}.",
+ welcome:"YEET UI.welcome: {checkin} {buttons} {closing}.",
+ welcome_suggestions:'suggestions',
+ welcome_first:'first-steps buttons',
+
+ closing:"YEET UI.closing.",
  welcome_checkin:" YEET UI.welcome_checkin.",
  consent:"YEET UI.consent.",
- next:"YEET UI.next: {count} {buttons} {xp}.",
+ next:"YEET UI.next: {count} {buttons} {closing}.",
  next_wheel:"YEET UI.next_wheel.",
  next_rest:"YEET UI.next_rest.",
- next_xp_wheel:"YEET UI.next_xp_wheel.",
- next_xp:"YEET UI.next_xp.",
+
+ first:"YEET UI.first: {source} {closing} {buttons}.",
+ tour:"YEET UI.tour: {username} {wheel}.",
+ tour_username:"YEET UI.tour_username.",
+ tour_username_named:'',
+ tour_wheel:", YEET UI.tour_wheel.",
  update:"YEET UI.update: {url}.",
 });
 const hasCheckin=ctx=>!ctx||!ctx.tools||ctx.tools.has('yeet_checkin');
@@ -423,10 +443,15 @@ const hasCheckin=ctx=>!ctx||!ctx.tools||ctx.tools.has('yeet_checkin');
 export const consentNote=()=>UI.consent;
 
 export const updateNote=(url=REFRESH_URL)=>fill(UI.update,{url});
+const standardButtons=ctx=>hasCheckin(ctx)?`${UI.next_wheel}, ${UI.next_rest}`:UI.next_rest;
 
 export function nextNote(ctx){
- const wheel=hasCheckin(ctx);
- return fill(UI.next,{count:wheel?'four':'three',buttons:wheel?`${UI.next_wheel}, ${UI.next_rest}`:UI.next_rest,xp:wheel?UI.next_xp_wheel:UI.next_xp});
+ return fill(UI.next,{count:hasCheckin(ctx)?'four':'three',buttons:standardButtons(ctx),closing:UI.closing});
+}
+
+export function firstNote(ctx,{source='overview\'s suggestions',named}={}){
+ const first=fill(UI.first,{source,closing:UI.closing,buttons:standardButtons(ctx)});
+ return `${first} ${fill(UI.tour,{username:named===true?UI.tour_username_named:UI.tour_username,wheel:hasCheckin(ctx)?UI.tour_wheel:''})}`;
 }
 const chatTerms=t=>!!t&&typeof t==='object'&&t.accepted===false&&t.mode!=='page';
 
@@ -435,10 +460,17 @@ export function uiFor(name,result,ctx){
  try{
   if(name==='yeet_overview'){
    if(result.terms?.accepted===false)return chatTerms(result.terms)?UI.consent:undefined;
-   return fill(UI.welcome,{checkin:hasCheckin(ctx)?UI.welcome_checkin:''});
+   const fresh=newcomer(result)&&result.trading!=='paused';
+   const welcome=fill(UI.welcome,{checkin:hasCheckin(ctx)?UI.welcome_checkin:'',buttons:fresh?UI.welcome_first:UI.welcome_suggestions,closing:fresh?'':UI.closing}).trimEnd();
+   return fresh?`${welcome} ${firstNote(ctx)}`:welcome;
   }
   if(name==='yeet_terms')return chatTerms(result.terms)?UI.consent:undefined;
-  if(name==='yeet_accept_terms')return result.terms?.accepted===true?nextNote(ctx):undefined;
+  if(name==='yeet_accept_terms'){
+   if(result.terms?.accepted!==true)return undefined;
+   const o=result.overview;
+   if(!newcomer(o)||o.trading==='paused')return nextNote(ctx);
+   return firstNote(ctx,{source:'overview\'s suggestions',named:Array.isArray(o.suggestions)?!o.suggestions.some(s=>s?.id==='username'):undefined});
+  }
   return undefined;
  }catch{return undefined}
 }

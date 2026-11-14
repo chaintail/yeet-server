@@ -3,22 +3,21 @@
 // Same filter as the router's tradableOnSolana (catalog.ts): Solana entries that are not the funding asset.
 import {readFileSync} from 'node:fs';
 import {createMarket} from './market.mjs';
+import {limitsFromEnv} from './trade/limits.mjs';
 const catalogue=JSON.parse(readFileSync(new URL('../vendor/yeet-win/router/dist/src/catalog.json',import.meta.url),'utf8'));
-const usdc=/^(0|[1-9][0-9]{0,5})(\.[0-9]{1,6})?$/;
-function amount(name,fallback){
- const value=process.env[name]??fallback;
- if(!usdc.test(value))throw Error(`Invalid ${name}`);
- return value;
-}
 export function tradable(entries=catalogue){
  return entries.filter(e=>e.chain==='solana'&&e.kind!=='funding');
 }
-const limits=()=>({
- min_leg_usdc:amount('YEET_MIN_LEG_USDC','3'),
- max_trade_usdc:amount('YEET_MAX_TRADE_USDC','25'),
- max_legs:5,
+const usdcText=raw=>{const s=(raw/1_000_000n).toString(),f=(raw%1_000_000n).toString().padStart(6,'0').replace(/0+$/,'');return f?`${s}.${f}`:s};
+/** The same minimum leg and account-blind per-trade ceiling the trade engine enforces (trade/limits.mjs): an unset,
+ * empty or blank variable (compose passes unset ones as '') is its default, as it is there. */
+const limits=(env=process.env)=>{const l=limitsFromEnv(env);return {
+ min_leg_usdc:usdcText(l.minLegRaw),
+ max_trade_usdc:usdcText(l.maxTradeRaw),
+ max_legs:l.maxLegs,
  default_usdc:'20',
-});
+}};
+export {limits as coinLimits};
 const NO_CHANGE=Object.freeze({h1:null,h6:null,h24:null});
 let shared;
 const defaultMarket=()=>shared??=createMarket();

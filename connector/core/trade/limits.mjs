@@ -28,12 +28,12 @@ export const COST_WARN_BPS=300;
 const USDC_RE=/^(0|[1-9][0-9]{0,5})(\.[0-9]{1,6})?$/;
 
 function usdcEnv(env,name,fallback){
- const v=env[name]===undefined||env[name]===''?fallback:env[name];
+ const v=String(env[name]??'').trim()===''?fallback:String(env[name]).trim();
  if(!USDC_RE.test(v))throw Error(`Invalid ${name}`);
  return parseUnits(v,6);
 }
 function intEnv(env,name,fallback,max){
- const v=env[name]===undefined||env[name]===''?fallback:Number(env[name]);
+ const v=String(env[name]??'').trim()===''?fallback:Number(env[name]);
  if(!Number.isSafeInteger(v)||v<0||v>max)throw Error(`Invalid ${name}`);
  return v;
 }

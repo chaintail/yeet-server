@@ -25,7 +25,7 @@ export const USDC_KEY=USDC_BASE.toLowerCase();
 /** YEET_BALANCE_TOLERANCE_BPS (default 100) and YEET_STUCK_AFTER_MINUTES (default 30); throws on a malformed value. */
 export function accountingFromEnv(env=process.env){
  const int=(name,fallback,max)=>{
-  const v=env[name]===undefined||env[name]===''?fallback:Number(env[name]);
+  const v=String(env[name]??'').trim()===''?fallback:Number(env[name]);
   if(!Number.isSafeInteger(v)||v<0||v>max)throw Error(`Invalid ${name}`);
   return v;
  };

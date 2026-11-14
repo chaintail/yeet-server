@@ -3,7 +3,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {z} from 'zod';
 import {createMarket,cleanText,httpsUrl,xUrl,priceString,pct,mintOf,WRAPPED_SOL} from './market.mjs';
-import {coins,coin,coinSuggestions,symbolOf,tradable} from './coins.mjs';
+import {coins,coin,coinSuggestions,symbolOf,tradable,coinLimits} from './coins.mjs';
+import {limitsFromEnv} from './trade/limits.mjs';
+import {accountingFromEnv} from './trade/accounting.mjs';
 import {toolSchemas,zodSchema} from '../mcp/tool-contract.mjs';
 
 const WIF='EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm',LOUD='EJZJpNa4tDZ3kYdcRZgaAtaKm3fLJ5akmyPkCaKmfWvd',POOL='EP2ib6dYdEeqD8MfE2ezHCxX3kP3K2eLKkirfPm5eyMx';
@@ -193,7 +195,7 @@ test('yeet_coin: one coin with everything; each missing piece is null on its own
  zodSchema(z,toolSchemas.yeet_coin.output).parse(wif);
  assert.deepEqual(wif,{symbol:'WIF',name:'dogwifhat',kind:'meme',price_usd:'0.143951',change_pct:{h1:-0.16,h6:-2.22,h24:-4.73},as_of:'2027-01-15T08:00:00Z',
   market_cap_usd:143783732.3,volume_24h_usd:330567.86,liquidity_usd:4415776.38,description:'dogwifhat (WIF) is a meme coin with a dog in a hat.',website:'https://dogwifcoin.org/',x:'https://x.com/dogwifcoin',
-  holding:{amount:'4.401187',usd:'0.63'},limits:{min_leg_usdc:'3',max_trade_usdc:'25',max_legs:5,default_usdc:'20'},suggestions:coinSuggestions('WIF')});
+  holding:{amount:'4.401187',usd:'0.63'},limits:{min_leg_usdc:'3',max_trade_usdc:'500',max_legs:5,default_usdc:'20'},suggestions:coinSuggestions('WIF')});
  assert.equal(card_chart.points.length,24);
  // The follow-ups, in the order the model offers them.
  assert.deepEqual(wif.suggestions.map(s=>[s.id,s.label]),[['research','Research WIF deeper'],['yeet','YEET WIF'],['moving','What else is moving?']]);
@@ -214,4 +216,18 @@ test('yeet_coin: one coin with everything; each missing piece is null on its own
  for(const unknown of ['DOGE','USDT','wif'])assert.equal(await coin(unknown,{market}),null,unknown);
  assert.equal(symbolOf(' $wif '),'WIF');assert.equal(symbolOf('Bome'),'BOME');
  for(const bad of ['','W','../x','WIF/..','a b',`${'A'.repeat(13)}`,null,5])assert.equal(symbolOf(bad),null,String(bad));
+});
+
+// Production, 2026-11-14: compose passes an unset variable as '', which made every yeet_coins / yeet_coin call throw
+// "Invalid YEET_MIN_LEG_USDC". Empty or blank is the default, and the numbers are the trade engine's (trade/limits.mjs).
+test('coin limits: empty or blank YEET_MIN_LEG_USDC / YEET_MAX_TRADE_USDC are the defaults, the same as the trade engine',()=>{
+ const want={min_leg_usdc:'3',max_trade_usdc:'500',max_legs:5,default_usdc:'20'};
+ for(const v of ['',' ','\t'])assert.deepEqual(coinLimits({YEET_MIN_LEG_USDC:v,YEET_MAX_TRADE_USDC:v}),want,JSON.stringify(v));
+ assert.deepEqual(coinLimits({}),want);
+ const l=limitsFromEnv({YEET_MIN_LEG_USDC:'',YEET_MAX_TRADE_USDC:''});assert.equal(l.minLegRaw,3_000_000n);assert.equal(l.maxTradeRaw,500_000_000n);
+ assert.deepEqual(coinLimits({YEET_MIN_LEG_USDC:'2.5',YEET_MAX_TRADE_USDC:'40'}),{...want,min_leg_usdc:'2.5',max_trade_usdc:'40'},'a set value is the engine\'s');
+ assert.throws(()=>coinLimits({YEET_MIN_LEG_USDC:'abc'}),/Invalid YEET_MIN_LEG_USDC/,'a malformed value still fails');
+ // The same flaw in the other env readers: blank is the default there too.
+ assert.equal(limitsFromEnv({YEET_MAX_COST_BPS:'  '}).maxCostBps,800);
+ assert.deepEqual(accountingFromEnv({YEET_BALANCE_TOLERANCE_BPS:' ',YEET_STUCK_AFTER_MINUTES:''}),accountingFromEnv({}));
 });
