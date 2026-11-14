@@ -27,6 +27,7 @@ import {transitionLeg,recordLegEvent,attemptIdOf} from '../pipeline/ledger.mjs';
 import {recordSpend} from '../trade/limits.mjs';
 import {tx} from '../trade/db.mjs';
 import {refuse,TradeError,iso} from '../trade/util.mjs';
+import {CANNOT_FILL_MESSAGE} from '#contracts/errors';
 import {formatUnits,CATALOG} from '../trade/router.mjs';
 import {onLedger} from './config.mjs';
 import {settledOk} from './solver.mjs';
@@ -53,6 +54,10 @@ CREATE INDEX IF NOT EXISTS ledger_attempt_trade ON ledger_attempt(trade_id,attem
 const big=v=>BigInt(v);
 const sum=xs=>xs.reduce((a,b)=>a+b,0n);
 const sha256Hex=s=>createHash('sha256').update(s,'utf8').digest('hex');
+/** What a person reads when the solver's float does not cover their trade (checked at the tap, before they are asked
+ * for anything): plain words, and the fact that matters. */
+export const CANNOT_FILL=CANNOT_FILL_MESSAGE;
+const cannotFill=detail=>{throw Object.assign(new TradeError('TEMPORARILY_UNAVAILABLE',detail),{userMessage:CANNOT_FILL})};
 export const explorerUrl=hash=>hash?`https://nearblocks.io/txns/${hash}`:null;
 /** The ledger account a Solana wallet's key owns: the address bytes in hex. No registration, nothing to create. */
 export const ledgerAccountOf=solanaAddress=>ed25519AccountId(solanaAddress);
@@ -155,7 +160,7 @@ export function createLedgerRoute({db,cfg,verifier,solver,client,catalog=CATALOG
   if(direction==='yeet'){
    const total=sum(legs.map(l=>big(l.amount_in_raw)));
    solver.checkExposure(total);
-   if(float<total)refuse('TEMPORARILY_UNAVAILABLE',`solver float ${float} is below ${total}`);
+   if(float<total)cannotFill(`solver float ${float} is below ${total}`);
   }
   const quotes=await quoteErrors(()=>Promise.all(legs.map((l,i)=>direction==='yeet'
    ?quoteFirm({originAsset:USDC_SOL_TOKEN_ID,destinationAsset:coins[i].assetId,amount:big(l.amount_in_raw),slippageBps,deadlineMs,dry})
@@ -163,7 +168,7 @@ export function createLedgerRoute({db,cfg,verifier,solver,client,catalog=CATALOG
   if(direction==='skeet'){
    const pays=giveFor(sum(quotes.map(r=>receivedFor(big(r.quote.minAmountOut),feePips))),feePips);
    solver.checkExposure(pays);
-   if(float<pays)refuse('TEMPORARILY_UNAVAILABLE',`solver float ${float} is below ${pays}`);
+   if(float<pays)cannotFill(`solver float ${float} is below ${pays}`);
   }
   const out=quotes.map((res,i)=>{
    const q=res.quote,l=legs[i],coin=coins[i],[origin,destination]=direction==='yeet'?[usdc,coin]:[coin,usdc];

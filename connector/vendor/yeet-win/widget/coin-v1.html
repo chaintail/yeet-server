@@ -261,6 +261,8 @@ html[data-theme=light]{background:#fff}
 .yc-h .meta{margin-left:auto;font:600 11.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--yc-mute);text-align:right}
 .yc-sub{margin:-6px 0 14px;font-size:15px;color:var(--yc-mute)}
 .amts{display:flex;gap:6px;margin-bottom:12px}
+/* Four in one row at any card width from 320 px: every chip may shrink (min-width 0), and the row gets tighter when narrow. */
+.amts>*{min-width:0;flex:1 1 0}
 .amts button{flex:1;height:38px;border:0;border-radius:12px;background:var(--yc-raise);color:var(--yc-fg);font:700 15px var(--mono);cursor:pointer;box-shadow:inset 0 0 0 1px var(--yc-line);transition:background .25s,color .25s,transform .3s var(--spring)}
 .amts button[aria-pressed=true]{background:var(--yc-fg);color:var(--yc-bg);transform:scale(1.04)}
 .rows{display:grid;gap:8px}
@@ -382,6 +384,9 @@ h1{margin:0}
 .amts label.on{background:var(--yc-fg);color:var(--yc-bg);transform:scale(1.04)}
 .amts label:focus-within{box-shadow:inset 0 0 0 2px var(--yc-accent)}
 .amts button:disabled,.amts label:has(input:disabled){opacity:.5;cursor:default}
+/* Narrow cards (320 to 400 px): the fourth chip ("$ Other") keeps its words inside itself and inside the card. */
+@media (max-width:400px){.amts{gap:4px}.amts button,.amts label,.amts label input{font-size:14px}.amts label{justify-content:flex-start;padding-left:8px;overflow:hidden}.amts label input{width:100%;flex:1}.amts label .hint{left:19px}}
+@media (max-width:345px){.amts button,.amts label,.amts label input{font-size:13px}.amts label{padding-left:6px}.amts label .hint{left:16px}}
 .stp button:disabled{opacity:.35;cursor:default}
 .row .est{font:600 13px var(--mono);color:var(--yc-mute);text-align:right;white-space:nowrap}
 .row .est b{display:block;color:var(--yc-fg);font:800 15px var(--mono)}
@@ -543,7 +548,7 @@ const BRAND={"logo":{"box":"-40 180 4256 820","d":"M84 990Q45 990,16 984Q-12 979
 const WheelCard=(()=>({logic:{normalizeSpin:()=>null,normalizeLucky:()=>null}}))(window); // src/wheel-card.js: the daily wheel (views home and wheel) and the lucky wheel (view lucky)
 const SIGNING=(()=>null)(null);   // src/trade-signing.js over src/vendor/wallet-request.mjs
 const signerCfg={"app_id":null,"script":null,"page":null};  // {app_id,script,page}: build-time; a result's _meta['yeet/signer'] overrides
-const BUILD="2e4068fc135be4bb54aa5325f34b8ce4a365f741";     // the yeet-win commit this template was built from; null for a local build
+const BUILD="b1cd0c9a3021ad313f87a773de536ac8bf0c17c5";     // the yeet-win commit this template was built from; null for a local build
 const APP={"manage_url":"https://chatgpt.com/plugins","refresh_label":"Refresh YEET in ChatGPT","refresh_steps":"open YEET there, select Refresh, then start a new chat"};         // {manage_url,refresh_label,refresh_steps}: where the person refreshes the app in ChatGPT
 const CONFIRM_KEY='yeet/confirm',SIGNER_KEY='yeet/signer',BUILD_KEY='yeet/build',FAILURE_KEY='yeet/failure';
 const POLL_MS=5000,POLL_MAX=360,SKEW_MS=2000,MAX_PARTS=99,AMOUNT_MAX=25,MORE_USDC='5';

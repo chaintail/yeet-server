@@ -1,10 +1,10 @@
-// The lucky wheel (yeet-win docs/WHEEL-CARD.md "Server additions needed"). Owner rules: the lucky wheel has 5 hot
+// The lucky wheel (yeet-win docs/WHEEL-CARD.md "Server additions needed"). Owner rules: the lucky wheel has 5
 // coins; the person spins it; it lands on one coin; if they YEET at least LUCKY_USDC into that coin, they get one bonus
 // spin of the daily wheel (grantSpin 'trade_bonus', unique per lucky_id) plus one stamp of that coin. Nothing else.
 //
 // - One lucky wheel per account per UTC day: lucky_id = 'l_' + HMAC(secret, account|day|lucky-id), stored with its
 //   five coins the first time lucky_wheel is asked that day, so the wheel never changes once shown.
-// - Hot coins: the catalog's meme coins, ranked per UTC day by HMAC(secret, day|hot|coin) (the same ranking for every
+// - The day's coins (the card says "lucky coins"; they are random, not popular): the catalog's meme coins, ranked per UTC day by HMAC(secret, day|hot|coin) (the same ranking for every
 //   account), keeping only coins 1Click can quote now (availability.mjs), the first LUCKY_SLICES of them.
 // - The slice is the server's draw, HMAC(secret, account|day|lucky) mod the wheel size, stored on the first lucky_spin;
 //   a repeat returns the stored slice.
@@ -26,7 +26,7 @@ export const LUCKY_ID=/^l_[a-z0-9]{8,40}$/;
 export const luckyCoins=(entries=tradable())=>Object.freeze(entries.filter(e=>e.kind==='meme').map(e=>e.symbol));
 const mac=(secret,seed)=>createHmac('sha256',secret).update(seed).digest();
 export const luckyIdFor=(secret,who,day)=>'l_'+mac(secret,`${who}|${day}|lucky-id`).toString('hex').slice(0,24);
-/** The day's ranking of `coins`, hottest first: the same for every account on one UTC day. */
+/** The day's ranking of `coins`, first is drawn first (a keyed random order, no popularity in it): the same for every account on one UTC day. */
 export const hotRanking=(secret,day,coins)=>[...coins].map(c=>[mac(secret,`${day}|hot|${c}`).readUInt32BE(0),c]).sort((a,b)=>a[0]-b[0]||(a[1]<b[1]?-1:1)).map(([,c])=>c);
 export const luckySlice=(secret,who,day,n)=>mac(secret,`${who}|${day}|lucky`).readUInt32BE(0)%n;
 

@@ -120,6 +120,11 @@ services:
       YEET_LEDGER_MIN_RUN_S: ${YEET_LEDGER_MIN_RUN_S:-}
       YEET_LEDGER_MIN_LEFT_S: ${YEET_LEDGER_MIN_LEFT_S:-}
       YEET_LEDGER_SOURCE_SLIPPAGE_BPS: ${YEET_LEDGER_SOURCE_SLIPPAGE_BPS:-}
+      # Funding on the ledger route (docs/LEDGER-ROUTE.md 1.5): the networks whose permanent deposit address the Add
+      # funds card shows (default solana) and what the deposit watch reads (status, default; or balance). The 1Click
+      # partner key that makes the addresses is ONECLICK_JWT, a secret: only from core.env below, for the core alone.
+      YEET_LEDGER_DEPOSIT_NETWORKS: ${YEET_LEDGER_DEPOSIT_NETWORKS:-}
+      YEET_LEDGER_DEPOSIT_STAGES: ${YEET_LEDGER_DEPOSIT_STAGES:-}
       NEAR_RPC_URL: ${NEAR_RPC_URL:-}
       YEET_SOLANA_PAUSE: ${YEET_SOLANA_PAUSE:-}
       YEET_BASE_PAUSE: ${YEET_BASE_PAUSE:-}

@@ -1,19 +1,22 @@
 # The ledger route: trades that settle inside the NEAR Intents ledger
 
-Status 2026-11-14, branch `int/ledger` (from `int/auth` f3557c9). A second trade route behind the same cards, **off by
-default**. With `YEET_ROUTE` unset or `chain` and `YEET_LEDGER_ACCOUNTS` empty, nothing of this route is created, read
-or written, and the 1Click chain-to-chain route runs as before (all 692 earlier tests pass unchanged).
+Status 2026-11-14, branch `int/ledger` (production `int/auth` 617b49e merged in; cards at yeet-win b1cd0c9, `tools-6`).
+A second trade route behind the same cards, **off by default**. With `YEET_ROUTE` unset or `chain` and
+`YEET_LEDGER_ACCOUNTS` empty, nothing of this route is created, read or written, and the 1Click chain-to-chain route
+and today's funding card run as before (every test of `int/auth` passes unchanged). Not deployed.
 
 The route is the proven spike made part of the pipeline: `docs/INTENTS-BALANCE-MODEL.md`, `ops/intents-direct-spike.mjs`,
 real trades in `receipts/intents-live/` (3-coin buy with one approval in 28.6 s, sell paid in 4 s).
 
-- Code: `connector/core/ledger-route/` (`config.mjs`, `route.mjs`, `solver.mjs`, `check.mjs`), on the spike's modules in
-  `connector/core/intents/`.
+- Code: `connector/core/ledger-route/` (`config.mjs`, `route.mjs`, `solver.mjs`, `check.mjs`, and `deposits.mjs` for
+  funding), on the spike's modules in `connector/core/intents/`.
 - Hooks: `connector/core/pipeline/pipeline.mjs` (every use is behind `ledgerRoute`, which is `null` while the route is off),
   `core/trade/proposals.mjs` (`clientFor`), `core/pipeline/wallet-request.mjs` (request kind `near_intent`),
-  `mcp/tool-registration.mjs` (`cutSignRequests`), `core/core.mjs` (start check), `ops/compose.yml` (settings passed through).
-- Tests: `connector/core/ledger-route/ledger-route.test.mjs` (25), `connector/core/intents/*.test.mjs` (63, from the spike).
-- Read-only tool: `ops/ledger-route-check.mjs`.
+  `mcp/tool-registration.mjs` (`cutSignRequests`), `core/core.mjs` (start check, and `/fund` for an account on this
+  route), `mcp/guidance.mjs` (`yeet_fund_own`), `ops/compose.yml` (settings passed through).
+- Tests: `connector/core/ledger-route/ledger-route.test.mjs` (25), `deposits.test.mjs` (19), `ops-tools.test.mjs` (6),
+  `connector/core/intents/*.test.mjs` (63, from the spike), one in `mcp/scripts/signing-meta-test.mjs`.
+- Operator tools: `ops/ledger-route-check.mjs` (read-only check; deposit addresses; deposit watch), `ops/send-usdc.mjs`.
 
 ## 1. Design
 
@@ -73,11 +76,61 @@ approved, the coins go to the leftover unload, and an alert names the surplus st
 
 ### 1.5 Funding and withdrawal
 
-- **In (what the spike used, proven live):** a 1Click same-asset quote, USDC on Solana in, the same USDC credited to
-  the **person's own ledger account** (`recipientType: INTENTS`, recipient = their account id, refund to their own
-  Solana wallet). `amountOut == amountIn`, no fee entry. It is an ordinary USDC transfer signed by the person's Solana
-  wallet: the request kind the cards already handle. It is **not wired to a card yet** (section 6); today it is the
-  operator step `--deposit-user` of `ops/intents-direct-spike.mjs`.
+**In: the person's permanent deposit addresses** (`ledger-route/deposits.mjs`; 1Click "reusable deposit addresses",
+https://docs.near-intents.org/integration/distribution-channels/1click-api/reusable-deposit-addresses.md).
+
+- One address set per account, made once at the account's first `yeet_fund` with the 1Click partner key
+  (`ONECLICK_JWT`, header `X-API-Key`): an `ANY_INPUT` quote from `1cs_v1:any` to `1cs_v1:original`, `depositType`,
+  `recipientType` and `refundType` all `INTENTS`, deadline `2038-01-01T00:00:00.000Z`. **Recipient and refund account
+  are always the account's own ledger account** (`ledgerAccountOf` of its Solana wallet address), nothing else.
+  Whatever is sent to an address of the set is credited to that ledger account as the coin it is.
+- Stored in the core's SQLite, table `ledger_deposit_address`: account id (primary key), ledger account (unique), the
+  recipient and refund account 1Click states, the whole `chainDepositAddresses` answer, 1Click's internal account of
+  the set (never shown), the correlation id, `created` or `adopted`, the times. **Shown only when the row was made for
+  exactly this account's ledger account**: `ledger_account`, `recipient` and `refund_to` are compared with the derived
+  id on every read, and a row that differs shows nothing (`ledger_deposit_set_mismatch` in the log).
+- **Never made twice.** One flight per account in the process. Before any create the partner key's own sets are
+  listed (`GET /v0/quotes?filter[swapType]=ANY_INPUT`, all pages: read live on 2026-11-14, the key lists the sets it
+  made, with no user session); a set that names this account is taken over after 1Click's own record of its request
+  (`GET /v0/status`) is checked to be ours. A create answered HTTP 400 (two creates overlapped) is followed by one
+  more listing and never by a second create. Any failure leaves the row `failed`; the next try comes 10 minutes later
+  at the earliest and lists first, so a set that was made without an answer reaching us is found, not duplicated.
+- The card (`_meta["yeet/deposit"]`, as for every account): the Solana address of the set, QR, Copy, the line "Send
+  USDC on Solana only. YEET trades from USDC." An entry with a memo, of another shape than its network's, or listed
+  twice is never offered. Nothing about an end date: the address is permanent.
+- **Solana alone is offered** (`YEET_LEDGER_DEPOSIT_NETWORKS`, default `solana`). The set has a Base address too, but
+  USDC sent on Base is credited as Base's USDC (`nep141:base-0x8335….omft.near`), a different token from the one this
+  route trades (`nep141:sol-5ce3….omft.near`): it would sit in the account and could not buy anything. `solana,base`
+  turns the second tab on; do that only once such USDC can be traded or swapped.
+- **No card payment on this route.** The funding page pays into the person's Privy wallet (Base or Solana), not into
+  their ledger account, so the answer carries `methods: ["crypto"]` and no `fund_url`, and the card has no "Pay by
+  card". A bridge step from the wallet to the ledger is not built.
+- **Without the key** (`ONECLICK_JWT` unset), or when the set cannot be made, the answer is `methods: []`: the card
+  says "Adding funds isn’t available here yet." and the model says the same. The one-time address path below is not
+  wired to a card, so there is nothing to fall back to.
+
+**The deposit watch.** `yeet_fund` is called by the model once and by the card every 10 s (30 minutes, then "Still
+waiting. This card will update when your USDC arrives; you can come back later."; it reads again when the person
+comes back). Each call compares the account with a snapshot taken when the watch began (`ledger_deposit_watch`):
+
+| stage | what it is read from | proven |
+|---|---|---|
+| `waiting` | nothing changed | |
+| `found` | 1Click's status of the set (`GET /v0/status` of its internal account): a new deposit transaction or deposited amount, or the status moving to `KNOWN_DEPOSIT_TX` / `INCOMPLETE_DEPOSIT` | the endpoint answers for a set with the key (read live: `PENDING_DEPOSIT`, empty details); **what it shows after a deposit to a permanent address is not proven** |
+| `preparing` | the same status: `PROCESSING`, a new NEAR transaction, or `SUCCESS` at a new time | as above |
+| `ready` | the account's USDC inside `intents.near` rose (`mt_tokens_for_owner` + `mt_batch_balance_of`, the read the route already uses) | yes: it is the ledger itself |
+| `other_coin` | another token of the account rose and USDC did not | the read is proven; the wording is "We received SOL. It is in your account, but YEET trades from USDC." |
+
+The two middle stages are never inferred: when 1Click reports nothing, the card goes from waiting to ready. The
+operator proof (6.3) prints 1Click's status at every change, which settles what the middle stages are worth;
+`YEET_LEDGER_DEPOSIT_STAGES=balance` turns them off (the card then draws two stages and 1Click is not polled). A trade
+of the account moves the same balances, so trade activity since the last look re-bases the snapshot instead of
+counting as a deposit. "Ready" holds for two minutes, then a new watch starts from the new balance.
+
+**In, the older way (what the spike used, proven live):** a 1Click same-asset quote, USDC on Solana in, the same USDC
+credited to the person's own ledger account, with a one-time address. Still the operator step `--deposit-user` of
+`ops/intents-direct-spike.mjs`; not on a card.
+
 - **Out (proven live, 72 s):** one more message of the person, `ft_withdraw` through the Omni bridge to their own
   Solana address. Operator step `--withdraw-user` / `--withdraw-all user` of the same tool. Not on a card.
 - The Omni bridge deposit without 1Click is built and simulated only (`docs/INTENTS-BALANCE-MODEL.md` section 7).
@@ -109,11 +162,13 @@ person's message was executed is decided by the ledger itself (`is_nonce_used`),
 | `trade_status` | unchanged: `signing` until settled, then `success` or `failed`; `amount_out` and `received` are what reached the person's ledger account |
 | receipt | the router receipt; the settlement is folded as a `SUCCESS` status with the NEAR hash |
 | welcome card, portfolio, limits, `BALANCE_LOW` | read the person's ledger account (USDC and every catalogue coin, one view call); USDC elsewhere is not spendable on this route |
+| `yeet_fund`, the Add funds card | the permanent deposit address and the deposit's stages; no card payment (1.5) |
 | caps | the same code: tiers, 3 USDC per coin, daily cap (`checkBasket`, `checkDaily`) |
 
 Rows of a ledger trade carry `origin_chain = 'sol'` (the person's Solana key owns the account) and are told apart by
-their `ledger_trade` row. No migration of the existing tables: the route makes its own four tables when it is created
-(`ledger_trade`, `ledger_attempt`, `ledger_solver_day`, `ledger_unload`).
+their `ledger_trade` row. No migration of the existing tables: the route makes its own six tables when it is created
+(`ledger_trade`, `ledger_attempt`, `ledger_solver_day`, `ledger_unload`, `ledger_deposit_address`,
+`ledger_deposit_watch`).
 
 ## 2. Settings
 
@@ -127,6 +182,9 @@ YEET_SOLVER_MAX_DAY_USDC=<n>       required; the most per UTC day
 NEAR_RPC_URL=<https url>           optional; tried before the public endpoints
 YEET_LEDGER_DEADLINE_S=180  YEET_LEDGER_MIN_RUN_S=60  YEET_LEDGER_MIN_LEFT_S=10  YEET_LEDGER_SOURCE_SLIPPAGE_BPS=100
 YEET_SOLVER_UNLOAD_MAX_TRIES=3  YEET_SOLVER_UNLOAD_MAX_USDC=<per-trade bound>
+ONECLICK_JWT=<1Click partner key>  secret, core.env only; without it funding on this route is "not available yet"
+YEET_LEDGER_DEPOSIT_NETWORKS=solana     the deposit networks the card shows (solana, or solana,base; see 1.5)
+YEET_LEDGER_DEPOSIT_STAGES=status       status (1Click may show the middle stages) | balance (waiting, ready only)
 ```
 
 With the route on, the core does not start when a required setting is missing or malformed, the key file is absent, its
@@ -135,7 +193,11 @@ mode is wider than 0600, or it holds another account's key (`core/core.mjs`, and
 ## 3. The solver
 
 - Holds USDC only. A trade beyond the per-trade or the per-day bound, or beyond its float, is refused at the tap,
-  before the person is asked for anything (`TEMPORARILY_UNAVAILABLE`). The amount is recorded when the solver pays.
+  before the person is asked for anything (`TEMPORARILY_UNAVAILABLE`). A float that does not cover the trade is said
+  in plain words: "YEET cannot fill this right now. Nothing was traded." (the one sentence that code may carry in
+  place of the catalogue text; the connector passes that sentence and no other). `ops/ledger-route-check.mjs` prints
+  the float (`"step":"solver_float"`: USDC inside the ledger, NEAR for gas, whether it covers the basket) so the
+  operator sees it before a trade. The amount is recorded when the solver pays.
 - One operation at a time. Sourcing is recognised by the change of the solver's own balances, so trades queue behind
   each other. A trade that waits past its deadline is not executed (safe, and it costs the person a retry).
 - Leftover inventory (a buy that was sourced and not settled, a sell whose sale was refunded): sold back to USDC while
@@ -147,30 +209,18 @@ mode is wider than 0600, or it holds another account's key (`core/core.mjs`, and
 - It needs NEAR for gas (each `execute_intents` attaches 300 Tgas, about 0.03 NEAR prepaid, about 0.002 burnt). A buy is
   two calls, a sell two or three.
 
-## 4. The cards: what needs yeet-win
+## 4. The cards
 
-**In-card approval of a ledger trade needs a yeet-win change.** It was not made here. Exactly:
+yeet-win main lists the request kind `near_intent` in the contract (`$defs.sign_request`, `near_intent_payload`), the
+card's signing module accepts it (`trade-signing.js` `KINDS`), and its `wallet-request.mjs` is this repository's copy
+byte for byte (the vendoring test holds that). So the tool answer carries a ledger trade's request to the card;
+`cutSignRequests` stays in place and cuts nothing while the contract lists the kind. **In-card approval of a ledger
+trade has still not run against Privy** (section 7); the YEET page (`/sign?trade_id=…`, same press and hold, same
+Privy wallet) reads its requests from core directly and remains the fallback.
 
-1. `contracts/yeet-tools.json`, `$defs/sign_request`: add `"near_intent"` to `kind.enum`, and to `payload.anyOf` a
-   `near_intent_payload`: object, no additional properties, required `standard` (`"raw_ed25519"`), `message` (string,
-   1..4000), `message_base64` (string), `signer_id` (64 hex), `verifying_contract` (`"intents.near"`), `deadline`
-   (time), `gives` (array 1..5 of `{token_id: string, amount_raw: string}`), `receives` (array 1..5 of
-   `{token_id: string, min_raw: string}`). `submit_trade_signature.signed`: the description gains "base64 of the
-   64-byte signature (near_intent)".
-2. `packages/widget/src/vendor/wallet-request.mjs`: copy this branch's `connector/core/pipeline/wallet-request.mjs`.
-3. `packages/widget/src/trade-signing.js`: `KINDS` gains `'near_intent'`. `sign()` needs no other change:
-   `privyRpcBodies` checks the message and answers the one `signMessage` body; a `BATCH_REFUSED` already marks the
-   legs not sent. No card text changes.
-4. Rebuild the cards and vendor them here (`scripts/vendor-yeet-win.sh`).
-
-Why it cannot be avoided: the wallet calls the deployed card can make are a Solana transaction signature, an EVM
-transaction signature, an EIP-7702 authorization and EIP-712 typed data restricted to a Calibur batch. None of them
-yields a signature the ledger accepts for an intent, and the card drops requests of a kind it does not know.
-
-**Until then** a ledger trade is approved on the YEET page (`/sign?trade_id=…`, same press and hold, same Privy
-wallet): the page loads `wallet-request.mjs` from this server and reads its requests from core directly, so it handles
-`near_intent` as built. The tool answer to the card leaves the unknown request out (`cutSignRequests`), so the card
-shows the trade waiting; it does not open the page by itself for this kind of trade.
+The Add funds card of an account on this route (yeet-win b1cd0c9, `tools-6`): contract `yeet_fund` output `methods`
+and `watch` (`$defs.deposit_watch`), fixtures `fund-track` and `fund-track-ready`, yeet-win docs/CARDS.md "A deposit
+the server follows".
 
 ## 5. Tools
 
@@ -180,9 +230,36 @@ Read-only check (no key, nothing signed, stored or sent; NEAR view calls and key
 node ops/ledger-route-check.mjs --address <solana wallet address> --solver <solver account> [--usdc 5] [--coins WIF,BOME,TRUMP]
 ```
 
-Prints the ledger account id, its balances, the solver's float, the quote and the exact message that would be
-approved. Run against mainnet on 2026-11-14 for the test wallet: answered in full. It also states the service's own
-rule: **a 3-coin 5 USDC basket is refused by the 3 USDC minimum per coin**; 5 USDC buys one coin, three coins need 9.
+Prints the ledger account id and its balances, **the solver's float** (`solver_float`: its USDC, its NEAR for gas,
+and a warning when it does not cover the basket), the quote and the exact message that would be approved. Run against
+mainnet on 2026-11-14 for the test wallet: answered in full (float 0 USDC, 0.49 NEAR: a trade would be refused). It
+also states the service's own rule: **a 3-coin 5 USDC basket is refused by the 3 USDC minimum per coin**; 5 USDC buys
+one coin, three coins need 9.
+
+Deposit addresses and the deposit watch (needs `ONECLICK_JWT` in the environment; never prints it; moves no funds):
+
+```
+node ops/ledger-route-check.mjs --address <solana wallet address> --deposit-addresses [--account <yeet account id>] [--db <file>]
+node ops/ledger-route-check.mjs --address <solana wallet address> --deposit-watch [--follow-s 900] [--account …] [--db <file>]
+```
+
+The first prints the set (every chain and address, which of them the card shows, `created` or `adopted`); it uses the
+same code as the service, so it lists before it creates and never makes a second set. The second follows a deposit:
+one line per change of the card's stage, the ledger USDC and 1Click's own status of the set. `--db` defaults to
+`~/.local/state/yeet/ledger-deposits.sqlite`; which file holds the row does not matter for safety, because the
+service takes over the existing set from 1Click's list the first time it is asked.
+
+A plain USDC transfer on Solana from a wallet file (dry by default):
+
+```
+node ops/send-usdc.mjs --to <solana address> --usdc 1 --wallet <file> [--fee-payer self|privy]            # dry
+YEET_SEND_USDC_CONFIRM=send-usdc node ops/send-usdc.mjs --to … --usdc 1 --wallet <file> --fee-payer privy --broadcast
+```
+
+At most 5 USDC unless `--max-usdc` raises it (never over 25). The signed transaction is saved (`<wallet
+file>.send-usdc.json`, or `--state`) before it is broadcast; a second run follows the same transfer and cannot pay
+twice; a transfer that already landed is refused unless `--again`. No other operator tool sends plain USDC to an
+arbitrary address (`ops/intents-direct-spike.mjs` only pays 1Click quotes it asked for itself).
 
 ## 6. Operator steps
 
@@ -231,31 +308,78 @@ the solver was left holding (`"step":"ledger_unload"`); `$S --status` shows what
 ### 6.2 One account on the ledger route in production
 
 1. Mount the solver key file under the core's `/secrets` (mode 0600, readable by the container's user).
-2. Fund the solver's float (6.1 step 1) and the account's ledger account. The account id is the hex of its Solana
-   address (`ledger-route-check.mjs` prints it). Until funding is on a card, USDC reaches it by a deposit that names
-   that account as recipient; `--deposit-user` deposits into the account of the wallet it is run with, so for another
-   person's account this needs a small tool change or a deposit from their own wallet (section 7).
-3. Environment of the core: `YEET_LEDGER_ACCOUNTS=<account id>` (leave `YEET_ROUTE` unset), `YEET_SOLVER_ACCOUNT`,
-   `YEET_SOLVER_KEY_FILE=/secrets/<file>`, `YEET_SOLVER_MAX_TRADE_USDC`, `YEET_SOLVER_MAX_DAY_USDC`. Restart the core;
-   it refuses to start if any of them is wrong.
-4. That account's welcome card and portfolio now show its ledger balance. It proposes a basket as usual; after the tap
-   the trade waits; the person opens `/sign?trade_id=<id>` and presses and holds (section 4).
+2. Fund the solver's float (6.1 step 1; `ledger-route-check.mjs` shows it as `solver_float`).
+3. Settings. In `ops/.env` (compose): `YEET_LEDGER_ACCOUNTS=<the YEET account id>` (leave `YEET_ROUTE` unset: every
+   other account stays on the chain route), `YEET_SOLVER_ACCOUNT=<64 hex>`, `YEET_SOLVER_KEY_FILE=/secrets/<file>`,
+   `YEET_SOLVER_MAX_TRADE_USDC=<n>`, `YEET_SOLVER_MAX_DAY_USDC=<n>`; optional `NEAR_RPC_URL`,
+   `YEET_LEDGER_DEPOSIT_STAGES`. In `/var/lib/yeet-connector/config/core.env` (secret, core only):
+   `ONECLICK_JWT=<the partner key>` (it is also the key the trade quotes already use). Restart the core; it refuses
+   to start if a route setting is wrong.
+4. The account funds itself: it asks to add funds, the Add funds card shows its permanent deposit address (made at
+   that moment), it sends USDC on Solana, the card follows the deposit. Its welcome card and portfolio show its
+   ledger balance. It proposes a basket as usual and approves it in the card, or on `/sign?trade_id=<id>` (section 4).
+   This deploy carries `tools-6`: everyone refreshes YEET once (docs/DEPLOY-V2.md "Tools version").
 5. Back to the chain route: remove the account from `YEET_LEDGER_ACCOUNTS` and restart. Its ledger balance stays in
    its ledger account until withdrawn (`--withdraw-user`, with its own key).
 
+### 6.3 Proof: 1 USDC to the test wallet's permanent deposit address
+
+Same shell as 6.1 (`W`, the Privy and fee payer variables, `SOLANA_RPC_URL`), plus the partner key, which is never
+echoed: `set -a; . ~/.secrets/yeet-1click.env; set +a`. `A` is the test wallet's Solana address
+(`3pdbUF2a37ANMsnvCHK4PdtvHCnxobF81ULE3rht8mVq` is the wallet whose ledger account
+`29eb0c97…d940` already has a set, made 2026-11-14 14:08 UTC; the tool takes that set over).
+
+```
+A=<test wallet solana address>
+D=~/.local/state/yeet/ledger-deposits.sqlite
+
+# (a) the set: chain + address for every chain, which ones the card shows. Creates nothing when a set exists.
+node ops/ledger-route-check.mjs --address $A --deposit-addresses --account yeet-privy-operator-test-wallet --db $D
+#     -> "step":"deposit_addresses","state":"ready","source":"adopted","card_shows":[{"network":"solana","address":"<DEPOSIT>"}, …]
+DEPOSIT=<the solana address from card_shows>
+
+# (b) 1 USDC on Solana from the test wallet to it. First dry, then the real transfer.
+node ops/send-usdc.mjs --to $DEPOSIT --usdc 1 --wallet $W --fee-payer privy
+YEET_SEND_USDC_CONFIRM=send-usdc node ops/send-usdc.mjs --to $DEPOSIT --usdc 1 --wallet $W --fee-payer privy --broadcast
+#     -> "step":"done","ok":true,"solana_tx":"…"
+
+# (c) watch it credit the ledger account (start it before (b) in a second shell to see every stage)
+node ops/ledger-route-check.mjs --address $A --deposit-watch --follow-s 900 --account yeet-privy-operator-test-wallet --db $D
+#     -> "step":"deposit_watch" lines: "stage" (waiting, found, preparing, ready), "ledger_usdc", and "oneclick":{status,…}
+#     -> "step":"done","ok":true,"credited_usdc":"1"
+node ops/ledger-route-check.mjs --address $A --solver 92d267dde43be0993edf88347b17ce7aeec183eef0a5f87a0d55a60ea58cc902 --usdc 5 --coins WIF
+#     -> "step":"account","usdc_spendable":"1"
+```
+
+What to read off (c): whether `oneclick.status` (and `origins`, `deposited`, `near`) change between the transfer and
+the credit. If they do, the middle stages are real and stay; if the only change is `ledger_usdc`, set
+`YEET_LEDGER_DEPOSIT_STAGES=balance`. Also note `credited_usdc` against the 1 USDC sent (a fee would show here) and
+the seconds it took. Start (c) BEFORE (b): the watch counts what arrives after it began.
+
 ## 7. Not built, not proven
 
-- **In-card approval** (section 4). The server side is built and tested with the card's own contract module; the
-  card and the contract are not changed.
+- **No deposit has been sent to a permanent address yet.** Proven live, read-only: the partner key lists and reads
+  the set of the test wallet's ledger account, the service takes it over with GET requests only, the check of its
+  request passes, and the watch reads the ledger and 1Click's status. Not proven: the credit itself, its fee if any,
+  how long it takes, and what 1Click's status shows on the way (so the two middle stages; 6.3 settles it).
+- **Listing every set before a create** grows with the number of accounts (500 a page). It runs once per account.
+  `GET /v0/quotes` is marked provisional by 1Click; if it stops answering, no new set is made (funding then says
+  "not available yet" for accounts without one) and stored sets keep working.
+- **A sell's proceeds can read as a deposit** when the USDC arrives after the trade's last update (the surplus of a
+  sell): the watch re-bases on trade activity, not on the ledger's own history. The card then says USDC arrived,
+  which is true, with the wrong reason.
+- **Another coin than USDC** stays in the ledger account. Nothing swaps it and no card withdraws it.
+- **Base USDC** sent to the set's EVM address (not shown by the card) is such a coin.
+- **Card payments** do not reach the ledger account (1.5).
+- **In-card approval of a ledger trade** has the contract and the card code, and no run against Privy.
 - **Privy producing the signature.** The spike and every test sign with local keys. Privy's Solana `signMessage` is
   documented to sign the given bytes; if it signed anything else the server refuses the approval (nothing moves),
   but then no Privy account can trade on this route until that is solved.
-- **Funding and withdrawal on a card.** Both are operator steps with the wallet's key file. For a real account the
-  deposit has to come from the person's own wallet as an approved transfer; the design is in 1.5.
-- **Depositing into another person's ledger account** with the operator tool (6.2 step 2).
+- **Withdrawal on a card.** An operator step with the wallet's key file.
 - **No real trade has run through this code.** The spike's trades prove the mechanics; this route is proven on an
-  in-memory ledger that verifies the real signatures and applies the contract's fee and zero-sum rule, and by one
-  read-only run against mainnet.
+  in-memory ledger that verifies the real signatures and applies the contract's fee and zero-sum rule, and by
+  read-only runs against mainnet. **The sell path was never run live: the solver's float was empty** (it is 0 USDC
+  today; `ledger-route-check.mjs` says so).
 - **One trade at a time** through the solver. Concurrent ledger trades queue; a queue longer than about two trades
   makes the later ones miss their deadline and fail safely.
 - **Sell surplus when the solver's sale fails**: the person has their approved minimum; the surplus is an alert for
@@ -264,6 +388,6 @@ the solver was left holding (`"step":"ledger_unload"`); `$S --status` shows what
   worse price as on the chain route.
 - **The welcome card's readiness** still looks at the Solana driver being configured (fee payer), which this route
   does not use. In production it is configured, so nothing shows.
-- **Base USDC** in the person's wallet cannot pay a ledger trade and reads as 0 on this route.
 - **Keyless 1Click** sourcing has no guaranteed rate limit; a refusal makes the tap fail before anything is committed.
-- **Solver NEAR balance** is not monitored: when it runs out, sourcing fails and trades are not executed.
+- **Solver NEAR balance** is not monitored: when it runs out, sourcing fails and trades are not executed (the check
+  tool prints it).

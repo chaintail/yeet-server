@@ -239,3 +239,48 @@ test('yeet_fund: the deposit addresses go to _meta only, well-formed or not at a
   assert.equal(p.isError,true);assert.equal(p.structuredContent,undefined);clean(p,'yeet_portfolio');
  }finally{await client.close();await server.close()}
 });
+
+// An account on the ledger route (docs/LEDGER-ROUTE.md 1.5): the core's answer names the one way it can add money and
+// follows the deposit. The permanent address rides in _meta like any deposit address; the stages are for the card and
+// carry no address; the model is told the address is the person's own and permanent.
+test('yeet_fund on the ledger route: methods and the deposit watch pass through; the address is card-only; the model gets the "own permanent address" guidance',async()=>{
+ const {DEPOSIT_META_KEY}=await import('../tool-registration.mjs');
+ const {COPY}=await import('../guidance.mjs');
+ const SOL='7iGsgjnCZweMbeC2Qrxj7zFaZhqV85rYLU5WgjHWiyKk';
+ const own={default:'solana',networks:[{network:'solana',address:SOL}]},steps=['waiting','found','preparing','ready'];
+ let fund={usdc:'3.2',presets:['10','25','50','100'],methods:['crypto'],card_deposit:own,watch:{steps,stage:'waiting'}};
+ const server=createMcpServer({token:{scope:allScopes.join(' ')},callCore:async route=>route==='/fund'?fund:core(route),env:ENV});
+ const client=new Client({name:'ledger-fund-test',version:'1'});const [a,b]=InMemoryTransport.createLinkedPair();
+ await server.connect(a);await client.connect(b);
+ const reads=r=>JSON.stringify([r.structuredContent??null,r.content??null]);
+ const call=async args=>{const r=await client.callTool({name:'yeet_fund',arguments:args});assert.equal(r.isError,undefined,JSON.stringify(r.content));
+  assert.doesNotMatch(reads(r),/7iGsgjn|WiyKk|card_deposit|yeet\/deposit/,'no part of the address where the model reads');return r};
+ try{
+  let r=await call({method:'crypto'});
+  assert.deepEqual(r._meta[DEPOSIT_META_KEY],own);
+  assert.deepEqual(r.structuredContent.methods,['crypto']);assert.deepEqual(r.structuredContent.watch,{steps,stage:'waiting'});assert.equal('fund_url' in r.structuredContent,false);
+  assert.equal(r.structuredContent.guidance,COPY.yeet_fund_own.crypto);
+  assert.match(r.structuredContent.guidance,/YEET/);assert.match(r.structuredContent.guidance,/Never write out an address/);assert.match(r.structuredContent.guidance,/reports back when the USDC arrives\.$/);
+  // the card's own reads (no method) get the same
+  assert.equal((await call({})).structuredContent.guidance,COPY.yeet_fund_own.crypto);
+  // asked for a card payment: the answer still has no card payment, and the model says so
+  r=await call({method:'card'});
+  assert.equal(r.structuredContent.guidance,COPY.yeet_fund_own.no_card);assert.deepEqual(r.structuredContent.methods,['crypto']);
+  fund={...fund,usdc:'4.2',watch:{steps,stage:'ready',arrived_usdc:'1'}};
+  r=await call({});
+  assert.equal(r.structuredContent.guidance,COPY.yeet_fund_own.ready);assert.equal(r.structuredContent.watch.arrived_usdc,'1');
+  fund={...fund,watch:{steps,stage:'other_coin',coin:'SOL'}};
+  assert.match((await call({})).structuredContent.guidance,/YEET/);
+  fund={...fund,watch:{steps,stage:'other_coin'}};
+  assert.match((await call({})).structuredContent.guidance,/\(another coin\)/);
+  // not available yet (no partner key, or the set could not be made): no address, no watch, a plain line
+  fund={usdc:'0',presets:['10','25','50','100'],methods:[]};
+  r=await call({method:'crypto'});
+  assert.equal(r._meta[DEPOSIT_META_KEY],undefined);assert.equal(r.structuredContent.guidance,COPY.yeet_fund_own.unavailable);
+  // a watch that tries to carry an address fails closed: no result rather than an address
+  fund={usdc:'3.2',presets:['10'],methods:['crypto'],card_deposit:own,watch:{steps,stage:'waiting',address:SOL}};
+  const bad=await client.callTool({name:'yeet_fund',arguments:{}});
+  assert.equal(bad.isError,true);assert.doesNotMatch(reads(bad),/7iGsgjn/);
+  for(const k of Object.keys(COPY.yeet_fund_own)){assert.doesNotMatch(COPY.yeet_fund_own[k],/wallet|Base|Solana|device|expir|\bcode\b|email/i,k);assert.match(COPY.yeet_fund_own[k],/Never write out an address/,k)}
+ }finally{await client.close();await server.close()}
+});

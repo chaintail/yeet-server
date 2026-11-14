@@ -79,6 +79,13 @@ for (const [role, dirs] of Object.entries(roles)) {
 // only to report wallets that still carry the old signer (ops/remove-yeet-signer.mjs removes it).
 assert.ok(!env.as.has("YEET_SIGNER_ID"));
 assert.ok(env.core.has("YEET_PRIVY_KEY_QUORUM_ID"));
+// The 1Click partner key (ONECLICK_JWT) makes the ledger route's permanent deposit addresses: the core alone reads it,
+// from its env_file; no service gets it through compose. The route's funding settings reach the core only.
+for (const role of Object.keys(roles)) assert.ok(!env[role].has("ONECLICK_JWT"), `${role}: ONECLICK_JWT is never in a compose environment block`);
+for (const name of ["YEET_LEDGER_DEPOSIT_NETWORKS", "YEET_LEDGER_DEPOSIT_STAGES"]) {
+  assert.ok(env.core.has(name), `core gets ${name}`);
+  assert.ok(!env.as.has(name) && !env.mcp.has(name), `${name} is the core's alone`);
+}
 // Card signing: the connector names the public Privy app id in trade results; the sign-in server serves the page.
 assert.ok(env.mcp.has("PRIVY_APP_ID") && env.as.has("PRIVY_APP_ID") && env.mcp.has("RESOURCE"));
 console.log(`PASS compose passes every setting each service reads (${Object.keys(roles).join(", ")})`);

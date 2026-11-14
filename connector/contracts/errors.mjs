@@ -18,6 +18,9 @@ for(const [code,entry] of Object.entries(catalog)){
 }
 /** Anything that is not a catalogue code becomes this one (an outage: the result is not known). */
 export const UNKNOWN='TEMPORARILY_UNAVAILABLE';
+/** The one sentence a TEMPORARILY_UNAVAILABLE refusal may carry in place of the catalogue text: the ledger route's
+ * solver cannot put up the USDC for this trade (checked at the tap, before the person is asked for anything). */
+export const CANNOT_FILL_MESSAGE='YEET cannot fill this right now. Nothing was traded.';
 if(!codes.includes(UNKNOWN))invalid(`${UNKNOWN} missing`);
 
 const deepFreeze=value=>{if(value&&typeof value==='object'){Object.values(value).forEach(deepFreeze);Object.freeze(value)}return value};

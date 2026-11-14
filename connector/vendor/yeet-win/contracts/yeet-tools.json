@@ -1223,7 +1223,7 @@
     },
     "lucky": {
       "type": "object",
-      "description": "The lucky wheel: the server’s hottest coins today; YEET amount_usdc into the landed coin for one bonus daily spin and a stamp of that coin.",
+      "description": "The lucky wheel: the coins the server picked at random for today, not by popularity; YEET amount_usdc into the landed coin for one bonus daily spin and a stamp of that coin.",
       "properties": {
         "lucky_id": {
           "$ref": "#/$defs/lucky_id"
@@ -1826,6 +1826,48 @@
       ],
       "additionalProperties": false
     },
+    "deposit_watch": {
+      "type": "object",
+      "description": "How far a deposit to the person’s YEET deposit address is, when the server follows it. steps: the stages this account’s card shows, in order (only stages the server can really observe are listed). stage: where it is now; other_coin: a coin that is not USDC arrived, named in coin. arrived_usdc: the USDC that arrived, once stage is ready. No address is ever in here.",
+      "properties": {
+        "steps": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "waiting",
+              "found",
+              "preparing",
+              "ready"
+            ]
+          },
+          "minItems": 2,
+          "maxItems": 4,
+          "uniqueItems": true
+        },
+        "stage": {
+          "enum": [
+            "waiting",
+            "found",
+            "preparing",
+            "ready",
+            "other_coin"
+          ]
+        },
+        "arrived_usdc": {
+          "$ref": "#/$defs/usdc"
+        },
+        "coin": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9$.]{1,16}$",
+          "description": "The coin that arrived when stage is other_coin, as its symbol."
+        }
+      },
+      "required": [
+        "steps",
+        "stage"
+      ],
+      "additionalProperties": false
+    },
     "deposit": {
       "type": "object",
       "description": "Card only (result _meta, never structuredContent or content): the connected account’s own YEET deposit addresses, one per network it can be funded on today. default is the network a first YEET spends from; the Add funds card opens on it. The model never reads an address.",
@@ -1897,7 +1939,7 @@
           "app_version": {
             "type": "string",
             "enum": [
-              "tools-5"
+              "tools-6"
             ],
             "description": "The tools version this tool list was built for."
           },
@@ -3481,6 +3523,21 @@
             "$ref": "#/$defs/https_url",
             "description": "The YEET funding page, for a card payment. The card opens it; with ?amount= it starts on that preset."
           },
+          "methods": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "crypto",
+                "card"
+              ]
+            },
+            "maxItems": 2,
+            "uniqueItems": true,
+            "description": "The ways this account can add money right now. Left out: both. One entry: the card shows that one alone. Empty: adding funds is not available for this account yet, and the card says so."
+          },
+          "watch": {
+            "$ref": "#/$defs/deposit_watch"
+          },
           "guidance": {
             "$ref": "#/$defs/guidance"
           }
@@ -4275,7 +4332,7 @@
     "lucky": {
       "uri": "ui://yeet/lucky-v1.html",
       "title": "Lucky wheel",
-      "description": "A trading offer: five hot coins, the wheel picks one, and a YEET of the offered amount into it."
+      "description": "A trading offer: five coins picked at random, the wheel picks one, and a YEET of the offered amount into it."
     },
     "fund": {
       "uri": "ui://yeet/fund-v1.html",
@@ -4306,12 +4363,13 @@
     "manage_url": "https://chatgpt.com/plugins",
     "refresh_label": "Refresh YEET in ChatGPT",
     "refresh_steps": "open YEET there, select Refresh, then start a new chat",
-    "tools_version": "tools-5",
+    "tools_version": "tools-6",
     "tools_versions_past": [
       "tools-3",
-      "tools-4"
+      "tools-4",
+      "tools-5"
     ],
-    "tools_hash": "e8fd86dcdde057d4654beb9f3dfd585a142b05aec38501bbb62f29f6a5a01f28"
+    "tools_hash": "62d4cf64559dc91f9adfb53742f5d58a35c346f0f0ac77ff7155d246509627a4"
   },
   "x-yeet-spin": {
     "base_xp": 5,

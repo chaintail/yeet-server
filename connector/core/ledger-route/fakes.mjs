@@ -84,6 +84,7 @@ export function fakeLedger({now,feePips=1}){
    currentSalt:async()=>'0a0b0c0d',
    fee:async()=>feePips,
    balances:async(account,ids)=>ids.map(id=>get(bal,account,id)),
+   holdings:async account=>[...(bal.get(account)??new Map())].map(([tokenId,amount])=>({tokenId,amount})).filter(h=>h.amount>0n),
    isNonceUsed:async(account,nonce)=>nonces.has(`${account}|${nonce}`),
    async simulate(signed){
     world.simulations=(world.simulations??0)+1;
@@ -184,7 +185,7 @@ export const accountOf=wallet=>ed25519AccountId(wallet.address);
  * `float` to the solver. The clock moves only when the route sleeps. `restart()` builds a new pipeline over the same
  * database, ledger and 1Click (a process restart: runs in memory are lost, state is kept).
  */
-export function ledgerPipeline({env={},userUsdc=20_000_000n,float=30_000_000n,xp=0,chainHoldings=[],rates=RATES}={}){
+export function ledgerPipeline({env={},userUsdc=20_000_000n,float=30_000_000n,xp=0,chainHoldings=[],rates=RATES,depositFetch}={}){
  const now=fakeClock(),world=fakeLedger({now}),oneclick=fakeLedgerOneClick({world,now,rates}),near=solverKey(),db=openTradeDb(':memory:'),logs=[];
  world.credit(accountOf(aliceWallet),USDC,userUsdc);world.credit(near.accountId,USDC,float);
  const fullEnv={...LEDGER_ENV,YEET_SOLVER_ACCOUNT:near.accountId,...env};
@@ -192,7 +193,7 @@ export function ledgerPipeline({env={},userUsdc=20_000_000n,float=30_000_000n,xp
  const chain=fakeBalances({usdc:'0',holdings:chainHoldings}),rpc=fakeSolanaRpc();
  const build=()=>createPipeline({db,env:fullEnv,client:oneclick,directory,balances:chain,now,trackerIntervalMs:0,landingWatchMs:0,log:l=>logs.push(JSON.parse(l)),xpOf:()=>xp,
   driverOverrides:{rpc,signatureStatus:rpc.signatureStatus,historySignatureStatus:rpc.signatureStatus,feePayer:fakeFeePayer()},
-  ledgerOverrides:{rpc:world.rpc,verifier:world.verifier,near,pollMs:0,unloadWaitMs:30_000,sleep:async ms=>{now.advance(Math.max(ms,500))}}});
+  ledgerOverrides:{rpc:world.rpc,verifier:world.verifier,near,pollMs:0,unloadWaitMs:30_000,sleep:async ms=>{now.advance(Math.max(ms,500))},...(depositFetch?{depositFetch}:{})}});
  const t={p:build(),db,now,world,oneclick,near,logs,env:fullEnv,chain,restart(){t.p=build();return t.p}};
  return t;
 }
@@ -218,4 +219,52 @@ export async function approveAndSettle(t,x,{wallet=aliceWallet,ctx=ALICE}={}){
  const s=await t.p.submit(ctx,{trade_id:req.trade_id,leg:req.leg,attempt_id:req.attempt_id,signed:approve(wallet,req)});
  await t.p.ledgerRoute.idle();
  return s;
+}
+
+/**
+ * 1Click's reusable deposit addresses over fetch (deposits.mjs): the partner's list, the create, the status of a set.
+ * `sets` are the sets that exist at 1Click; `create` decides what the next POST does: ok | 400 | 500 | drop (the set
+ * is made but no answer comes back) | other (the answer names another account). Every call is recorded; a call
+ * without the partner key is answered 401.
+ */
+export function fakeDepositApi({key='test-partner-key',now=Date.now,pageSize=500}={}){
+ const api={key,sets:[],calls:[],create:'ok',listFails:false,echoRequest:true,
+  posts:()=>api.calls.filter(c=>c.method==='POST').length,
+  addressesFor(n){return [{blockchain:'eth',address:`0x${String(n).padStart(40,'c')}`},{blockchain:'base',address:`0x${String(n).padStart(40,'c')}`},{blockchain:'sol',address:base58Encode(createHash('sha256').update(`deposit-${n}`).digest())},
+   {blockchain:'stellar',address:'GDJ4JZXZELZD737NVFORH4PSSQDWFDZTKW3AIDKHYQG23ZXBPDGGQBJK',memo:String(237260000+n)}]},
+  /** A set as 1Click holds it. */
+  add(request,{addresses}={}){
+   const n=api.sets.length+1,set={request:{depositMode:'SIMPLE',appFees:[],...request},internal:createHash('sha256').update(`internal-${n}`).digest('hex'),addresses:addresses??api.addressesFor(n),createdAt:new Date(now()+n).toISOString(),
+    status:{status:'PENDING_DEPOSIT',updatedAt:new Date(now()).toISOString(),swapDetails:{depositedAmount:null,amountIn:null,intentHashes:[],nearTxHashes:[],originChainTxHashes:[],destinationChainTxHashes:[]}}};
+   api.sets.push(set);return set;
+  },
+  async fetch(url,init={}){
+   const u=new URL(url),method=init.method??'GET',body=init.body?JSON.parse(init.body):null;
+   api.calls.push({method,path:u.pathname,query:Object.fromEntries(u.searchParams),body,key:init.headers?.['x-api-key']??null});
+   const json=(status,v)=>({ok:status>=200&&status<300,status,text:async()=>JSON.stringify(v)});
+   if(init.headers?.['x-api-key']!==key)return json(401,{message:'Unauthorized'});
+   if(method==='GET'&&u.pathname==='/v0/quotes'){
+    if(api.listFails)return json(503,{message:'try later'});
+    if(u.searchParams.get('filter[swapType]')!=='ANY_INPUT')return json(400,{errors:[{detail:'swapType must be equal to ANY_INPUT'}]});
+    const from=Number(u.searchParams.get('page[after]')??0),page=api.sets.slice(from,from+pageSize);
+    return json(200,{data:page.map(s=>({type:'quotes',attributes:{status:s.status.status,createdAt:s.createdAt,depositAddress:s.internal,depositMemo:null,chainDepositAddresses:s.addresses,originAsset:s.request.originAsset,destinationAsset:s.request.destinationAsset,
+     recipient:s.request.recipient,refundTo:s.request.refundTo}})),links:{next:from+pageSize<api.sets.length?`/v0/quotes?filter[swapType]=ANY_INPUT&page[size]=${pageSize}&page[after]=${from+pageSize}`:null}});
+   }
+   if(method==='GET'&&u.pathname==='/v0/status'){
+    const s=api.sets.find(x=>x.internal===u.searchParams.get('depositAddress'));
+    if(!s)return json(404,{message:'Deposit address not found'});
+    return json(200,{...s.status,correlationId:'corr-status',quoteResponse:{quoteRequest:s.request,quote:{depositAddress:s.internal}}});
+   }
+   if(method==='POST'&&u.pathname==='/v0/quote'){
+    const mode=api.create;
+    if(mode===400)return json(400,{message:'another quote is being created for this recipient'});
+    if(mode===500)return json(500,{message:'internal'});
+    const s=api.add(body);
+    if(mode==='drop')throw Object.assign(Error('socket hang up'),{name:'TypeError'});
+    const request=mode==='other'?{...s.request,recipient:'f'.repeat(64)}:s.request;
+    return json(201,{correlationId:`corr-set-${api.sets.length}`,...(api.echoRequest?{quoteRequest:request}:{}),quote:{depositAddress:s.internal,chainDepositAddresses:s.addresses,amountIn:'0',deadline:'2038-01-04T00:00:00.000Z'}});
+   }
+   return json(404,{message:'not found'});
+  }};
+ return api;
 }

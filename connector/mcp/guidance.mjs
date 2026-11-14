@@ -130,6 +130,14 @@ export const COPY=Object.freeze({
   card:"YEET yeet_fund.card.",
  },
 
+ yeet_fund_own:{
+  crypto:"YEET yeet_fund_own.crypto.",
+  no_card:"YEET yeet_fund_own.no_card.",
+  ready:"YEET yeet_fund_own.ready.",
+  other_coin:"YEET yeet_fund_own.other_coin: {coin}.",
+  unavailable:"YEET yeet_fund_own.unavailable.",
+ },
+
  yeet_checkin:{
   open:"YEET yeet_checkin.open.",
   done:"YEET yeet_checkin.done: {days} {s}.",
@@ -341,7 +349,17 @@ const BY_TOOL={
   if(r.board&&r.board!=='xp')return empty?c.result_empty:Number.isInteger(r.me?.rank)?fill(c.result_ranked,{rank:r.me.rank}):c.result_unranked;
   return Number.isInteger(r.me?.rank)?fill(c.ranked,{rank:r.me.rank,xp:r.me.xp}):c.unranked;
  },
- yeet_fund:r=>r.method==='crypto'?COPY.yeet_fund.crypto:r.method==='card'?COPY.yeet_fund.card:COPY.yeet_fund.choose,
+ yeet_fund:r=>{
+
+  if(Array.isArray(r.methods)&&!r.methods.includes('card')){
+   const c=COPY.yeet_fund_own;
+   if(!r.methods.includes('crypto'))return c.unavailable;
+   if(r.watch?.stage==='ready')return c.ready;
+   if(r.watch?.stage==='other_coin')return fill(c.other_coin,{coin:typeof r.watch.coin==='string'&&/^[A-Za-z0-9$.]{1,16}$/.test(r.watch.coin)?r.watch.coin:'another coin'});
+   return r.method==='card'?c.no_card:c.crypto;
+  }
+  return r.method==='crypto'?COPY.yeet_fund.crypto:r.method==='card'?COPY.yeet_fund.card:COPY.yeet_fund.choose;
+ },
  yeet_checkin:r=>{const c=r.checkin??{},left=Number.isInteger(c.spins_available)?c.spins_available:c.spin_available?1:0;return left>0?COPY.yeet_checkin.open:join(fill(COPY.yeet_checkin.done,{days:c.streak_days,s:plural(c.streak_days)}),reminder(c.streak_days))},
  daily_spin:spin,
  yeet_set_username:r=>fill(COPY.yeet_set_username.set,{username:r.username}),

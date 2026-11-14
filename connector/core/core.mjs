@@ -332,6 +332,11 @@ app.get('/fund',trade('yeet_fund',async(e,ctx)=>{
  const home=await e.home(ctx),f=home.funding;
  // The account's own deposit addresses, for the card only (card_deposit; the connector moves it to _meta). They are
  // the bound account's (ctx.accountId is the token's subject), read by e.home from the wallet directory.
+ // An account on the ledger route (docs/LEDGER-ROUTE.md 1.5): its permanent deposit address and the watch of a
+ // deposit. No card payment and no funding page link: a card payment lands in the person's wallet, not in their
+ // ledger account. null for every other account, whose answer below is unchanged.
+ const led=await e.ledgerFund?.(ctx,home);
+ if(led)return {...fundAnswer(led.usdc??(f?totalUsdc(f.base_usdc,f.solana_usdc):null),null),methods:led.methods,...(led.card_deposit?{card_deposit:led.card_deposit}:{}),...(led.watch?{watch:led.watch}:{})};
  const deposit=depositFor(home.wallets,e.funding?.deposits?.());
  return {...fundAnswer(f?totalUsdc(f.base_usdc,f.solana_usdc):totalUsdc(home.wallets?.base?.usdc),await fundLink(ctx.accountId)),...(deposit?{card_deposit:deposit}:{})};
 }));
@@ -427,7 +432,7 @@ app.get('/leaderboard/:board{/:window}',xpRoute('yeet_leaderboard',async(x,who,a
 // yeet_checkin: the daily wheel on its own card (a check-in). The same XP summary yeet_home carries in `xp`.
 app.get('/checkin',xpRoute('yeet_checkin',(x,who)=>({checkin:homeXp(x.summary(who),HOME_XP_KEYS)})));
 app.post('/spin',xpRoute('daily_spin',(x,who)=>x.doSpin(who)));
-// Lucky wheel (xp/lucky.mjs): today's five hot coins (only coins 1Click quotes now), then the server's slice.
+// Lucky wheel (xp/lucky.mjs): today's five coins, picked at random per day (only coins 1Click quotes now), then the server's slice.
 app.get('/lucky',xpRoute('lucky_wheel',async(x,who)=>x.lucky.wheel(who,luckyAvailable(await tradeEngine()))));
 app.post('/lucky/spin',xpRoute('lucky_spin',(x,who,a)=>x.lucky.spin(who,a.lucky_id)));
 // Username (username.mjs): read by the sign-in server's account page; set from that page or by yeet_set_username.

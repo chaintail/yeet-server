@@ -1,5 +1,5 @@
 import {advertisedScopes} from '#scope-catalog';
-import {normalize,toolMessage,isRetryable} from '#contracts/errors';
+import {normalize,toolMessage,isRetryable,CANNOT_FILL_MESSAGE} from '#contracts/errors';
 import {refusalGuidance} from './guidance.mjs';
 import {META_KEYS,contract} from './tool-contract.mjs';
 const APP=contract['x-yeet-app'];
@@ -10,7 +10,9 @@ export function toolError(value,ctx,{tool}={}){
  // LIMIT_EXCEEDED: the core's sentence with the person's tier, limits and amount left today (trade/limits.mjs).
  // BALANCE_LOW: the core's sentence with the person's USDC on Base and on Solana (pipeline/funding.mjs).
  // AMOUNT_TOO_SMALL: only a SELL under the sell minimum has its own sentence (trade/limits.mjs skeetTooSmall).
- const own=(code==='LIMIT_EXCEEDED'||code==='BALANCE_LOW'||code==='AMOUNT_TOO_SMALL')&&typeof value?.message==='string'&&value.message.length>=1&&value.message.length<=500?value.message:null;
+ const own=(code==='LIMIT_EXCEEDED'||code==='BALANCE_LOW'||code==='AMOUNT_TOO_SMALL')&&typeof value?.message==='string'&&value.message.length>=1&&value.message.length<=500?value.message
+  // TEMPORARILY_UNAVAILABLE (also what any unknown failure becomes): only the one known sentence, never the core's words.
+  :value?.error==='TEMPORARILY_UNAVAILABLE'&&value?.message===CANNOT_FILL_MESSAGE?CANNOT_FILL_MESSAGE:null;
  const data={error:code,message:own??toolMessage(code),retryable:isRetryable(code)};
  // BALANCE_LOW: where the person adds USDC (contract $defs.failure fund_url, https only); the card shows Add funds.
  if(code==='BALANCE_LOW'&&typeof value?.fund_url==='string'&&/^https:\/\/[^\s]{1,500}$/.test(value.fund_url))data.fund_url=value.fund_url;

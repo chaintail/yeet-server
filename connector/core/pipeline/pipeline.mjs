@@ -41,7 +41,8 @@ import {createFunding,forcedBuyChain,chainPaused,NETWORK} from './funding.mjs';
 import {xpRuntime} from '../xp/xp.mjs';
 import {averageCost} from '../trade/pnl.mjs';
 import {ledgerConfig} from '../ledger-route/config.mjs';
-import {createLedgerRoute,ledgerBalances} from '../ledger-route/route.mjs';
+import {createLedgerRoute,ledgerBalances,ledgerAccountOf} from '../ledger-route/route.mjs';
+import {createDeposits,depositNetworksFromEnv,depositStagesFromEnv} from '../ledger-route/deposits.mjs';
 import {createSolver,loadSolverKey} from '../ledger-route/solver.mjs';
 import {createNearRpc,createVerifier} from '../intents/verifier.mjs';
 import {NEAR_RPC_URLS} from '../intents/constants.mjs';
@@ -88,7 +89,7 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
  // use below is behind it, so the chain route runs exactly as before. An account on the ledger route has its
  // spendable USDC and its coins read from its own ledger account.
  const ledgerCfg=ledgerConfig(env);
- let ledgerRoute=null,ledgerVerifier=null,ledgerRpc=null;
+ let ledgerRoute=null,ledgerVerifier=null,ledgerRpc=null,ledgerDeposits=null;
  if(ledgerCfg.enabled){
   ledgerRpc=ledgerOverrides?.rpc??createNearRpc({urls:ledgerCfg.nearRpc?[ledgerCfg.nearRpc,...NEAR_RPC_URLS]:NEAR_RPC_URLS,fetch});
   ledgerVerifier=ledgerOverrides?.verifier??createVerifier({rpc:ledgerRpc});
@@ -286,6 +287,10 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
    hooks:{trade,legsOf,settle:(id,lastError)=>settle(id,lastError),refresh:id=>{try{tracker.refresh(id)}catch(e){ledger.note(id,`refresh: ${e?.message}`)}},
     apply:(id,idx,res)=>tracker.apply(id,idx,res),legNotSent:(id,idx,evidence)=>ledger.legNotSent(id,idx,evidence),raiseAlert:a=>ledger.raiseAlert(a),
     note:(id,message)=>ledger.note(id,message),paused:ledgerPaused,gate:accountId=>gateFor(null)(accountId)}});
+  // Funding on this route: the account's permanent deposit addresses (made once, with the 1Click partner key) and the
+  // watch of a deposit. Without the key nothing is made and yeet_fund answers that adding funds is not available yet.
+  ledgerDeposits=createDeposits({db,key:env.ONECLICK_JWT?.trim()||undefined,verifier:ledgerVerifier,accountOf:ledgerAccountOf,catalog,networks:depositNetworksFromEnv(env),stages:depositStagesFromEnv(env),
+   fetch:ledgerOverrides?.depositFetch??fetch,now,log:event});
  }
 
  async function replay(tradeId){await recoverTrade(tradeId);return answer(tradeId)}
@@ -463,6 +468,15 @@ export function createPipeline({db,env=process.env,client,wallets,directory,bala
   limits,wallets,proposals,tracker,codes,ledger,drivers,buyChain,sellChain,catalog,funding,
   /** The ledger route (ledger-route/route.mjs), or null while it is off. */
   ledgerRoute,
+  /** The ledger route's deposit addresses and deposit watch (ledger-route/deposits.mjs), or null while it is off. */
+  ledgerDeposits,
+  /** yeet_fund for an account on the ledger route: {methods, card_deposit?, watch?, usdc?}. null for an account on
+   * the chain route (the funding card is then today's). `home` is this account's home() answer. */
+  async ledgerFund(ctx,home){
+   if(!ledgerDeposits||!ledgerRoute?.handles(ctx.accountId))return null;
+   const {usdc_raw,...r}=await ledgerDeposits.fund(ctx.accountId,home?.wallets?.solana?.address);
+   return {...r,...(usdc_raw!==undefined?{usdc:usd(formatUnits(usdc_raw,6))}:{})};
+  },
   /** The trade database, read only by the leaderboards (core/xp/boards.mjs over trade/pnl.mjs). */
   db,
   /** The person's average YEET price per held coin, from settled legs (trade/pnl.mjs): Map(symbol -> USD per coin). */
