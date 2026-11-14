@@ -37,6 +37,7 @@ import {randomBytes} from "node:crypto";
 import express from "express";
 import {html} from "./auth-pages.mjs";
 import {privyPageCsp} from "./fund-page.mjs";
+import {DEFAULT_LOGIN_METHODS, knownMethods} from "./login-methods.mjs";
 import {APP_ID, PRIVY_API, SIGN_PAGE_PATH, SIGNER_PATH_PREFIX, signerAsset} from "#shared/signing.mjs";
 
 const TRADE_ID = /^t_[a-z0-9]{20}$/;
@@ -72,8 +73,10 @@ export function returnUrl(value) {
   } catch { return null; }
 }
 
-export function signPageHtml({appId, tradeId, asset, back, nonce}) {
+export function signPageHtml({appId, tradeId, asset, back, nonce, methods = DEFAULT_LOGIN_METHODS}) {
   const data = [
+    // The sign-in methods this page offers a browser with no session (YEET_LOGIN_METHODS; as/login-methods.mjs).
+    ["methods", knownMethods(methods).join(",")],
     ["app-id", appId && APP_ID.test(appId) ? appId : ""],
     ["trade-id", TRADE_ID.test(tradeId ?? "") ? tradeId : ""],
     ["back", back ?? ""],
@@ -90,8 +93,9 @@ export function signPageHtml({appId, tradeId, asset, back, nonce}) {
  *   core(route, account, body, timeoutMs) -> {status, body}  (core-as credential, x-yeet-subject = account)
  *   originOK(req)        exact Origin of this server
  *   asset                signerAsset() (null when the signer is not vendored)
+ *   methods()            the sign-in methods the page offers with no session (YEET_LOGIN_METHODS)
  */
-export function signRoutes(app, {enabled, appId, lookup, core, originOK, asset = signerAsset()}) {
+export function signRoutes(app, {enabled, appId, lookup, core, originOK, asset = signerAsset(), methods = () => [...DEFAULT_LOGIN_METHODS]}) {
   app.get(`${SIGNER_PATH_PREFIX}.js`, (_q, r) => {
     if (!asset) return r.sendStatus(404);
     r.set({...SCRIPT_HEADERS, "Cache-Control": SHORT_CACHE, ETag: `"${asset.hash}"`}).send(asset.bytes);
@@ -116,7 +120,7 @@ export function signRoutes(app, {enabled, appId, lookup, core, originOK, asset =
       "X-Content-Type-Options": "nosniff",
     });
     const id = enabled() ? appId() : "";
-    r.type("html").send(signPageHtml({appId: id, tradeId, asset: id ? asset : null, back: returnUrl(q.query.redirectUrl), nonce}));
+    r.type("html").send(signPageHtml({appId: id, tradeId, asset: id ? asset : null, back: returnUrl(q.query.redirectUrl), nonce, methods: methods()}));
   });
 
   const json = express.json({limit: "64kb"});

@@ -64,7 +64,10 @@ import {
   PUBLIC,
 } from "#shared/common.mjs";
 import { issuableScopes } from "./scopes.mjs";
+import { loginMethods } from "./login-methods.mjs";
 configuredRefreshWindow();
+// YEET_LOGIN_METHODS (login-methods.mjs): a wrong value stops the server here, not at the first sign-in.
+loginMethods();
 const publicBase = process.env.PUBLIC_BASE_URL || AS;
 if (
   PUBLIC &&
@@ -402,6 +405,8 @@ app.get("/account/identity-config", (_q, r) =>
     ? r.set("Cache-Control", "no-store").json({
         // Decision (b): no signer id is published; the page never attaches a YEET signer to a wallet.
         appId: process.env.PRIVY_APP_ID,
+        // The sign-in methods a page with no account-bound link offers (YEET_LOGIN_METHODS, login-methods.mjs).
+        methods: loginMethods(),
       })
     : r.sendStatus(404),
 );
@@ -653,6 +658,7 @@ termsRoutes(app, { session, originOK, equal, formBody, core: (route, account, bo
 signRoutes(app, {
   enabled: () => process.env.PRIVY_LOGIN === "1" || (TEST && process.env.DEV_IDENTITY_STUB === "1"),
   appId: () => process.env.PRIVY_APP_ID ?? "",
+  methods: loginMethods,
   lookup: lookupAccount,
   core: (route, account, body, timeoutMs) => coreSend(route, account, secret("core-as"), body, timeoutMs),
   originOK,

@@ -30,6 +30,30 @@ export function enabledMethods(appConfig) {
   });
 }
 
+/**
+ * The methods a page offers when the server names none: Google and Apple. The server's list is YEET_LOGIN_METHODS
+ * (as/login-methods.mjs), sent with /account/identity-config and on the trade page; a page opened from an
+ * account-bound link gets that account's own methods instead. Email is off by default because Privy never merges an
+ * email-code user into a Google user: one person using both would hold two YEET accounts.
+ */
+export const DEFAULT_OFFERED = Object.freeze(["google", "apple"]);
+
+/** "google,email" or ["google","email"] -> the known ids in page order; null when it names nothing usable. */
+export function methodIds(value) {
+  const given = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
+  const ids = LOGIN_METHODS.filter((id) => given.some((g) => typeof g === "string" && g.trim() === id));
+  return ids.length ? ids : null;
+}
+
+/**
+ * What the page shows: the methods the Privy app has on (enabledMethods) that are also offered here. `offered` is the
+ * server's list or a signed link's; anything unusable falls back to DEFAULT_OFFERED, never to every method.
+ */
+export function offeredMethods(enabled, offered) {
+  const ids = methodIds(offered) ?? DEFAULT_OFFERED;
+  return (Array.isArray(enabled) ? enabled : []).filter((m) => ids.includes(m.id));
+}
+
 /** "a", "a or b", "a, b or c". */
 const joinOr = (words) => (words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} or ${words.at(-1)}`);
 

@@ -43,6 +43,8 @@ services:
       CIMD_TEST_FIXTURES: ${CIMD_TEST_FIXTURES:-}
       PRIVY_APP_ID: ${PRIVY_APP_ID:-}
       PRIVY_JWKS_URL: ${PRIVY_JWKS_URL:-}
+      # Sign-in methods on pages with no account-bound link: comma list of google, apple, email. Default google,apple.
+      YEET_LOGIN_METHODS: ${YEET_LOGIN_METHODS:-}
       STATE_DIR: /state
       CORE_INTERNAL: ${CORE_INTERNAL:-}
       YEET_DAILY_CAP_USDC: ${YEET_DAILY_CAP_USDC:-}

@@ -1,5 +1,5 @@
-// The sign-in step of the trade page (as/sign-page.mjs, as/viewer/sign/sign.js): the SAME methods as the connect
-// screen (Continue with Google, Continue with Apple when it is on, email with a code), from the same component
+// The sign-in step of the trade page (as/sign-page.mjs, as/viewer/sign/sign.js): the methods the page names
+// (Continue with Google, Continue with Apple when it is on; email with a code only when offered), from the same component
 // (choose-method.jsx) and the same Privy configuration (privy-app.jsx). The page loads this bundle only when the
 // browser has no YEET session, or when Google or Apple is sending the person back.
 //
@@ -12,7 +12,9 @@
 //   - when the session exists the page reloads itself: the wallet runs on the page's own Privy client (the vendored
 //     yeet-signer.js), which reads the same session from this origin's storage. One client at a time.
 //
-// mountSignIn(element, {appId, redirectUrl, intro, onStart, onDone}) -> unmount()
+// mountSignIn(element, {appId, redirectUrl, intro, methods, onStart, onDone}) -> unmount()
+//   methods: the ids the page offers (the trade page's data-methods: YEET_LOGIN_METHODS, or the trade's own account's
+//   methods when the card's link carried them); with none given, Google and Apple.
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { PrivyProvider, usePrivy, useLoginWithOAuth } from "@privy-io/react-auth";
@@ -22,9 +24,9 @@ import { ChooseMethod, useEnabledMethods } from "./choose-method.jsx";
 import { words } from "./brand-words.jsx";
 import { Swap } from "./screen.jsx";
 
-function Step({ intro, onStart, onDone }) {
+function Step({ intro, methods: offered, onStart, onDone }) {
   const { ready, authenticated } = usePrivy();
-  const methods = useEnabledMethods();
+  const methods = useEnabledMethods(offered);
   // A Google or Apple return that was refused (the account must already exist here): read from the flow's own state,
   // so it is known whenever the methods appear, and only an OAuth refusal is ever shown this way.
   const { loading, state } = useLoginWithOAuth();
@@ -65,11 +67,11 @@ function Step({ intro, onStart, onDone }) {
   );
 }
 
-export function mountSignIn(element, { appId, redirectUrl, intro, onStart, onDone }) {
+export function mountSignIn(element, { appId, redirectUrl, intro, methods, onStart, onDone }) {
   const root = createRoot(element);
   root.render(
     <PrivyProvider appId={appId} config={{ ...privyConfig(), ...(redirectUrl ? { customOAuthRedirectUrl: redirectUrl } : {}) }}>
-      <Step intro={intro} onStart={onStart} onDone={onDone} />
+      <Step intro={intro} methods={methods} onStart={onStart} onDone={onDone} />
     </PrivyProvider>,
   );
   return () => root.unmount();

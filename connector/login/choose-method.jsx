@@ -13,7 +13,7 @@
 //                Apple sign-in that came back refused)
 import React, { useEffect, useState } from "react";
 import { usePrivy, useLoginWithEmail, useLoginWithOAuth, useLoginWithTelegram, usePrivyClient_experimental } from "@privy-io/react-auth";
-import { enabledMethods, introLine } from "./login-methods.js";
+import { enabledMethods, introLine, offeredMethods } from "./login-methods.js";
 import { words } from "./brand-words.jsx";
 import { Swap } from "./screen.jsx";
 
@@ -31,8 +31,10 @@ const onEnter = (action) => (e) => {
 /**
  * The sign-in methods the Privy app has on, read from the app configuration the Privy client loaded at page load.
  * Null while it is still loading; [] when nothing is on or the configuration cannot be read.
+ * `offered`: the ids this page offers (the server's YEET_LOGIN_METHODS, or the methods of the account a signed link
+ * names); the result is cut to them, and to Google and Apple when the page was given no list.
  */
-export function useEnabledMethods() {
+export function useEnabledMethods(offered) {
   const { ready } = usePrivy();
   const client = usePrivyClient_experimental();
   const [methods, setMethods] = useState(null);
@@ -47,11 +49,13 @@ export function useEnabledMethods() {
       } catch {
         config = undefined;
       }
-      if (config || Date.now() - started >= CONFIG_WAIT_MS) return setMethods(enabledMethods(config));
+      if (config || Date.now() - started >= CONFIG_WAIT_MS) return setMethods(offeredMethods(enabledMethods(config), offered));
       timer = setTimeout(look, 250);
     };
     look();
     return () => clearTimeout(timer);
+    // `offered` is fixed for the life of a page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, client]);
   return methods;
 }

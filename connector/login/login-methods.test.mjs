@@ -40,3 +40,22 @@ test("the trade page: a Google or Apple return that is no YEET account says so; 
   assert.equal(oauthRefusal(undefined), "That did not finish. Try again.");
   for (const code of ["user_does_not_exist", "x"]) assert.doesNotMatch(oauthRefusal(code), /\bsign\w*|log ?in/i);
 });
+
+test("offered methods: Google and Apple by default; email only when the server or a signed link names it", async () => {
+  const { DEFAULT_OFFERED, methodIds, offeredMethods } = await import("./login-methods.js");
+  const all = enabledMethods({ email_auth: true, google_oauth: true, apple_oauth: true });
+  const shown = (offered, enabled = all) => offeredMethods(enabled, offered).map((m) => m.id);
+  assert.deepEqual([...DEFAULT_OFFERED], ["google", "apple"]);
+  assert.deepEqual(shown(undefined), ["google", "apple"], "no list from the server: never email");
+  assert.deepEqual(shown(["google", "apple"]), ["google", "apple"]);
+  assert.deepEqual(shown(["google", "apple", "email"]), ["google", "apple", "email"], "the setting restores email");
+  assert.deepEqual(shown("email"), ["email"], "a link for an email account shows only email");
+  assert.deepEqual(shown("email,google"), ["google", "email"], "page order, whatever the list's order");
+  // Apple is offered but off for the Privy app: no Apple button.
+  assert.deepEqual(shown(["google", "apple"], enabledMethods({ email_auth: true, google_oauth: true })), ["google"]);
+  // An unusable list falls back to the default, never to every method.
+  for (const bad of [[], "", "telegram", ["x"], 7, null]) assert.deepEqual(shown(bad), ["google", "apple"]);
+  assert.equal(methodIds("nope"), null);
+  assert.deepEqual(methodIds(" google , email "), ["google", "email"]);
+  assert.match(introLine(offeredMethods(all, undefined)), /^Sign in with Google or Apple\./);
+});

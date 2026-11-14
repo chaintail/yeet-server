@@ -39,7 +39,10 @@ function kept() {
   }
   return null;
 }
-const cfg = {appId: root.dataset.appId || '', tradeId: root.dataset.tradeId || '', back: root.dataset.back || ''};
+const METHOD_IDS = ['google', 'apple', 'email'];
+/** The sign-in methods the server offers on this page (data-methods); with none named, Google and Apple. */
+const methodsOf = (text) => { const given = String(text ?? '').split(','); const ids = METHOD_IDS.filter((m) => given.includes(m)); return ids.length ? ids : ['google', 'apple']; };
+const cfg = {appId: root.dataset.appId || '', tradeId: root.dataset.tradeId || '', back: root.dataset.back || '', methods: methodsOf(root.dataset.methods)};
 const query = new URLSearchParams(location.search);
 const fromProvider = query.has('privy_oauth_code') || query.has('privy_oauth_state');
 if (!cfg.tradeId) { const k = kept(); if (k) { cfg.tradeId = k.tradeId; cfg.back = cfg.back || k.back; } }
@@ -118,9 +121,11 @@ async function showSignIn(why) {
   show(why === 'stuck' ? line('That didn’t carry over in this browser. Try once more, or open this page in Safari or Chrome.', 'bad') : null, host);
   const intro = why === 'expired' ? 'Your session here ended. Confirm it’s you again to finish this trade.' : LEAD;
   let mod;
-  try { mod = await import(SIGN_IN_BUNDLE); } catch { return emailOnly(host, intro); }
+  // The bundle did not load: the emailed code alone, and only where email is offered. Otherwise say so plainly.
+  try { mod = await import(SIGN_IN_BUNDLE); }
+  catch { return cfg.methods.includes('email') ? emailOnly(host, intro) : host.replaceChildren(line('This step didn’t load. Reload the page to try again.', 'bad')); }
   host.replaceChildren();
-  unmount = mod.mountSignIn(host, {appId: cfg.appId, redirectUrl: `${location.origin}/sign`, intro, onStart: keep, onDone: signedIn});
+  unmount = mod.mountSignIn(host, {appId: cfg.appId, redirectUrl: `${location.origin}/sign`, intro, methods: cfg.methods, onStart: keep, onDone: signedIn});
 }
 /** The sign-in bundle did not load: the emailed code alone, through the page's own client (existing accounts only). */
 function emailOnly(host, intro) {

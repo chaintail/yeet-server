@@ -233,7 +233,8 @@ const LOADING = <p role="status">Loading secure sign in…</p>;
 
 function SignIn({ config }) {
   const { ready, authenticated } = usePrivy();
-  const methods = useEnabledMethods();
+  // Only the methods the server offers here (YEET_LOGIN_METHODS, sent with /account/identity-config).
+  const methods = useEnabledMethods(config.methods);
   // Every sign-in method ends here, so the YEET signer step runs after email, Google, Apple, X and Telegram alike.
   const screen = !ready ? "loading" : authenticated ? "finish" : methods === null ? "loading" : !methods.length ? "none" : "methods";
   return (
