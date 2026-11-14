@@ -469,6 +469,7 @@ h1{margin:0}
 
 .yc.terms .msg{margin:0}.yc.terms .tx{display:inline-block;margin-top:8px}
 
+
 .fine.refresh{flex-wrap:wrap}.fine.refresh .tx{color:var(--yc-accent);font-weight:700}
 .signin{display:grid;gap:8px;margin:0 0 12px;padding:14px;border-radius:18px;background:var(--yc-raise);box-shadow:inset 0 0 0 1px var(--yc-line)}
 .signin strong{font:700 15px var(--disp);color:var(--yc-fg)}.signin .next{text-align:left}.signin .reason{color:var(--rose);font:600 12.5px var(--mono)}
@@ -857,7 +858,7 @@ function signedFromWallet(req,answer){
 
 return {privyRpcBody,privyRpcBodies,checkBatch,checkIntent,reactSdkArgs,signedFromWallet,signedFromWallets};})());   // src/trade-signing.js over src/vendor/wallet-request.mjs
 const signerCfg={"app_id":null,"script":null,"page":null};  // {app_id,script,page}: build-time; a result's _meta['yeet/signer'] overrides
-const BUILD="49a1318ca11f09d8c731fbfcbbeef90e554645aa";     // the yeet-win commit this template was built from; null for a local build
+const BUILD="2e4068fc135be4bb54aa5325f34b8ce4a365f741";     // the yeet-win commit this template was built from; null for a local build
 const APP={"manage_url":"https://chatgpt.com/plugins","refresh_label":"Refresh YEET in ChatGPT","refresh_steps":"open YEET there, select Refresh, then start a new chat"};         // {manage_url,refresh_label,refresh_steps}: where the person refreshes the app in ChatGPT
 const CONFIRM_KEY='yeet/confirm',SIGNER_KEY='yeet/signer',BUILD_KEY='yeet/build',FAILURE_KEY='yeet/failure';
 const POLL_MS=5000,POLL_MAX=360,SKEW_MS=2000,MAX_PARTS=99,AMOUNT_MAX=25,MORE_USDC='5';
@@ -867,7 +868,7 @@ const SYMBOL=/^[A-Z0-9]{2,12}$/,DECIMAL=/^-?(0|[1-9][0-9]*)(\.[0-9]+)?$/;
 const PROPOSAL_ID=/^p_[a-z0-9]{20}$/,TRADE_ID=/^t_[a-z0-9]{20}$/,CODE=/^[A-Za-z0-9_-]{43}$/;
 const EVM_TX=/^0x[0-9a-fA-F]{64}$/,SOL_TX=/^[1-9A-HJ-NP-Za-km-z]{43,90}$/;
 const EXPLORERS=new Set(['basescan.org','solscan.io','explorer.near-intents.org','nearblocks.io']);
-const WAITING={fund:'Reading your balance…',wheel:'Opening the wheel…',lucky:'Opening the lucky wheel…',overview:'Opening YEET…',home:'Opening YEET…',basket:'Getting your quote…',receipt:'Checking your trade…',portfolio:'Reading your wallet…',leaderboard:'Loading the board…',referral:'Opening the win code…'};
+const WAITING={coin:'Looking up the coin…',fund:'Reading your balance…',wheel:'Opening the wheel…',lucky:'Opening the lucky wheel…',overview:'Opening YEET…',home:'Opening YEET…',basket:'Getting your quote…',receipt:'Checking your trade…',portfolio:'Reading your wallet…',leaderboard:'Loading the board…',referral:'Opening the win code…'};
 
 const root=document.getElementById('root');
 const pending=new Map();let sequence=0;
@@ -997,6 +998,14 @@ function tell(kind,key,text){
   else if(host.ready)request('ui/message',{role:'user',content:{type:'text',text:body}}).catch(()=>{});
  }catch{/* the report stays in the context update */}
 }
+function canAsk(){return typeof window.openai?.sendFollowUpMessage==='function'||host.ready}
+function ask(text){
+ try{
+  if(typeof window.openai?.sendFollowUpMessage==='function'){Promise.resolve(window.openai.sendFollowUpMessage({prompt:text})).catch(()=>{});return true}
+  if(host.ready){request('ui/message',{role:'user',content:{type:'text',text}}).catch(()=>{});return true}
+ }catch{/* the card says what to type instead */}
+ return false;
+}
 function reportHeight(){if(heightFrame!==null)return;heightFrame=window.requestAnimationFrame(()=>{heightFrame=null;const h=Math.ceil(root.getBoundingClientRect().height);if(h!==lastHeight){lastHeight=h;if(window.parent!==window)notify('ui/notifications/size-changed',{height:h});try{window.openai?.notifyIntrinsicHeight?.(h)}catch{/* optional */}}})}
 function applyInsets(insets){if(!insets)return;for(const edge of ['top','right','bottom','left']){const v=insets[edge];document.documentElement.style.setProperty(`--host-${edge}`,`${typeof v==='number'&&Number.isFinite(v)&&v>=0?v:0}px`)}}
 /** Light or dark, as the chat is: window.openai.theme (Apps SDK) or hostContext.theme (apps bridge); the system's when the host says nothing. */
@@ -1032,6 +1041,7 @@ function kindOf(d){
  if(!d||typeof d!=='object')return null;
  if(typeof d.error==='string')return 'error';
  if(VIEW==='overview'&&typeof d.username==='string'&&Array.isArray(d.suggestions))return 'overview';
+ if(VIEW==='coin'&&typeof d.symbol==='string'&&has(d,'price_usd')&&has(d,'change_pct'))return 'coin';
  if(typeof d.proposal_id==='string'&&Array.isArray(d.legs)&&d.totals)return 'basket';
  if(typeof d.trade_id==='string'&&Array.isArray(d.legs))return 'receipt';
  if(typeof d.ready==='string'&&has(d,'recent_wins'))return 'home';
@@ -1077,6 +1087,7 @@ function show(data,meta){
  }
  if(kind==='receipt'&&data.status==='requote_required'&&data.requote){note='The price moved. This is the new quote.';return show(data.requote,meta)}
  if(kind==='receipt'&&TRADE_ID.test(data.trade_id)){if(state.trade_id!==data.trade_id){polls=0;pollFailures=0}saveState({trade_id:data.trade_id,...(PROPOSAL_ID.test(data.proposal_id??'')?{proposal_id:data.proposal_id}:{})});if(!FINAL.has(data.status)){openTrades.add(data.trade_id);poll(POLL_MS)}else{window.clearTimeout(pollTimer);if(openTrades.has(data.trade_id))tellTrade(data)}}
+ if(kind==='coin'){takeChart(meta);coinAsked=null}
  if(kind==='lucky')luckyData=data;
  if(kind==='spin'){
   spinWon=data;saveState({spin:spinToday(data)??undefined});
@@ -1981,7 +1992,7 @@ function render(){
  let node;const kind=!current||current.kind==='waiting'?'waiting':current.kind;
  if(kind==='waiting')node=el('div','yc waiting',WAITING[VIEW]??'Loading…');
  else try{
-  node=current.kind==='overview'?renderOverview(current.data):current.kind==='fund'?renderFund(current.data):current.kind==='referral'?renderReferral(current.data):current.kind==='basket'?renderBasket(current.data):current.kind==='receipt'?renderReceipt(current.data):current.kind==='home'?renderHome(current.data)
+  node=current.kind==='overview'?renderOverview(current.data):current.kind==='coin'?renderCoin(current.data):current.kind==='fund'?renderFund(current.data):current.kind==='referral'?renderReferral(current.data):current.kind==='basket'?renderBasket(current.data):current.kind==='receipt'?renderReceipt(current.data):current.kind==='home'?renderHome(current.data)
    :current.kind==='portfolio'?renderPortfolio(current.data):current.kind==='leaderboard'?renderLeaderboard(current.data):current.kind==='spin'?renderSpin(current.data)
    :current.kind==='lucky'?renderLucky(current.data):current.kind==='checkin'?renderCheckin(current.data):renderError(current.data,current.proposal_id);
  }catch{node=renderError({error:'TEMPORARILY_UNAVAILABLE'})}

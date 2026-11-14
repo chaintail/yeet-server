@@ -23,6 +23,8 @@ Object.assign(process.env,{
 for(const name of ['PUBLIC_MODE','PRIVY_LOGIN','MOCK_PASSWORD_LOGIN','PUBLIC_BASE_URL','COOKIE_SECURE','TRUST_PROXY'])delete process.env[name];
 // https://cimd.test/<name> answers with fixture client metadata documents (as.mjs, TEST only).
 process.env.CIMD_TEST_FIXTURES='1';
+// No market data lookups from the suite (core/market.mjs): prices are null, as when the source is down.
+process.env.YEET_MARKET_DATA='off';
 // oidc-provider's notices about defaults it wants changed, and its warning about a body parsed upstream.
 const providerNotices=[];
 for(const level of ['info','warn']){const orig=console[level];console[level]=(m,...rest)=>{if(String(m).includes('oidc-provider'))providerNotices.push(String(m));orig(m,...rest)}}
@@ -34,7 +36,7 @@ after(async()=>{
  rmSync(root,{recursive:true,force:true});
 });
 
-const LISTED=['apply_referral','execute_trade','skeet_propose','submit_trade_signature','trade_status','yeet_accept_terms','yeet_coins','yeet_fund','yeet_home','yeet_overview','yeet_portfolio','yeet_profile','yeet_propose','yeet_quote','yeet_referral','yeet_set_username','yeet_terms'];
+const LISTED=['apply_referral','execute_trade','skeet_propose','submit_trade_signature','trade_status','yeet_accept_terms','yeet_coin','yeet_coins','yeet_fund','yeet_home','yeet_overview','yeet_portfolio','yeet_profile','yeet_propose','yeet_quote','yeet_referral','yeet_set_username','yeet_terms'];
 const SCOPES=['openid','offline_access','yeet:read','yeet:write','yeet:prepare'];
 const local=url=>{const u=new URL(url,ORIGIN);return u.origin===ORIGIN?`${AS}${u.pathname}${u.search}`:u.href};
 function jar(){const c=new Map();return {header:()=>[...c].map(([k,v])=>`${k}=${v}`).join('; '),add(r){for(const s of r.headers.getSetCookie()){const p=s.split(';')[0],i=p.indexOf('=');c.set(p.slice(0,i),p.slice(i+1))}}}}
@@ -192,6 +194,22 @@ test('A-4: a signed-in, consented token lists the P0 and P1 tools over HTTP, exe
  const call=async(name,args)=>(await (await rpc({jsonrpc:'2.0',id:3,method:'tools/call',params:{name,arguments:args}},tok.access_token)).json()).result;
  const coins=await call('yeet_coins',{});
  assert.equal(coins.isError,undefined);assert.ok(coins.structuredContent.coins.some(c=>c.symbol==='WIF'));
+ // yeet_coin over HTTP, through the core route and its scope: one coin by a symbol as a person writes it. No market data
+ // in this process and no wallet: every number is null, nothing is held, the limits and the three follow-ups are there.
+ const one=await call('yeet_coin',{symbol:' $wif '});
+ assert.equal(one.isError,undefined,JSON.stringify(one.content));
+ assert.deepEqual([one.structuredContent.symbol,one.structuredContent.name,one.structuredContent.price_usd,one.structuredContent.holding,one.structuredContent.as_of],['WIF','dogwifhat',null,null,null]);
+ assert.deepEqual(one.structuredContent.suggestions.map(s=>s.label),['Research WIF deeper','YEET WIF','What else is moving?']);
+ assert.deepEqual(one.structuredContent.limits,coins.structuredContent.limits);
+ assert.match(one.structuredContent.guidance,/YEET/);
+ const tool=tools.find(t=>t.name==='yeet_coin');
+ assert.equal(tool._meta['openai/outputTemplate'],'ui://yeet/coin-v1.html');assert.equal(tool.annotations.readOnlyHint,true);assert.deepEqual(tool._meta.securitySchemes,[{type:'oauth2',scopes:['yeet:read']}]);
+ for(const unknown of ['DOGE','USDT','not a coin','../portfolio']){
+  const no=await call('yeet_coin',{symbol:unknown});
+  assert.equal(no.isError,true,unknown);assert.equal(Object.hasOwn(no,'structuredContent'),false);
+  const body=JSON.parse(no.content[0].text);
+  assert.equal(body.error,'COIN_NOT_SUPPORTED',unknown);assert.equal(body.retryable,false);assert.match(body.guidance,/YEET/);
+ }
  // No Privy credentials in this process: the default delegated adapter cannot find wallets.
  const home=await call('yeet_home',{});
  assert.equal(home.isError,true);assert.equal(JSON.parse(home.content[0].text).error,'WALLET_NOT_READY');
@@ -455,7 +473,7 @@ test('terms in the chat, end to end: gated until accepted, the overview answers,
  const call=async(name,args={})=>(await (await rpc({jsonrpc:'2.0',id:31,method:'tools/call',params:{name,arguments:name==='yeet_overview'?{app_version:TOOLS_VERSION,...args}:args}},tok.access_token)).json()).result;
  const refused=r=>{assert.equal(r.isError,true);return JSON.parse(r.content[0].text)};
  // Every tool that does something for the person is refused with the terms; nothing reaches the engine.
- for(const [name,args] of [['yeet_home',{}],['yeet_coins',{}],['yeet_portfolio',{}],['yeet_fund',{}],['yeet_referral',{}],['trade_status',{trade_id:'t_abcdefghij0123456789'}],
+ for(const [name,args] of [['yeet_home',{}],['yeet_coins',{}],['yeet_coin',{symbol:'WIF'}],['yeet_portfolio',{}],['yeet_fund',{}],['yeet_referral',{}],['trade_status',{trade_id:'t_abcdefghij0123456789'}],
   ['yeet_propose',{request_id:'11111111-1111-4111-8111-111111111111',amount_usdc:'20',legs:[{symbol:'WIF',parts:10}]}],['execute_trade',{proposal_id:'p_abcdefghij0123456789',revision:1,confirm:'a'.repeat(43)}]]){
   const b=refused(await call(name,args));
   assert.equal(b.error,'TERMS_REQUIRED',name+': '+JSON.stringify(b).slice(0,160));assert.equal(b.terms.accepted,false);assert.equal(b.terms.version,TERMS_VERSION);

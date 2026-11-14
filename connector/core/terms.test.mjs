@@ -85,7 +85,7 @@ test('a new version asks everyone again: an acceptance of another version does n
 
 test('without an acceptance only the overview, the terms and the eligibility check answer; every other connector route is gated',()=>{
  for(const [m,p] of [['GET','/overview'],['GET','/terms'],['POST','/terms/accept'],['GET','/eligibility']])assert.equal(termsOpen(m,p),true,`${m} ${p}`);
- for(const [m,p] of [['GET','/home'],['GET','/coins'],['POST','/proposals'],['POST','/proposals/skeet'],['POST','/proposals/p_abcdefghij0123456789/quote'],['POST','/trades'],
+ for(const [m,p] of [['GET','/home'],['GET','/coins'],['GET','/coins/WIF'],['POST','/proposals'],['POST','/proposals/skeet'],['POST','/proposals/p_abcdefghij0123456789/quote'],['POST','/trades'],
   ['POST','/trades/t_abcdefghij0123456789/signature'],['GET','/trades/t_abcdefghij0123456789'],['GET','/portfolio'],['GET','/fund'],['GET','/leaderboard/xp'],['GET','/checkin'],['POST','/spin'],
   ['GET','/lucky'],['POST','/lucky/spin'],['POST','/username'],['GET','/referral'],['POST','/referral'],['POST','/overview'],['GET','/terms/accept']])assert.equal(termsOpen(m,p),false,`${m} ${p}`);
  // Every tool but the overview and the terms tools lists the refusal in the contract.

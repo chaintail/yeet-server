@@ -5,7 +5,7 @@ import {createWalletEnsurer,walletSetupConfig,walletSetupMessage} from './trade/
 import express from 'express';
 import {introspectBearer,validatePrincipal} from '#shared/introspection.mjs';
 import {secret,equal,read,write,port,TEST,DEV_APP_ID} from '#shared/common.mjs';
-import {coins} from './coins.mjs';
+import {coins,coin,symbolOf} from './coins.mjs';
 import {unavailable,failure,withUserMessage} from './failure.mjs';
 import {tradeEngine,onTradeSettled} from './trade/runtime.mjs';
 import {xpRuntime,p2On,homeXp,homeXpKeys,checkSpinTable} from './xp/xp.mjs';
@@ -130,6 +130,7 @@ export const ROUTE_SCOPES=Object.freeze([
  ['GET',/^\/overview$/,'yeet:read'],
  ['GET',/^\/home$/,'yeet:read'],
  ['GET',/^\/coins$/,'yeet:read'],
+ ['GET',/^\/coins\/[A-Z0-9]{2,12}$/,'yeet:read'],
  ['POST',/^\/proposals$/,'yeet:write'],
  ['POST',/^\/proposals\/skeet$/,'yeet:write'],
  ['POST',/^\/proposals\/p_[a-z0-9]{20}\/quote$/,'yeet:write'],
@@ -254,7 +255,28 @@ app.post('/wallets/ensure',async(q,r)=>{
  try{r.json(await walletEnsurer.ensure(q.subject,didFor(q.subject)))}
  catch(e){const code=typeof e?.code==='string'?e.code:'WALLET_SETUP_FAILED';r.status(502).json({code,chain:e?.chain??null,privy_status:e?.status??null,message:walletSetupMessage(code)})}
 });
-app.get('/coins',(_q,r)=>r.json(coins()));
+// yeet_coins: the catalogue with live prices (coins.mjs, market.mjs). A price that cannot be read is null, never an error.
+app.get('/coins',async(_q,r)=>{try{r.json(await coins())}catch(e){console.error(JSON.stringify({event:'coins_failed',error:String(e?.message??e).slice(0,200)}));unavailable(r)}});
+// yeet_coin: one coin. What the person holds of it comes from the portfolio read when that answers within 2.5 s;
+// otherwise the coin is shown without a holding. An unknown symbol is the contract's COIN_NOT_SUPPORTED.
+const HOLDING_MS=2500;
+async function holdingOf(ctx,symbol){
+ let timer;
+ try{
+  const bag=await Promise.race([tradeEngine().then(e=>e.portfolio(ctx)),new Promise((_,no)=>{timer=setTimeout(()=>no(Error('timeout')),HOLDING_MS)})]);
+  const h=(bag?.solana?.holdings??[]).find(x=>x.symbol===symbol);
+  return h&&Number(h.amount)>0?{amount:h.amount,usd:h.usd??null}:null;
+ }catch{return null}finally{clearTimeout(timer)}
+}
+app.get('/coins/:symbol',async(q,r)=>{
+ if(q.role!=='mcp')return r.sendStatus(403);
+ const symbol=symbolOf(q.params.symbol);
+ try{
+  const view=symbol?await coin(symbol,{holding:await holdingOf({accountId:q.subject,clientId:q.principal.client},symbol)}):null;
+  if(!view)return r.status(409).json(failure('COIN_NOT_SUPPORTED'));
+  r.json(view);
+ }catch(e){console.error(JSON.stringify({event:'coin_failed',error:String(e?.message??e).slice(0,200)}));unavailable(r)}
+});
 // Trade engine (lane B). Only the connector reaches these routes; each answer is the tool's structuredContent, plus
 // `confirm` for the card-only `_meta` where the contract has one. A refusal is the contract `failure` shape.
 const inputs=Object.fromEntries(Object.entries(toolSchemas).map(([n,s])=>[n,zodSchema(z,s.input)]));

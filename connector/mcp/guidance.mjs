@@ -46,8 +46,18 @@ export const COPY=Object.freeze({
   ready_funding_unread:"YEET yeet_home.ready_funding_unread: {usdc} {network} {other}.",
   ready:"YEET yeet_home.ready.",
  },
+
  yeet_coins:{
   list:"YEET yeet_coins.list.",
+  unpriced:"YEET yeet_coins.unpriced.",
+ },
+
+ yeet_coin:{
+  head:"YEET yeet_coin.head: {symbol}.",
+  head_held:"YEET yeet_coin.head_held: {symbol}.",
+  head_unpriced:"YEET yeet_coin.head_unpriced: {symbol}.",
+  about:"YEET yeet_coin.about.",
+  tail:"YEET yeet_coin.tail.",
  },
 
  propose_yeet:{
@@ -306,6 +316,12 @@ export function termsGuidance(terms,reason){
  if(reason==='version')return terms?.mode==='page'?c.due_page:c.version;
  return terms?.mode==='page'?c.due_page:fill(c.due_chat,{url:APP.manage_url});
 }
+
+function coinGuidance(r){
+ const c=COPY.yeet_coin,symbol=/^[A-Z0-9]{2,12}$/.test(r.symbol??'')?r.symbol:'the coin';
+ const head=r.price_usd===null||r.price_usd===undefined?c.head_unpriced:r.holding?c.head_held:c.head;
+ return join(fill(head,{symbol}),r.description||r.website?c.about:null,c.tail);
+}
 const BY_TOOL={
  yeet_overview:overviewGuidance,
  yeet_terms:r=>r.terms?.accepted?COPY.terms.accepted:termsGuidance(r.terms),
@@ -313,7 +329,8 @@ const BY_TOOL={
  yeet_referral:r=>r.status==='applied'?fill(COPY.referral.applied,{code:r.code}):r.status==='skipped'?COPY.referral.skipped:COPY.referral.open,
  apply_referral:r=>r.status==='applied'?fill(COPY.referral.applied,{code:r.code}):COPY.referral.skipped,
  yeet_home:home,
- yeet_coins:()=>COPY.yeet_coins.list,
+ yeet_coins:r=>(r.coins??[]).some(c=>c.price_usd!==null&&c.price_usd!==undefined)?COPY.yeet_coins.list:COPY.yeet_coins.unpriced,
+ yeet_coin:coinGuidance,
  yeet_propose:proposal,yeet_quote:proposal,skeet_propose:proposal,
  execute_trade:execute,
  submit_trade_signature:trade,trade_status:trade,

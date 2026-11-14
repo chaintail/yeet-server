@@ -1778,6 +1778,54 @@
       ],
       "additionalProperties": false
     },
+    "change_pct": {
+      "type": "object",
+      "description": "Price change in percent over the last 1 hour, 6 hours and 24 hours (1.5 is +1.5%). A window the price source does not have is null.",
+      "properties": {
+        "h1": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -100,
+              "maximum": 1000000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "h6": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -100,
+              "maximum": 1000000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "h24": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -100,
+              "maximum": 1000000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "h1",
+        "h6",
+        "h24"
+      ],
+      "additionalProperties": false
+    },
     "deposit": {
       "type": "object",
       "description": "Card only (result _meta, never structuredContent or content): the connected account’s own YEET deposit addresses, one per network it can be funded on today. default is the network a first YEET spends from; the Add funds card opens on it. The model never reads an address.",
@@ -1849,7 +1897,7 @@
           "app_version": {
             "type": "string",
             "enum": [
-              "tools-4"
+              "tools-5"
             ],
             "description": "The tools version this tool list was built for."
           },
@@ -2245,18 +2293,33 @@
                       "type": "null"
                     }
                   ]
+                },
+                "change_pct": {
+                  "$ref": "#/$defs/change_pct"
                 }
               },
               "required": [
                 "symbol",
                 "name",
                 "kind",
-                "price_usd"
+                "price_usd",
+                "change_pct"
               ],
               "additionalProperties": false
             },
             "minItems": 0,
             "maxItems": 25
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the prices were read; null when no price could be read just now."
           },
           "limits": {
             "type": "object",
@@ -2290,6 +2353,7 @@
         },
         "required": [
           "coins",
+          "as_of",
           "limits"
         ],
         "additionalProperties": false
@@ -2310,6 +2374,295 @@
         "TEMPORARILY_UNAVAILABLE",
         "TERMS_REQUIRED"
       ]
+    },
+    "yeet_coin": {
+      "priority": "P1",
+      "title": "YEET coin",
+      "description": "Shows the coin card for one coin: its USD price, its change over 1, 6 and 24 hours, the person's holding and the basket limits.",
+      "invocation": {
+        "invoking": "Looking up the coin…",
+        "invoked": "Coin looked up"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16,
+            "description": "The coin's symbol as yeet_coins lists it, for example WIF."
+          }
+        },
+        "required": [
+          "symbol"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "$ref": "#/$defs/symbol"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "kind": {
+            "enum": [
+              "meme",
+              "major"
+            ]
+          },
+          "price_usd": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/amount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "change_pct": {
+            "$ref": "#/$defs/change_pct"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the price was read; null when no price could be read just now."
+          },
+          "market_cap_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Market value in USD, or null."
+          },
+          "volume_24h_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD traded in the last 24 hours, or null."
+          },
+          "liquidity_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD in the coin's trading pools, or null."
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 280
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Third-party text about the coin from its listing on a market data site: the coin's own project's claims, not YEET's."
+          },
+          "website": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/https_url"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The coin's own website as a market data site lists it (third-party), or null; the card does not show it."
+          },
+          "x": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/https_url"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The coin's profile on X as a market data site lists it (third-party), or null; the card does not show it."
+          },
+          "holding": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "$ref": "#/$defs/amount"
+                  },
+                  "usd": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/usdc"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "amount",
+                  "usd"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the person holds of this coin; null when they hold none or it could not be read just now."
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "min_leg_usdc": {
+                "$ref": "#/$defs/usdc"
+              },
+              "max_trade_usdc": {
+                "$ref": "#/$defs/usdc"
+              },
+              "max_legs": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5
+              },
+              "default_usdc": {
+                "$ref": "#/$defs/usdc"
+              }
+            },
+            "required": [
+              "min_leg_usdc",
+              "max_trade_usdc",
+              "max_legs",
+              "default_usdc"
+            ],
+            "additionalProperties": false
+          },
+          "suggestions": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "description": "Next actions, in order.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "enum": [
+                    "research",
+                    "yeet",
+                    "moving"
+                  ]
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 48
+                },
+                "say": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80,
+                  "description": "What the person would say to pick it."
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "say"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "guidance": {
+            "$ref": "#/$defs/guidance"
+          }
+        },
+        "required": [
+          "symbol",
+          "name",
+          "kind",
+          "price_usd",
+          "change_pct",
+          "as_of",
+          "market_cap_usd",
+          "volume_24h_usd",
+          "liquidity_usd",
+          "description",
+          "website",
+          "x",
+          "holding",
+          "limits",
+          "suggestions"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "scope": "yeet:read",
+      "card": "coin",
+      "visible": true,
+      "widgetAccessible": false,
+      "errors": [
+        "INVALID_ARGUMENT",
+        "COIN_NOT_SUPPORTED",
+        "REAUTH_REQUIRED",
+        "TEMPORARILY_UNAVAILABLE",
+        "TERMS_REQUIRED"
+      ],
+      "resultMeta": {
+        "yeet/chart": {
+          "type": "object",
+          "description": "Card only: the coin's price over the last 24 hours, oldest first, about one point an hour. Left out when no history could be read.",
+          "properties": {
+            "points": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": 0
+              },
+              "minItems": 2,
+              "maxItems": 48
+            }
+          },
+          "required": [
+            "points"
+          ],
+          "additionalProperties": false
+        }
+      }
     },
     "yeet_propose": {
       "priority": "P0",
@@ -3933,6 +4286,11 @@
       "uri": "ui://yeet/referral-v1.html",
       "title": "Win code",
       "description": "One input for a win code, starting with WIN, with Apply and Skip."
+    },
+    "coin": {
+      "uri": "ui://yeet/coin-v1.html",
+      "title": "YEET coin",
+      "description": "One coin: its logo, ticker and name, the price, a small chart of the last 24 hours, the change over 1 hour, 6 hours and 24 hours, what the person holds of it, and one YEET button that asks the chat for a basket of it."
     }
   },
   "x-yeet-meta": {
@@ -3941,17 +4299,19 @@
     "build": "yeet/build",
     "account": "yeet/account",
     "failure": "yeet/failure",
+    "chart": "yeet/chart",
     "deposit": "yeet/deposit"
   },
   "x-yeet-app": {
     "manage_url": "https://chatgpt.com/plugins",
     "refresh_label": "Refresh YEET in ChatGPT",
     "refresh_steps": "open YEET there, select Refresh, then start a new chat",
-    "tools_version": "tools-4",
+    "tools_version": "tools-5",
     "tools_versions_past": [
-      "tools-3"
+      "tools-3",
+      "tools-4"
     ],
-    "tools_hash": "0648a186feec7b1c460e64b29ef7c4bf3bef00f36356b6da942c367cd3d31642"
+    "tools_hash": "e8fd86dcdde057d4654beb9f3dfd585a142b05aec38501bbb62f29f6a5a01f28"
   },
   "x-yeet-spin": {
     "base_xp": 5,
