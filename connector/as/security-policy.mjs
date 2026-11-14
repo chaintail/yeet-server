@@ -1,4 +1,4 @@
-import { classOfRedirects } from "#shared/agent-route.mjs";
+import { classOfRedirects, agentRedirect } from "#shared/agent-route.mjs";
 // Provider hooks retain native issuance/rotation; application checks fail closed.
 export function allowedAccount(
   policy,
@@ -31,6 +31,18 @@ export const CHATGPT_REDIRECT_URI = "https://chatgpt.com/connector_platform_oaut
 const CHATGPT_CALLBACK_REDIRECT = /^https:\/\/chatgpt\.com\/connector\/oauth\/[A-Za-z0-9_-]{1,128}$/;
 export function chatgptRedirect(uri) {
   return typeof uri === "string" && (uri === CHATGPT_REDIRECT_URI || CHATGPT_CALLBACK_REDIRECT.test(uri));
+}
+// form-action of the sign-in and consent pages (CSP). A form's whole redirect chain is checked against it: the POST
+// goes to this server, and the provider answers with 303s that end at the client's redirect URI (the code, or the
+// error after Cancel). ChatGPT-class pages allow chatgpt.com. An agent-class page must allow that client's exact
+// loopback callback origin (http://127.0.0.1:PORT), or the browser blocks the last hop and leaves the page empty with
+// the card already gone (2026-11-14). CSP host-source has no IPv6 literal syntax, so an http://[::1] callback gets the
+// http: scheme instead (only loopback http redirects can be registered for an agent).
+export const CHATGPT_FORM_ACTION = "'self' https://chatgpt.com";
+export function interactionFormAction(cls, redirectUri) {
+  if (cls !== "agent" || !agentRedirect(redirectUri)) return CHATGPT_FORM_ACTION;
+  const u = new URL(redirectUri);
+  return `'self' ${u.hostname.startsWith("[") ? "http:" : u.origin}`;
 }
 /** The client's class from its redirect URIs alone (shared/agent-route.mjs): 'chatgpt', 'agent' or null. */
 export const clientClass = (uris) => classOfRedirects(uris, chatgptRedirect);

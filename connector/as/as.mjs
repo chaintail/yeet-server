@@ -10,7 +10,7 @@ import {
   diagnostic,
   observeServerError,
 } from "./diagnostics.mjs";
-import { document, credentials, html, expiredAuthorizationBody, promptTitle, agentAsk, providerErrorPage } from "./auth-pages.mjs";
+import { document, credentials, html, expiredAuthorizationBody, promptTitle, agentAsk, providerErrorPage, UNKNOWN_CLIENT_LINE } from "./auth-pages.mjs";
 import express from "express";
 import { providerCsp } from "./provider-csp.mjs";
 import { fundRoutes, privyPageCsp, afterSignIn, nextField, boundNext, FUND_NEXT } from "./fund-page.mjs";
@@ -38,6 +38,8 @@ import {
   bindInteraction,
   chatgptRedirect,
   clientClass,
+  interactionFormAction,
+  CHATGPT_FORM_ACTION,
   registrationRequest,
   CLIENT_AUTH_METHODS,
   rateLimiter,
@@ -452,13 +454,14 @@ app.use("/auth", (q, _r, next) => {
   if (q.method === "GET") observeAuthorization(q, RESOURCE);
   next();
 });
-function authDocument(res, title, body) {
+// formAction: the CSP form-action for this page (security-policy.mjs interactionFormAction); ChatGPT's by default.
+function authDocument(res, title, body, formAction = CHATGPT_FORM_ACTION) {
   if (process.env.PRIVY_LOGIN !== "1") return document(title, body);
   const nonce = randomBytes(24).toString("base64");
   res.set(
     "Content-Security-Policy",
     // Privy sign-in plus embedded wallets: auth API, wallet RPC hosts, the wallet iframe and the Turnstile challenge.
-    privyPageCsp(nonce, { formAction: "'self' https://chatgpt.com", telegram: true }),
+    privyPageCsp(nonce, { formAction, telegram: true }),
   );
   return document(title, body, nonce);
 }
@@ -554,7 +557,7 @@ async function foreignClient(d) {
   if (AGENT_ON && classOf(await provider.Client.find(d.params.client_id)) === "agent") return false;
   return !chatgptRedirect(uri);
 }
-const foreignClientBody = "<p>Only ChatGPT can connect to YEET. Start again from ChatGPT.</p>";
+const foreignClientBody = `<p>${UNKNOWN_CLIENT_LINE}</p>`;
 function interactionBinding(d, s) {
   const db = read("interaction-bindings.json");
   const binding = bindInteraction(db, d, s);
@@ -904,7 +907,10 @@ app.get("/interaction/:uid", async (q, r, next) => {
     const login = d.prompt.name === "login";
     const client = await provider.Client.find(d.params.client_id);
     const agent = AGENT_ON && classOf(client) === "agent";
-    const ask = agent ? agentAsk(client.clientName, d.params.redirect_uri || client.redirectUris?.[0]) : "";
+    const redirectUri = d.params.redirect_uri || (client.redirectUris?.length === 1 ? client.redirectUris[0] : undefined);
+    const ask = agent ? agentAsk(client.clientName, redirectUri) : "";
+    // The forms on both pages end at the client's redirect URI (the code, or the error after Cancel).
+    const formAction = interactionFormAction(agent ? "agent" : "chatgpt", redirectUri);
     if (!login) {
       const who = await currentUsername(d.session.accountId);
       r.type("html").send(
@@ -912,7 +918,7 @@ app.get("/interaction/:uid", async (q, r, next) => {
           csrf: data.csrf, name: who.name || who.username || "",
           ...(agent ? { lead: AGENT_CONNECT_LEAD, ask } : {}),
           connectedSeconds: compatibilityClient(d.params.client_id) ? configuredRefreshWindow() : 0,
-        })),
+        }), formAction),
       );
       return;
     }
@@ -926,6 +932,7 @@ app.get("/interaction/:uid", async (q, r, next) => {
         r,
         promptTitle("connect-login", agent),
         `${ask}<form method="POST" data-yeet-prompt="login"><input type="hidden" name="csrf" value="${data.csrf}">${identity}${(!s || recoveringAccount(d)) && process.env.PRIVY_LOGIN === "1" ? "" : `<button type="submit">${action}</button>`}${legalLine()}</form>`,
+        formAction,
       ),
     );
   } catch (e) {

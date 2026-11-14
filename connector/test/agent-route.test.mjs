@@ -131,6 +131,42 @@ test('tokens carry the class and the resource; the owner accepts the terms in Ch
  assert.equal(t.status,200);assert.equal(t.json.result.isError,undefined,JSON.stringify(t.json.result));
 });
 
+// 2026-11-14 (owner on an iPhone: a blank page and no callback). The whole agent-class journey, signed out and then in
+// the same browser already signed in: sign in, then ALWAYS the consent page with an explicit Connect (an agent is
+// never auto-connected), then the loopback callback with the code and the same state.
+test('agent journey, signed out and already signed in: sign-in, the consent page every time, then the loopback callback with code and state',async()=>{
+ const cookies=jar();
+ const step=async(url,init={})=>{const r=await fetch(local(url),{redirect:'manual',...init,headers:{cookie:cookies.header(),...init.headers}});cookies.add(r);return r};
+ const form=body=>({method:'POST',headers:{'content-type':'application/x-www-form-urlencoded',origin:ORIGIN},body:new URLSearchParams(body)});
+ async function authorize(state){
+  const verifier=randomBytes(32).toString('base64url'),challenge=createHash('sha256').update(verifier).digest('base64url');
+  const auth=new URL(AS+'/auth');
+  auth.search=new URLSearchParams({client_id:agentClient,response_type:'code',redirect_uri:LOOPBACK,code_challenge:challenge,code_challenge_method:'S256',scope:SCOPES.join(' '),resource:AGENT,state});
+  let r=await step(auth.href);assert.equal(r.status,303);
+  let page=r.headers.get('location');assert.match(new URL(page,ORIGIN).pathname,/^\/interaction\//);
+  let d=await (await step(page)).json();
+  const prompts=[d.prompt];
+  if(d.prompt==='login'){
+   r=await step(page,form({csrf:d.csrf,identity_token:'DEV:did:privy:agent-owner'}));assert.equal(r.status,303);
+   r=await step(r.headers.get('location'));assert.equal(r.status,303);
+   page=r.headers.get('location');assert.ok(!page.startsWith(LOOPBACK),'never straight to the agent without the consent page');
+   d=await (await step(page)).json();prompts.push(d.prompt);
+  }
+  assert.equal(d.prompt,'consent');
+  r=await step(page,form({csrf:d.csrf,consent:'yes',decision:'connect'}));assert.equal(r.status,303);
+  r=await step(r.headers.get('location'));assert.equal(r.status,303);
+  const callback=new URL(r.headers.get('location'));
+  assert.equal(`${callback.origin}${callback.pathname}`,LOOPBACK);
+  assert.equal(callback.searchParams.get('state'),state);assert.equal(callback.searchParams.get('error'),null);
+  const token=await (await fetch(AS+'/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',code:callback.searchParams.get('code'),code_verifier:verifier,redirect_uri:LOOPBACK,client_id:agentClient,resource:AGENT})})).json();
+  assert.ok(token.access_token,JSON.stringify(token));
+  return prompts;
+ }
+ assert.deepEqual(await authorize('signed-out'),['login','consent']);
+ // The same browser, still signed in: no new sign-in, and still the consent page before the callback.
+ assert.deepEqual(await authorize('signed-in'),['consent']);
+});
+
 test('MCP call, both directions: the agent token on the ChatGPT endpoint and the ChatGPT token on the agent host are refused with WRONG_ROUTE',async()=>{
  const onChatgpt=await rpcTo(new URL(ORIGIN).host,agentToken)('tools/list');
  assert.equal(onChatgpt.status,403);assert.equal(onChatgpt.json.error.data.error,'WRONG_ROUTE');assert.equal(onChatgpt.json.error.data.correct_url,AGENT);

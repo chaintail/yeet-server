@@ -12,5 +12,7 @@ export function agentAsk(name,redirect){let at='';try{at=new URL(String(redirect
 export function credentials(){return '<label for="identity_token">Development identity</label><input id="identity_token" name="identity_token" autocomplete="off" autocapitalize="none" spellcheck="false">'}
 
 // Browser-facing OAuth errors from the provider (renderError): the same page as a refused connection, plus the code.
-export function providerErrorPage(code){const c=/^[a-z_]{1,64}$/.test(String(code))?String(code):'invalid_request';return document('Connection refused',`<p>Only ChatGPT can connect to YEET. Start again from ChatGPT.</p><p class="details">Error code: ${html(c)}</p>`)}
+/** The refusal for a link that is not a valid authorization (an unknown client, a foreign redirect): either class may land here. */
+export const UNKNOWN_CLIENT_LINE='This sign-in link is not valid. Start again from ChatGPT or from your agent.';
+export function providerErrorPage(code){const c=/^[a-z_]{1,64}$/.test(String(code))?String(code):'invalid_request';return document('Connection refused',`<p>${UNKNOWN_CLIENT_LINE}</p><p class="details">Error code: ${html(c)}</p>`)}
 export const expiredAuthorizationBody = '<p>This authorization page expired or its sign-in session changed. Go back to ChatGPT and connect YEET again.</p>';
