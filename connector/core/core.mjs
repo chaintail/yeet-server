@@ -309,7 +309,7 @@ app.post('/wallets/ensure',async(q,r)=>{
 app.get('/coins',async(_q,r)=>{try{r.json(await coins())}catch(e){console.error(JSON.stringify({event:'coins_failed',error:String(e?.message??e).slice(0,200)}));unavailable(r)}});
 // yeet_coin: one coin. What the person holds of it comes from the portfolio read when that answers within 2.5 s;
 // otherwise the coin is shown without a holding. An unknown symbol is the contract's COIN_NOT_SUPPORTED.
-const HOLDING_MS=2500;
+const HOLDING_MS=1500;
 async function holdingOf(ctx,symbol){
  let timer;
  try{

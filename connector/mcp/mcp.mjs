@@ -41,7 +41,7 @@ app.get(prmPath,(_q,r)=>r.json({resource:RESOURCE,authorization_servers:[AS],sco
 const challenge=res=>res.set('WWW-Authenticate',`Bearer resource_metadata="${new URL(RESOURCE).origin}${prmPath}"`);
 /** Core deadline per route: proposals (YEET and SKEET) and quotes 15 s, trade execution 25 s, the overview (wallets,
  * balances and holdings in one answer) 8 s, everything else 4.5 s. */
-export const coreTimeout=(route,method)=>method==='GET'&&route==='/overview'?8000:method==='POST'&&route==='/trades'?25_000:method==='POST'&&/^\/proposals(\/skeet|\/[^/]+\/quote)?$/.test(route)?15_000:4500;
+export const coreTimeout=(route,method)=>method==='GET'&&route==='/overview'?8000:method==='POST'&&route==='/trades'?25_000:method==='POST'&&/^\/proposals(\/skeet|\/[^/]+\/quote)?$/.test(route)?15_000:method==='GET'&&/^\/coins(\/|$)/.test(route)?10_000:4500;
 app.post(resourcePath,async(req,res)=>{
  const bearer=req.headers.authorization?.match(/^Bearer (\S+)$/i)?.[1];
  const auth=await authenticate(bearer,{introspect:b=>introspectBearer(b,'mcp-resource','introspection'),validate:validatePrincipal});
@@ -59,7 +59,7 @@ app.post(resourcePath,async(req,res)=>{
     ...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(coreTimeout(route,method))});
    const raw=await r.text();if(Buffer.byteLength(raw)>128*1024)throw Error('Bound');
    const result=JSON.parse(raw);if(!r.ok)throw {error:result.error??(r.status===401?'REAUTH_REQUIRED':'TEMPORARILY_UNAVAILABLE'),fund_url:result.fund_url,waitlist_url:result.waitlist_url,message:result.message,terms:result.terms,missing:result.missing,reason:result.reason};return result;
-  }catch(e){throw {error:e.error??'TEMPORARILY_UNAVAILABLE',fund_url:e.fund_url,waitlist_url:e.waitlist_url,message:e.error?e.message:undefined,terms:e.terms,missing:e.missing,reason:e.reason}}
+  }catch(e){if(!e.error)console.error(JSON.stringify({event:'core_call_failed',route:String(route).slice(0,60),method,error:String(e?.name??'')+' '+String(e?.message??e).slice(0,120)}));throw {error:e.error??'TEMPORARILY_UNAVAILABLE',fund_url:e.fund_url,waitlist_url:e.waitlist_url,message:e.error?e.message:undefined,terms:e.terms,missing:e.missing,reason:e.reason}}
  }
  const server=createMcpServer({token,callCore});
  const transport=new StreamableHTTPServerTransport({sessionIdGenerator:undefined,enableJsonResponse:true});

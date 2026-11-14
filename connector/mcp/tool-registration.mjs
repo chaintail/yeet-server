@@ -228,7 +228,7 @@ export function createMcpServer({token,callCore,env=process.env,staleness=proces
     const guidance=tellRefresh&&isObject?withRefresh(refreshGuidance(),own):own;
     const refresh=tellRefresh&&name==='yeet_overview'&&isObject?{app_refresh:appRefresh()}:{};
     const parsed=output.safeParse(guidance?{...data,...refresh,guidance}:data);
-    if(!parsed.success)return toolError({error:'TEMPORARILY_UNAVAILABLE'},ctx,{tool:name});
+    if(!parsed.success){console.error(JSON.stringify({event:'output_rejected',tool:name,issues:parsed.error.issues.slice(0,4).map(i=>({path:i.path.join('.'),code:i.code,message:String(i.message).slice(0,80)}))}));return toolError({error:'TEMPORARILY_UNAVAILABLE'},ctx,{tool:name});}
     const text=TEXT[name]?TEXT[name](name==='yeet_fund'?parsed.data:result,name==='yeet_fund'?deposit?.networks:undefined):JSON.stringify(parsed.data);
     // Card only: the server's card build, so a card built from another commit can tell it is stale.
     const cardMeta={[BUILD_META_KEY]:staleness.build,...(confirm?{[CONFIRM_META_KEY]:confirm}:{}),...(account?{[ACCOUNT_META_KEY]:account}:{}),...(deposit?{[DEPOSIT_META_KEY]:deposit}:{}),...(chart?{[CHART_META_KEY]:chart}:{}),...(signer&&SIGNER_TOOLS.has(name)?{[SIGNER_META_KEY]:boundSigner(signer,hint)}:{})};
