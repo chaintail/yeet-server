@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { PrivyProvider, usePrivy, useUser, useLoginWithOAuth } from "@privy-io/react-auth";
 import { privyConfig } from "./privy-app.jsx";
 import { NO_METHOD_LINE, oauthRefusal } from "./login-methods.js";
+import { BOUND_CALLBACK_PATH, boundContext, boundUrl, boundView, fromProvider, keepBound, keptBound } from "./bound-return.js";
 import { ChooseMethod, useEnabledMethods } from "./choose-method.jsx";
 import {
   CHAINS,
@@ -252,54 +253,87 @@ function SignIn({ config }) {
   );
 }
 
+/** A refused Google or Apple return, carried from the bare address back to the bound page (shown once). */
+const REFUSAL_KEY = "yeet-bound-refusal";
+function takeRefusal() {
+  try {
+    const v = sessionStorage.getItem(REFUSAL_KEY) ?? "";
+    sessionStorage.removeItem(REFUSAL_KEY);
+    return v.slice(0, 200);
+  } catch {
+    return "";
+  }
+}
 /**
  * The sign-in page opened from an account-bound link (as/account-bound.mjs; the funding page, or the terms page
  * whose own token ran out). The server put that account's methods on the page (data-methods). Differences from the
  * plain sign-in, all on purpose:
  *   - nothing is created (signup off) and no wallet set-up is asked for: this page only lets an existing account in;
- *   - once Privy knows the person, the form is posted at once; the SERVER compares who that is with the link's
- *     account and refuses anyone else. Nothing here decides that;
- *   - `again`: the person came in as another account and pressed Try again. The Privy session of that other account
- *     is ended first, once (never on the way back from Google or Apple), so the methods show again.
+ *   - the SERVER compares who signed in with the link's account and refuses anyone else. Nothing here decides that;
+ *   - Google and Apple return to the fixed /account/login (bound-return.js); the page keeps where it was for the trip;
+ *   - a session Privy already had when the page opened is neither sent nor ended by itself (boundView "confirm"):
+ *     the person presses Continue, or Use another account. Nothing in the address can log anyone out.
  */
-function BoundSignIn({ offered, again }) {
-  const { ready, authenticated, getAccessToken, logout } = usePrivy();
+function BoundSignIn({ offered, context }) {
+  const { ready, authenticated, user, getAccessToken, logout } = usePrivy();
   const methods = useEnabledMethods(offered);
-  const { loading, state } = useLoginWithOAuth();
-  const refusal = state?.status === "error" ? oauthRefusal(state.error?.privyErrorCode) : "";
-  const [cleared, setCleared] = useState(!again);
+  const [startedHere, setStartedHere] = useState(() => takeStarted());
+  const [refusal] = useState(() => takeRefusal());
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   const [seen, setSeen] = useState(false);
   const sent = useRef(false);
-  useEffect(() => {
-    if (!ready || cleared) return;
-    // Drop the flag from the address first: a reload or a provider return must not end the new session again.
-    try {
-      const u = new URL(location.href);
-      u.searchParams.delete("again");
-      history.replaceState(null, "", u);
-    } catch {
-      /* the flag stays; the provider-return check below still holds */
-    }
-    (authenticated ? logout() : Promise.resolve()).catch(() => {}).finally(() => setCleared(true));
-  }, [ready, cleared, authenticated, logout]);
-  useEffect(() => {
-    if (!ready || !cleared || !authenticated || sent.current) return;
+  const view = boundView({ ready, authenticated, startedHere });
+  async function send() {
+    if (sent.current) return;
     sent.current = true;
-    submitSession(getAccessToken).catch(() => {
+    setBusy(true);
+    setError("");
+    try {
+      await submitSession(getAccessToken);
+    } catch {
       sent.current = false;
+      setBusy(false);
       setError("That could not continue. Please try again.");
-    });
-  }, [ready, cleared, authenticated, getAccessToken]);
-  const screen = !ready || !cleared ? "loading" : authenticated ? "finish" : methods === null ? "loading" : !methods.length ? "none" : "methods";
+    }
+  }
+  useEffect(() => {
+    if (view === "submit") send();
+    // send reads the latest hooks; it runs once per sign-in.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+  /** The one place this page ends a session, and only from the button. */
+  async function useAnother() {
+    setBusy(true);
+    setError("");
+    try {
+      await logout();
+    } catch {
+      setError("That could not finish. Please try again.");
+    }
+    setBusy(false);
+  }
+  const screen = view === "methods" && methods === null ? "loading" : view === "methods" && !methods.length ? "none" : view;
   return (
     <Swap id={screen}>
       {screen === "loading" ? (
         LOADING
-      ) : screen === "finish" ? (
+      ) : screen === "submit" ? (
         <p role={error ? "alert" : "status"} className={error ? "notice" : undefined}>
           {words(error || "That’s you. One moment…")}
         </p>
+      ) : screen === "confirm" ? (
+        <>
+          <button type="button" disabled={busy} onClick={send}>
+            {busy ? "One moment…" : `Continue as ${accountLabel(user)}`}
+          </button>
+          <button type="button" className="secondary" disabled={busy} onClick={useAnother}>
+            Use another account
+          </button>
+          <p role="alert" className={error ? "notice" : undefined}>
+            {words(error)}
+          </p>
+        </>
       ) : screen === "none" ? (
         <p role="status">{words(NO_METHOD_LINE)}</p>
       ) : (
@@ -307,12 +341,52 @@ function BoundSignIn({ offered, again }) {
           methods={methods}
           signup={false}
           intro="Use the account you connected to ChatGPT with."
-          pageNotice={loading || seen ? "" : refusal}
-          onStart={() => setSeen(true)}
+          pageNotice={seen ? "" : refusal}
+          onStart={() => {
+            setSeen(true);
+            // Kept for the trip to Google or Apple; an emailed code never leaves the page.
+            if (context) keepBound(sessionStorage, context);
+            markStarted();
+            setStartedHere(true);
+          }}
         />
       )}
     </Swap>
   );
+}
+
+/**
+ * Back from Google or Apple on the fixed address, for a sign-in that started on a bound page. Privy finishes the
+ * sign-in here; then the browser goes to the bound address again, where the server verifies the hint once more and
+ * the page posts the form. A refused return goes back the same way, with its line.
+ */
+function ReturnToBound({ context }) {
+  const { ready, authenticated } = usePrivy();
+  const { loading, state } = useLoginWithOAuth();
+  const went = useRef(false);
+  // A return that never settles (the provider's answer was lost on the way): back to the bound page, which starts over.
+  const [late, setLate] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setLate(true), 20000);
+    return () => clearTimeout(timer);
+  }, []);
+  useEffect(() => {
+    if (!ready || went.current) return;
+    const failed = state?.status === "error";
+    if (!authenticated && !late && (loading || !failed)) return;
+    went.current = true;
+    try {
+      if (failed && !authenticated) {
+        sessionStorage.setItem(REFUSAL_KEY, oauthRefusal(state.error?.privyErrorCode));
+        sessionStorage.removeItem(STARTED_KEY);
+      }
+    } catch {
+      /* the bound page then shows the methods with no line */
+    }
+    keptBound(sessionStorage, { take: true });
+    location.replace(boundUrl(context));
+  }, [ready, authenticated, loading, state, context, late]);
+  return LOADING;
 }
 
 try {
@@ -322,14 +396,17 @@ try {
   if (!response.ok) throw Error();
   const config = await response.json();
   const host = document.getElementById("privy-login");
-  const query = new URLSearchParams(location.search);
-  const fromProvider = query.has("privy_oauth_code") || query.has("privy_oauth_state");
+  const bound = host.dataset.bound === "1";
+  // Back from Google or Apple on the fixed address: the bound page this tab came from, if it kept one.
+  const returning = !bound && fromProvider(location.search) ? keptBound(sessionStorage) : null;
   createRoot(host).render(
-    <PrivyProvider appId={config.appId} config={privyConfig()}>
+    <PrivyProvider appId={config.appId} config={bound || returning ? { ...privyConfig(), customOAuthRedirectUrl: `${location.origin}${BOUND_CALLBACK_PATH}` } : privyConfig()}>
       {host.dataset.mode === "logout" ? (
         <EndSession />
-      ) : host.dataset.bound === "1" ? (
-        <BoundSignIn offered={host.dataset.methods} again={host.dataset.again === "1" && !fromProvider} />
+      ) : bound ? (
+        <BoundSignIn offered={host.dataset.methods} context={boundContext(location.search)} />
+      ) : returning ? (
+        <ReturnToBound context={returning} />
       ) : (
         <SignIn config={config} />
       )}
