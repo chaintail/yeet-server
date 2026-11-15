@@ -61,6 +61,7 @@ export const COPY=Object.freeze({
  },
 
  yeet_coin:{
+
   head:"YEET yeet_coin.head: {symbol}.",
   head_held:"YEET yeet_coin.head_held: {symbol}.",
   head_unpriced:"YEET yeet_coin.head_unpriced: {symbol}.",
@@ -184,6 +185,8 @@ export const COPY=Object.freeze({
 
  style:{
   reminder:"YEET style.reminder.",
+
+  card:"YEET style.card.",
  },
 
  errors:{
@@ -321,6 +324,8 @@ export const FIRST_YEET_XP=50;
 export const firstSpin=r=>r?.streak_days===1&&Number.isFinite(Number(r.total))&&Number.isFinite(Number(r.xp_won))&&Number(r.total)-Number(r.xp_won)<FIRST_YEET_XP;
 
 const reminder=days=>Number.isInteger(days)&&days>=2?fill(COPY.streak.reminder,{streak_days:days}):'';
+
+export const reminderDue=r=>!!r&&Number.isInteger(r.xp_won)&&!((r.spins_available??0)>0)&&!!reminder(r.streak_days);
 function spin(r,ctx){
  const c=COPY.daily_spin,s=r.stamp;
  const head=!s?fill(c.xp_only,r)
@@ -328,7 +333,7 @@ function spin(r,ctx){
   :fill(c.stamp,{coin:s.coin,filled:s.filled,slots:s.slots,xp_won:r.xp_won});
  const left=r.spins_available??0;
 
- return join(head,left>0?fill(c.more_spins,{left,s:plural(left)}):hasLucky(ctx)&&r.spin_reason!=='trade_bonus'?c.lucky:c.done,left>0?'':reminder(r.streak_days),firstSpin(r)?COPY.referral.moment:'');
+ return join(head,left>0?fill(c.more_spins,{left,s:plural(left)}):hasLucky(ctx)&&r.spin_reason!=='trade_bonus'?c.lucky:c.done,reminderDue(r)?reminder(r.streak_days):'',firstSpin(r)?COPY.referral.moment:'');
 }
 function lucky(r){
  const c=COPY.lucky,l=r?.lucky;
@@ -355,7 +360,7 @@ export function termsGuidance(terms,reason){
 }
 
 function coinGuidance(r){
- const c=COPY.yeet_coin,symbol=/^[A-Z0-9]{2,12}$/.test(r.symbol??'')?r.symbol:'the coin';
+ const c=COPY.yeet_coin,symbol=/^[A-Z0-9]{2,12}$/.test(r.symbol??'')?r.symbol:'coin';
  const head=r.price_usd===null||r.price_usd===undefined?c.head_unpriced:r.holding?c.head_held:c.head;
  return join(fill(head,{symbol}),r.description||r.website?c.about:null,c.tail);
 }
@@ -392,7 +397,8 @@ const BY_TOOL={
   }
   return r.method==='crypto'?COPY.yeet_fund.crypto:r.method==='card'?COPY.yeet_fund.card:COPY.yeet_fund.choose;
  },
- yeet_checkin:r=>{const c=r.checkin??{},left=Number.isInteger(c.spins_available)?c.spins_available:c.spin_available?1:0;return left>0?COPY.yeet_checkin.open:join(fill(COPY.yeet_checkin.done,{days:c.streak_days,s:plural(c.streak_days)}),reminder(c.streak_days))},
+
+ yeet_checkin:r=>{const c=r.checkin??{},left=Number.isInteger(c.spins_available)?c.spins_available:c.spin_available?1:0;return left>0?COPY.yeet_checkin.open:fill(COPY.yeet_checkin.done,{days:c.streak_days,s:plural(c.streak_days)})},
  daily_spin:spin,
  yeet_set_username:r=>fill(COPY.yeet_set_username.set,{username:r.username}),
  yeet_profile:()=>COPY.yeet_set_username.profile,
@@ -413,10 +419,12 @@ const STYLED={
 };
 export const STYLED_TOOLS=Object.freeze(Object.keys(STYLED));
 
+export const CARD_STYLED=Object.freeze(new Set(['yeet_coin','yeet_checkin','daily_spin','lucky_wheel','lucky_spin']));
+
 export function styleFor(name,result){
  const f=STYLED[name];
  if(!f||!result||typeof result!=='object')return undefined;
- try{return f(result)?COPY.style.reminder:undefined}catch{return undefined}
+ try{return f(result)?CARD_STYLED.has(name)?COPY.style.card:COPY.style.reminder:undefined}catch{return undefined}
 }
 
 export const UI=Object.freeze({
@@ -436,6 +444,8 @@ export const UI=Object.freeze({
  tour_username:"YEET UI.tour_username.",
  tour_username_named:'',
  tour_wheel:", YEET UI.tour_wheel.",
+
+ reminder:"YEET UI.reminder.",
  update:"YEET UI.update: {url}.",
 });
 const hasCheckin=ctx=>!ctx||!ctx.tools||ctx.tools.has('yeet_checkin');
@@ -465,6 +475,7 @@ export function uiFor(name,result,ctx){
    return fresh?`${welcome} ${firstNote(ctx)}`:welcome;
   }
   if(name==='yeet_terms')return chatTerms(result.terms)?UI.consent:undefined;
+  if(name==='daily_spin')return reminderDue(result)?UI.reminder:undefined;
   if(name==='yeet_accept_terms'){
    if(result.terms?.accepted!==true)return undefined;
    const o=result.overview;
