@@ -55,8 +55,9 @@ test('yeet_coin: read scope, read only, the coin card; the model reads price, ch
   assert.equal(CHART_META_KEY,'yeet/chart');assert.deepEqual(r._meta['yeet/chart'],{points});
   assert.equal(Object.hasOwn(r.structuredContent,'card_chart'),false);assert.doesNotMatch(JSON.stringify(r.structuredContent)+JSON.stringify(r.content),/points|card_chart|0\.1497/);
   assert.deepEqual(JSON.parse(r.content[0].text),r.structuredContent);
-  // The JSON, then the style reminder as its own text block (guidance.mjs STYLED), nothing else.
-  assert.equal(r.content.length,2);assert.equal(r.content[1].text,COPY.style.reminder);
+  // The JSON, then the card style line as its own text block (guidance.mjs CARD_STYLED: the coin card already shows
+  // the numbers, so no chart or price card of the model's own), nothing else.
+  assert.equal(r.content.length,2);assert.equal(r.content[1].text,COPY.style.card);
   assert.ok(r.content[0].text.length<1800,`the model reads this: ${r.content[0].text.length} characters`);
  }finally{await close()}
 });
