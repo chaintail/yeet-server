@@ -1,5 +1,5 @@
 // Tool schemas from the vendored yeet-win contract (vendor/yeet-win/contracts/yeet-tools.json; commit in PINNED).
-import {readFileSync} from 'node:fs';
+import {readFileSync,existsSync} from 'node:fs';
 import {CONTRACT_URL} from '#contracts/errors';
 /** The private descriptions (descriptions.private.json "contract"): the public contract carries one neutral sentence
  * where ChatGPT reads ours. At each JSON pointer the vendored text must be the recorded neutral one (or already the
@@ -14,7 +14,9 @@ export function applyDescriptions(target,overlay){
  }
  return target;
 }
-export const contract=applyDescriptions(JSON.parse(readFileSync(CONTRACT_URL,'utf8')),JSON.parse(readFileSync(DESCRIPTIONS_URL,'utf8')).contract);
+/** Without the overlay file (this public repository) every pointer keeps the vendored contract's neutral text. */
+export const overlay=existsSync(DESCRIPTIONS_URL)?JSON.parse(readFileSync(DESCRIPTIONS_URL,'utf8')).contract:{};
+export const contract=applyDescriptions(JSON.parse(readFileSync(CONTRACT_URL,'utf8')),overlay);
 export function resolveSchema(schema){
  if(Array.isArray(schema))return schema.map(resolveSchema);
  if(!schema||typeof schema!=='object')return schema;
