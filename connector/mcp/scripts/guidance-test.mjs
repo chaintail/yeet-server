@@ -582,7 +582,8 @@ test('welcome layout: username, the three-column summary, tier and the check-in,
  assert.doesNotMatch(uiFor('yeet_overview',OV,P01),/check-in/,'no check-in without the wheel tools');
  // Never on other results, and the consent flow replaces it while the terms are due.
  for(const name of GUIDED_TOOLS.filter(n=>!['yeet_overview','yeet_terms','yeet_accept_terms'].includes(n)))assert.equal(uiFor(name,{...OV,terms:{accepted:false,mode:'chat'}},ALL_P2),undefined,name);
- assert.equal(uiFor('yeet_overview',{...OV,terms:{accepted:false,mode:'chat'}}),consentNote());
+ // The terms card's note (the card shows in place of the welcome), then the list layout for a chat without cards.
+ {const u=uiFor('yeet_overview',{...OV,terms:{accepted:false,mode:'chat'}});assert.ok(u.startsWith("YEET text."));assert.ok(u.endsWith(`\n\n${consentNote()}`))}
  assert.equal(uiFor('yeet_overview',{...OV,terms:{accepted:false,mode:'page'}}),undefined);
  for(const bad of [null,undefined,'x'])assert.equal(uiFor('yeet_overview',bad),undefined);
  // Apart from the copy table: no layout note is inside a guidance string.

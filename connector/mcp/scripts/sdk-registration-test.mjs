@@ -50,10 +50,10 @@ test('tools/list: P0 and P1 tools with the contract annotations, scopes, cards a
   assert.deepEqual(by.execute_trade.annotations,{readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:true});
   const template=Object.fromEntries(tools.map(t=>[t.name,t._meta?.['openai/outputTemplate']]));
   // The overview shows the welcome card; no tool shows a device step; the terms and profile tools have no card.
-  assert.deepEqual(template,{yeet_overview:OVERVIEW_UI_URI,yeet_profile:undefined,yeet_set_username:undefined,yeet_terms:undefined,yeet_accept_terms:undefined,yeet_referral:'ui://yeet/referral-v1.html',apply_referral:undefined,yeet_home:HOME_UI_URI,yeet_coins:undefined,yeet_coin:'ui://yeet/coin-v1.html',yeet_propose:BASKET_UI_URI,yeet_quote:BASKET_UI_URI,execute_trade:undefined,trade_status:RECEIPT_UI_URI,yeet_portfolio:PORTFOLIO_UI_URI,yeet_fund:'ui://yeet/fund-v1.html',skeet_propose:BASKET_UI_URI,submit_trade_signature:undefined});
+  assert.deepEqual(template,{yeet_overview:OVERVIEW_UI_URI,yeet_profile:undefined,yeet_set_username:undefined,yeet_terms:'ui://yeet/terms-v1.html',yeet_accept_terms:undefined,yeet_referral:'ui://yeet/referral-v1.html',apply_referral:undefined,yeet_home:HOME_UI_URI,yeet_coins:undefined,yeet_coin:'ui://yeet/coin-v1.html',yeet_propose:BASKET_UI_URI,yeet_quote:BASKET_UI_URI,execute_trade:undefined,trade_status:RECEIPT_UI_URI,yeet_portfolio:PORTFOLIO_UI_URI,yeet_fund:'ui://yeet/fund-v1.html',skeet_propose:BASKET_UI_URI,submit_trade_signature:undefined});
   for(const t of tools)assert.equal(t._meta?.ui?.resourceUri,template[t.name]);
   const access=Object.fromEntries(tools.map(t=>[t.name,t._meta?.['openai/widgetAccessible']]));
-  assert.deepEqual(access,{yeet_overview:true,yeet_profile:false,yeet_set_username:false,yeet_terms:false,yeet_accept_terms:false,yeet_referral:true,apply_referral:true,yeet_home:true,yeet_coins:false,yeet_coin:false,yeet_propose:true,yeet_quote:true,execute_trade:true,submit_trade_signature:true,trade_status:true,yeet_portfolio:true,yeet_fund:true,skeet_propose:true});
+  assert.deepEqual(access,{yeet_overview:true,yeet_profile:false,yeet_set_username:false,yeet_terms:false,yeet_accept_terms:true,yeet_referral:true,apply_referral:true,yeet_home:true,yeet_coins:false,yeet_coin:false,yeet_propose:true,yeet_quote:true,execute_trade:true,submit_trade_signature:true,trade_status:true,yeet_portfolio:true,yeet_fund:true,skeet_propose:true});
   // execute_trade is card-only: hidden from the model, callable by the app.
   assert.equal(by.execute_trade._meta['openai/visibility'],'private');
   assert.deepEqual(by.execute_trade._meta.ui.visibility,['app']);
@@ -62,8 +62,8 @@ test('tools/list: P0 and P1 tools with the contract annotations, scopes, cards a
   assert.deepEqual(by.submit_trade_signature._meta.ui.visibility,['app']);
   // apply_referral is card-only too: the win code is applied from its card.
   assert.equal(by.apply_referral._meta['openai/visibility'],'private');assert.deepEqual(by.apply_referral._meta.ui.visibility,['app']);
-  // yeet_accept_terms is the model's own call and no card may make it.
-  assert.equal(by.yeet_accept_terms._meta['openai/widgetAccessible'],false);assert.deepEqual(by.yeet_accept_terms.annotations,{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false});
+  // yeet_accept_terms: the model's own call (the list path) and, since tools-9, the terms card's on the person's Accept and start.
+  assert.equal(by.yeet_accept_terms._meta['openai/widgetAccessible'],true);assert.deepEqual(by.yeet_accept_terms._meta.ui.visibility,['model','app']);assert.deepEqual(by.yeet_accept_terms.annotations,{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false});
   for(const n of LISTED.filter(n=>n!=='execute_trade'&&n!=='submit_trade_signature'&&n!=='apply_referral')){assert.equal(by[n]._meta['openai/visibility'],undefined,n);assert.deepEqual(by[n]._meta.ui.visibility,['model','app'],n)}
   // yeet_how_it_works is in the contract and registered only with YEET_HOW_IT_WORKS=1 (OPT_IN).
  assert.deepEqual(TOOLS.map(t=>t.name).sort(),[...LISTED,...P2,'yeet_how_it_works'].sort());

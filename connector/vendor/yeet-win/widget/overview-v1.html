@@ -524,7 +524,30 @@ h1{margin:0}
 @keyframes breathe{0%,100%{opacity:1}50%{opacity:.45}}
 @media (prefers-reduced-motion:reduce){.legs .row .stat,.legs .row .cv{animation:none}.settle i{transition:none}}
 .receipt .yc-h .meta{white-space:nowrap}
-</style></head><body class="gpt" data-theme="dark" data-view="overview">
+
+/* The terms card: Marlin's raised rows, one per statement. The whole row is the checkbox (48 px or more tall); Read is
+   its own 44 px target at the row's end. A ticked row takes the accent ring and its box pops in (transform only). */
+.yc.consent .yc-h{flex-wrap:wrap;row-gap:6px}
+.ct-intro{margin:-4px 2px 12px;font-size:15px;line-height:1.4;color:var(--yc-mute)}
+.ct-rows{display:grid;gap:6px}
+.ct-l{margin:16px 2px 6px;font:600 11.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--yc-mute)}
+.ct-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:stretch;border-radius:16px;background:var(--yc-raise);box-shadow:inset 0 0 0 1px var(--yc-line);transition:box-shadow .25s}
+.ct-row[data-on=true]{box-shadow:inset 0 0 0 1.5px var(--yc-accent)}
+.ct-tick{display:grid;grid-template-columns:24px minmax(0,1fr);gap:10px;align-items:start;min-height:48px;margin:0;padding:12px 2px 12px 12px;border:0;border-radius:16px;background:none;text-align:left;cursor:pointer;font:500 15px/1.38 var(--disp);color:var(--yc-fg);-webkit-tap-highlight-color:transparent}
+.ct-tick:disabled{cursor:default}
+.ct-tick:focus-visible{outline:2px solid var(--yc-accent);outline-offset:-2px}
+.ct-box{width:24px;height:24px;border-radius:8px;display:grid;place-items:center;box-shadow:inset 0 0 0 2px var(--yc-mute);transition:background .2s,box-shadow .2s}
+.ct-row[data-on=true] .ct-box{background:var(--yc-accent);box-shadow:none;color:var(--yc-bg)}
+.ct-box svg{width:14px;height:14px;animation:popin .3s var(--spring) both}
+.ct-read{display:flex;align-items:center;justify-content:center;min-width:56px;min-height:44px;padding:0 12px 0 6px;font-size:13px}
+.ct-prog{margin:16px 2px 6px;font:600 13px var(--mono);color:var(--yc-mute)}
+.yc.consent .ct-bar{margin:0 2px 4px}
+.yc.consent .yc-alert{margin:12px 0 0}
+.ct-done{margin:2px 0 8px;font:800 44px/1 var(--disp);font-stretch:75%;letter-spacing:-.01em}
+.ct-done .shim{--s1:var(--yc-fg);--s2:var(--volt)}
+.gpt[data-theme=light] .ct-done .shim{--s2:var(--ultra)}
+.yc.consent>.tx{display:inline-flex;align-items:center;min-height:44px;margin-top:6px}
+@media (prefers-reduced-motion:reduce){.ct-box svg{animation:none}}</style></head><body class="gpt" data-theme="dark" data-view="overview">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
 <symbol id="i-bolt" viewBox="0 0 20 28"><path d="M12.6 0 0 16.2h7.4L5.6 28 20 10.6h-7.6z" fill="currentColor"/></symbol>
 <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.4" fill="none" stroke="currentColor" stroke-width="2.8"/><circle cx="12" cy="12" r="3.3" fill="currentColor"/><path d="M12 .8v4M12 19.2v4M.8 12h4M19.2 12h4" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></symbol>
@@ -555,7 +578,7 @@ const WheelCard=(()=>({logic:{normalizeSpin:()=>null,normalizeLucky:()=>null}}))
 const Fair=null; // packages/fair/fair.mjs: the fair wheel's check, run in the card (views with the wheel; null elsewhere) // src/wheel-card.js: the daily wheel (views home and wheel) and the lucky wheel (view lucky)
 const SIGNING=(()=>null)(null);   // src/trade-signing.js over src/vendor/wallet-request.mjs
 const signerCfg={"app_id":null,"script":null,"page":null};  // {app_id,script,page}: build-time; a result's _meta['yeet/signer'] overrides
-const BUILD="e2225ad2bbdc3318f10ee81a99755df452df4f46";     // the yeet-win commit this template was built from; null for a local build
+const BUILD="63d54bcaa0bcc87c3d0be4db835b6b71ca766aab";     // the yeet-win commit this template was built from; null for a local build
 const APP={"manage_url":"https://chatgpt.com/plugins","refresh_label":"Refresh YEET in ChatGPT","refresh_steps":"open YEET there, select Refresh, then start a new chat"};         // {manage_url,refresh_label,refresh_steps}: where the person refreshes the app in ChatGPT
 const CONFIRM_KEY='yeet/confirm',SIGNER_KEY='yeet/signer',BUILD_KEY='yeet/build',FAILURE_KEY='yeet/failure';
 const POLL_MS=5000,POLL_MAX=360,SKEW_MS=2000,MAX_PARTS=99,AMOUNT_MAX=25,MORE_USDC='5';
@@ -774,6 +797,7 @@ async function freshen(p){
 }
 function show(data,meta){
  let kind=kindOf(data);
+ if(VIEW==='terms'?!kind&&termsOf(data):kind==='overview'&&pendingTerms(data))kind='terms';
  if(data?.error==='TERMS_REQUIRED')markTerms(data.terms);else if(kind&&kind!=='error')termsDue=null;
  if(kind==='basket'){
   const cur=current?.kind==='basket'?current.data:null;
@@ -1607,6 +1631,80 @@ function renderOverview(d){
  c.append(noGuarantee());
  return c;
 }
+WAITING.terms='Getting the YEET terms…';SAY.add('accepted');
+let tick=new Set(),tickV=null,consent=null;   // consent: null, 'busy', 'done' or 'error'
+const T_DATE=/^(\d{4})-(\d{2})-(\d{2})/;
+const dayOf=v=>{const m=T_DATE.exec(typeof v==='string'?v:'');return m?new Date(Date.UTC(+m[1],m[2]-1,+m[3])).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'}):null};
+function termsOf(d){const t=d?.terms;return t&&typeof t==='object'&&T_DATE.test(t.version??'')&&Array.isArray(t.statements)&&t.statements.length?t:null}
+function pendingTerms(d){const t=termsOf(d);return !!t&&t.accepted===false&&t.mode!=='page'}
+const acceptedKey=v=>`accepted:${v}`;
+function refusalBody(r){try{return JSON.parse(r.content.find(c=>c?.type==='text').text)}catch{return null}}
+async function acceptTerms(t){
+ if(consent==='busy'||!canCall())return;
+ consent='busy';note=null;render();
+ const confirmed=t.statements.filter(s=>tick.has(s.id)).map(s=>s.id),args={version:t.version,confirmed};
+ let r=null;
+ try{r=await callHost('yeet_accept_terms',BUILD?{...args,card_build:BUILD}:args,20000);takeBuild(r?._meta)}catch(e){if(unknownTool(e))markStale()}
+ const d=r&&r.isError!==true?unwrap(r).data:null;
+ if(termsOf(d)?.accepted===true){
+  consent='done';
+  const extra=t.statements.filter(s=>!s.required&&tick.has(s.id)).map(s=>s.text);
+  tell('accepted',acceptedKey(t.version),`The person ticked every required statement and accepted the YEET terms, version ${t.version}, in the card. Optional statements ticked: ${extra.length?extra.map(x=>`"${x}"`).join(', '):'none'}. The acceptance is recorded.`);
+  if(VIEW==='overview'&&d.overview&&typeof d.overview==='object'&&typeof d.overview.username==='string'){show(d.overview,null);note='You’re in.';render();return}
+  current={kind:'terms',data:d};render();return;
+ }
+ const v=r?.isError===true?refusalBody(r):null;
+ if(v?.error==='TERMS_REQUIRED'&&termsOf(v)&&v.terms.version!==t.version){consent=null;current={kind:'terms',data:{terms:v.terms}};note='The rules changed. Tick them again.';render();return}
+ consent='error';render();
+}
+function renderConsent(d){
+ const t=termsOf(d);if(!t)return renderError({error:'TEMPORARILY_UNAVAILABLE'});
+ if(tickV!==t.version){tickV=t.version;tick=new Set();if(consent!=='busy')consent=null}
+ const day=dayOf(t.version),c=card('consent','The yeet rules',day?`Version ${day}`:null);c.dataset.version=t.version;
+ const before=t.accepted===true&&consent!=='done'||t.accepted===false&&told.has(acceptedKey(t.version));
+ if(consent==='done'||before){
+  c.dataset.state=before?'accepted':'done';
+  if(!before){const h=mark(el('p','ct-done'),'done',true);h.append(el('span','shim','You’re in.'));c.append(h)}
+  const at=dayOf(t.accepted_at);
+  c.append(el('p','ct-intro',before?(at?`You accepted these rules on ${at}.`:'You accepted these rules.'):'Accepted. You can start now.'));
+  const g=el('div','ct-rows');for(const s of t.statements.filter(s=>s.required))g.append(consentRow(s,null));c.append(g);
+  if(note)c.append(noteLine(note));
+  c.append(noGuarantee());return c;
+ }
+ const req=t.statements.filter(s=>s.required),opt=t.statements.filter(s=>!s.required),busyNow=consent==='busy';
+ c.dataset.state=busyNow?'accepting':consent==='error'?'error':'open';
+ c.append(el('p','ct-intro','Tick each rule to start. Read opens the full text.'));
+ const prog=mark(el('p','ct-prog'),'progress');prog.setAttribute('aria-live','polite');
+ const bar=el('div','settle ct-bar'),fill=el('i');bar.append(fill);bar.setAttribute('aria-hidden','true');
+ const go=button(`yeet md wide run cta${busyNow?' signing':''}`,busyNow?'Accepting…':consent==='error'?'Try again':'Accept and start',()=>acceptTerms(t));
+ go.dataset.role=consent==='error'?'terms-retry':'terms-accept';if(busyNow)go.setAttribute('aria-busy','true');
+ const sync=()=>{
+  const n=req.filter(s=>tick.has(s.id)).length;prog.textContent=`${n} of ${req.length} ticked`;
+  fill.style.transform=`scaleX(${req.length?Math.max(.04,n/req.length):1})`;go.disabled=busyNow||n<req.length||!canCall();
+ };
+ const group=(items,label)=>{const g=el('div','ct-rows');g.setAttribute('role','group');g.setAttribute('aria-label',label);for(const s of items)g.append(consentRow(s,sync,busyNow));return g};
+ c.append(group(req,'Required'));
+ if(opt.length){c.append(el('p','ct-l','Optional'),group(opt,'Optional'))}
+ if(consent==='error')c.append(alertBox('That didn’t go through','Nothing was recorded. Your ticks are still here.','terms-error'));
+ c.append(prog,bar);sync();
+ const box=mark(el('div','acts-row'),'actions');box.append(go);c.append(box);
+ const page=t.page_url?fundUrl(t.page_url):null;
+ if(!canCall()&&page){const a=link('Open the YEET terms page',page);a.dataset.role='terms-link';c.append(a)}
+ if(note)c.append(noteLine(note));
+ c.append(noGuarantee());
+ return c;
+}
+/** One statement: the whole row toggles its checkbox; Read opens the statement's document. sync null: read only. */
+function consentRow(s,sync,off){
+ const r=el('div','ct-row'),b=el('button','ct-tick'),box=el('i','ct-box');r.dataset.id=s.id;
+ const set=on=>{r.dataset.on=String(on);b.setAttribute('aria-checked',String(on));box.replaceChildren(...(on?[use('i-check')]:[]))};
+ b.type='button';b.setAttribute('role','checkbox');b.append(box,el('span','ct-tx',s.text));
+ if(sync){set(tick.has(s.id));b.disabled=!!off;b.onclick=()=>{if(tick.has(s.id))tick.delete(s.id);else tick.add(s.id);set(tick.has(s.id));if(consent==='error'){consent=null;render();return}sync()}}
+ else{set(true);b.disabled=true}
+ r.append(b);
+ const u=fundUrl(s.url);if(u){const a=link('Read',u);a.classList.add('ct-read');a.setAttribute('aria-label',`Read: ${s.text}`);r.append(a)}
+ return r;
+}
 /** The daily check-in card: the wheel card alone (XP, streak, stamps, the spin). */
 function renderCheckin(d){
  const xp=d.checkin;
@@ -1659,6 +1757,7 @@ function render(){
  let node;const kind=!current||current.kind==='waiting'?'waiting':current.kind;
  if(kind==='waiting')node=el('div','yc waiting',WAITING[VIEW]??'Loading…');
  else try{
+  if(current.kind==='terms')node=renderConsent(current.data);else
   node=current.kind==='overview'?renderOverview(current.data):current.kind==='coin'?renderCoin(current.data):current.kind==='fund'?renderFund(current.data):current.kind==='referral'?renderReferral(current.data):current.kind==='basket'?renderBasket(current.data):current.kind==='receipt'?renderReceipt(current.data):current.kind==='home'?renderHome(current.data)
    :current.kind==='portfolio'?renderPortfolio(current.data):current.kind==='leaderboard'?renderLeaderboard(current.data):current.kind==='spin'?renderSpin(current.data)
    :current.kind==='lucky'?renderLucky(current.data):current.kind==='checkin'?renderCheckin(current.data):renderError(current.data,current.proposal_id);

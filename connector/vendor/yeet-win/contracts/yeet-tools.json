@@ -1544,7 +1544,7 @@
             "chat",
             "page"
           ],
-          "description": "chat: the assistant shows the statements and records the acceptance with yeet_accept_terms. page: the person accepts on page_url."
+          "description": "chat: accepted in the chat with yeet_accept_terms, from the terms card or from the assistant. page: the person accepts on page_url."
         },
         "page_url": {
           "$ref": "#/$defs/https_url",
@@ -2119,7 +2119,7 @@
           "app_version": {
             "type": "string",
             "enum": [
-              "tools-8"
+              "tools-9"
             ],
             "description": "The tools version this tool list was built for."
           },
@@ -2189,7 +2189,7 @@
         "openWorldHint": false
       },
       "scope": "yeet:read",
-      "card": null,
+      "card": "terms",
       "visible": true,
       "widgetAccessible": false,
       "errors": [
@@ -2223,6 +2223,9 @@
               "pattern": "^[a-z0-9_]{1,40}$"
             },
             "description": "Ids of the statements the person confirmed."
+          },
+          "card_build": {
+            "$ref": "#/$defs/card_build"
           }
         },
         "required": [
@@ -2267,7 +2270,7 @@
       "scope": "yeet:write",
       "card": null,
       "visible": true,
-      "widgetAccessible": false,
+      "widgetAccessible": true,
       "errors": [
         "INVALID_ARGUMENT",
         "REAUTH_REQUIRED",
@@ -4588,6 +4591,11 @@
       "uri": "ui://yeet/coin-v1.html",
       "title": "YEET coin",
       "description": "One coin: its logo, ticker and name, the price, a small chart of the last 24 hours, the change over 1 hour, 6 hours and 24 hours, what the person holds of it, and one YEET button that asks the chat for a basket of it."
+    },
+    "terms": {
+      "uri": "ui://yeet/terms-v1.html",
+      "title": "The yeet rules",
+      "description": "The YEET terms: one checkbox per statement with its link, and Accept and start."
     }
   },
   "x-yeet-meta": {
@@ -4603,15 +4611,16 @@
     "manage_url": "https://chatgpt.com/plugins",
     "refresh_label": "Refresh YEET in ChatGPT",
     "refresh_steps": "open YEET there, select Refresh, then start a new chat",
-    "tools_version": "tools-8",
+    "tools_version": "tools-9",
     "tools_versions_past": [
       "tools-3",
       "tools-4",
       "tools-5",
       "tools-6",
-      "tools-7"
+      "tools-7",
+      "tools-8"
     ],
-    "tools_hash": "a80599b6695e4fd2649b90af5f8bdac75171aaacdd954e65da504691c22c9a18"
+    "tools_hash": "1eaf725b4ed7dd5d343d1633b5378d6ded953aecbff16feeb88323c6dc22b612"
   },
   "x-yeet-spin": {
     "base_xp": 5,

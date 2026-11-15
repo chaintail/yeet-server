@@ -1,10 +1,10 @@
 repo: chaintail/yeet-win
-branch: vendor/terms-fair (local merge, not in chaintail/yeet-win: feat/fair-wheel d601ea5 merged into feat/terms-xp 9a0fd90 as 71fd2c3, then e2225ad keeps the wheel card code to the wheel views; recipe in connector/docs/SUBMIT-BUILD.md)
-commit: e2225ad2bbdc3318f10ee81a99755df452df4f46
-built: router (tsc 7.0.2), widget (node build.mjs), signer (scripts/build-signer.mjs, esbuild 0.28.2, @privy-io/js-sdk-core 0.79.5, sha256 a4affb0c76ce)
+branch: vendor/terms-card (local, not in chaintail/yeet-win: yeet-win feat/terms-card 586cc24 cherry-picked onto vendor/terms-fair e2225ad as 63d54bc; recipe in connector/docs/SUBMIT-BUILD.md "Vendored yeet-win")
+commit: 63d54bcaa0bcc87c3d0be4db835b6b71ca766aab
+built: widget (node build.mjs at 63d54bc); router and signer unchanged from e2225ad: router (tsc 7.0.2), signer (scripts/build-signer.mjs, esbuild 0.28.2, @privy-io/js-sdk-core 0.79.5, sha256 a4affb0c76ce)
 files:
   contracts/yeet-tools.json
-  widget/basket-v1.html coin-v1.html fund-v1.html home-v1.html leaderboard-v1.html lucky-v1.html overview-v1.html portfolio-v1.html receipt-v1.html referral-v1.html templates.json wheel-v1.html yeet-signer.js 
+  widget/basket-v1.html coin-v1.html fund-v1.html home-v1.html leaderboard-v1.html lucky-v1.html overview-v1.html portfolio-v1.html receipt-v1.html referral-v1.html templates.json terms-v1.html wheel-v1.html yeet-signer.js 
   router/dist/src/**
   router/test/fixtures/*.json
-edited: contracts/yeet-tools.json descriptions neutralised to the yeet-win int/submission text (byte-identical to its contracts/yeet-tools.json at bdd334b); ours are in connector/mcp/descriptions.private.json, applied at load
+edited: contracts/yeet-tools.json descriptions neutralised to the yeet-win int/submission text (byte-identical to its contracts/yeet-tools.json at bdd334b); ours are in connector/mcp/descriptions.private.json, applied at load; then the terms card shape change of 586cc24 applied to it (x-yeet-cards.terms, yeet_terms.card, yeet_accept_terms widgetAccessible and card_build, $defs.terms.mode description, tools-9 and tools_hash 1eaf725b…)

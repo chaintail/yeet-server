@@ -505,7 +505,7 @@ test('terms in the chat, end to end: gated until accepted, the overview answers,
   ['yeet_propose',{request_id:'11111111-1111-4111-8111-111111111111',amount_usdc:'20',legs:[{symbol:'WIF',parts:10}]}],['execute_trade',{proposal_id:'p_abcdefghij0123456789',revision:1,confirm:'a'.repeat(43)}]]){
   const b=refused(await call(name,args));
   assert.equal(b.error,'TERMS_REQUIRED',name+': '+JSON.stringify(b).slice(0,160));assert.equal(b.terms.accepted,false);assert.equal(b.terms.version,TERMS_VERSION);
-  assert.deepEqual(b.terms.statements.map(s=>s.id),STATEMENTS.map(s=>s.id));assert.match(b.guidance,/YEET/);assert.doesNotMatch(b.guidance,/all of them/);assert.doesNotMatch(b.guidance,/unlock|device|6-digit/i);
+  assert.deepEqual(b.terms.statements.map(s=>s.id),STATEMENTS.map(s=>s.id));assert.match(b.guidance,/YEET/);assert.match(b.guidance,/YEET/);assert.doesNotMatch(b.guidance,/all of them/);assert.doesNotMatch(b.guidance,/unlock|device|6-digit/i);
  }
  // The overview and the terms themselves answer.
  // (This fixture account has no wallets, so the overview itself answers WALLET_NOT_READY: the point here is that the
