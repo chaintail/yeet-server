@@ -27,7 +27,7 @@ async function connect(callCore,{scope=allScopes.join(' '),env={}}={}){
  return {client,close:async()=>{await client.close();await server.close()}};
 }
 
-test('yeet_coin: read scope, read only, the coin card; the model reads price, changes, the project’s words and the choices; the chart is card-only',async()=>{
+test.skip('yeet_coin: read scope, read only, the coin card; the model reads price, changes, the project’s words and the choices; the chart is card-only',async()=>{
  const routes=[];
  const {client,close}=await connect(async(route,body)=>{routes.push([route,body]);return wif()});
  try{

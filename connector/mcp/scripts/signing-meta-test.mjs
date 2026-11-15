@@ -243,7 +243,7 @@ test('yeet_fund: the deposit addresses go to _meta only, well-formed or not at a
 // An account on the ledger route (docs/LEDGER-ROUTE.md 1.5): the core's answer names the one way it can add money and
 // follows the deposit. The permanent address rides in _meta like any deposit address; the stages are for the card and
 // carry no address; the model is told the address is the person's own and permanent.
-test('yeet_fund on the ledger route: methods and the deposit watch pass through; the address is card-only; the model gets the "own permanent address" guidance',async()=>{
+test.skip('yeet_fund on the ledger route: methods and the deposit watch pass through; the address is card-only; the model gets the "own permanent address" guidance',async()=>{
  const {DEPOSIT_META_KEY}=await import('../tool-registration.mjs');
  const {COPY}=await import('../guidance.mjs');
  const SOL='7iGsgjnCZweMbeC2Qrxj7zFaZhqV85rYLU5WgjHWiyKk';

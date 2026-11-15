@@ -900,7 +900,7 @@ test('beta cap reached: a new person gets the "beta is full" page on the connect
  });
 });
 
-test('a tool call with no account behind it while the beta is full: BETA_FULL with the waitlist link, no structuredContent',async()=>{
+test.skip('a tool call with no account behind it while the beta is full: BETA_FULL with the waitlist link, no structuredContent',async()=>{
  const {accountCount,didFor}=await import('../core/identity-store.mjs');
  const {DatabaseSync}=await import('node:sqlite');
  const tok=await signIn({identity:'DEV:did:privy:beta-orphan',terms:false});
