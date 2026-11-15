@@ -86,9 +86,10 @@ export const staleness=createStaleness();
 export const staleKey=(token,meta)=>`${token?.sub??token?.subject??'anon'}|${typeof meta?.['openai/session']==='string'?meta['openai/session'].slice(0,200):''}`;
 /** Where the server sends a person to refresh YEET (owner, 2026-11-14): the Personal tab of the contract's apps page
  * (x-yeet-app.manage_url), where a connected app like YEET is listed. A value only: every field that carries it is an
- * https_url, so no schema, tools version or card changes. The vendored cards keep the contract's own link. */
+ * https_url, so no schema, tools version or card changes. The vendored cards keep the contract's own link; since
+ * yeet-win 688d69b the contract's manage_url is this same Personal tab. */
 export const REFRESH_URL='https://chatgpt.com/plugins?directoryTab=personal';
-if(!REFRESH_URL.startsWith(`${APP.manage_url}?`))throw Error('refresh: REFRESH_URL is no longer on x-yeet-app.manage_url');
+if(REFRESH_URL!==APP.manage_url&&!REFRESH_URL.startsWith(`${APP.manage_url}?`))throw Error('refresh: REFRESH_URL is no longer on x-yeet-app.manage_url');
 /** yeet_overview.app_refresh, and APP_OUTDATED's. */
 export const appRefresh=()=>({url:REFRESH_URL,steps:APP.refresh_steps});
 /** `refresh` first, then as much of the result's own guidance as the contract's 500 characters hold (whole sentences). */

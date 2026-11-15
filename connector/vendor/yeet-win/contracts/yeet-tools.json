@@ -4608,7 +4608,7 @@
     "deposit": "yeet/deposit"
   },
   "x-yeet-app": {
-    "manage_url": "https://chatgpt.com/plugins",
+    "manage_url": "https://chatgpt.com/plugins?directoryTab=personal",
     "refresh_label": "Refresh YEET in ChatGPT",
     "refresh_steps": "open YEET there, select Refresh, then start a new chat",
     "tools_version": "tools-9",

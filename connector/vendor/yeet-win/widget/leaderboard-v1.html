@@ -119,12 +119,7 @@
 .num-pulse { display: inline-block; animation: numPulse .5s var(--ease-out); }
 @keyframes numPulse { 0% { transform: scale(var(--pulse, 1.08)); filter: brightness(1.5); } 100% { transform: none; filter: none; } }
 @media (prefers-reduced-motion: reduce) { .num-pulse { animation: none; } }
-/* YEET cards: the ChatGPT components of the round-3 Marlin entry (yeet-brand-entries/yeet-brand3-marlin, "In ChatGPT"),
-   ported verbatim: tokens, sizes, spacing and colours are Marlin's. Changes, all for scroll performance inside the chat
-   (docs: scroll-jank review 2026-11-13): the border run, the glow, the sheen and the shimmer play once on entrance or on
-   a press instead of forever; the trade wire moves by transform; no @property loop, no backdrop-filter.
-   The theme follows the host: body.gpt[data-theme] is set from window.openai.theme or the host context of the apps bridge.
-   Fonts are Bricolage Grotesque and Geist Mono, subset and inlined (src/fonts.css); nothing loads from the network. */
+
 @property --a{syntax:'<angle>';inherits:false;initial-value:0deg}
 :root{
   --night:#09071C; --night-2:#131032; --night-3:#1D1947; --night-4:#2A2560;
@@ -149,10 +144,10 @@ p{margin:0}
 ul,ol{list-style:none;margin:0;padding:0}
 .sr{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 [hidden]{display:none!important}
-/* The card's frame in the chat: the host's own background around Marlin's card. */
+
 main{position:relative;padding:calc(2px + var(--host-top,0px)) calc(2px + var(--host-right,0px)) calc(20px + var(--host-bottom,0px)) calc(2px + var(--host-left,0px))}
 
-/* ---------- motion primitives (Marlin) ---------- */
+
 @keyframes arrive{
   0%{opacity:0;transform:translate3d(var(--ax),var(--ay),0);animation-timing-function:cubic-bezier(.12,.8,.3,1)}
   56%{opacity:1;transform:translate3d(0,var(--ay),0);animation-timing-function:cubic-bezier(.3,1.5,.5,1)}
@@ -185,10 +180,10 @@ main{position:relative;padding:calc(2px + var(--host-top,0px)) calc(2px + var(--
 .winding{animation:wind .14s linear infinite alternate}
 .land{animation:land .75s var(--ease-out)}
 
-/* Shimmer on text: one pass on entrance. */
+
 .shim{background:linear-gradient(100deg,var(--s1,var(--fog)) 0 40%,var(--s2,#fff) 50%,var(--s1,var(--fog)) 60% 100%);background-size:300% 100%;background-position:0% 0;-webkit-background-clip:text;background-clip:text;color:transparent;animation:shim var(--sd,1.6s) ease-in-out .5s both}
 
-/* border run: a bright arc that travels the edge, once on entrance and once on a press */
+
 .run{position:relative}
 .run::before{content:"";position:absolute;inset:0;border-radius:inherit;padding:var(--rw,2.5px);pointer-events:none;z-index:2;opacity:0;
   background:conic-gradient(from var(--a),transparent 0 200deg,var(--r1b,#fff) 300deg,var(--r2,var(--volt)) 336deg,transparent 360deg);
@@ -197,7 +192,7 @@ main{position:relative;padding:calc(2px + var(--host-top,0px)) calc(2px + var(--
 .in .run::before,.ar.in.run::before,.run.again::before{animation:spinA var(--rs,2.6s) linear .9s 1,runOnce var(--rs,2.6s) linear .9s 1}
 .run.again::before{animation-delay:0s}
 
-/* ---------- buttons (Marlin) ---------- */
+
 .btn{--fs:20px;position:relative;display:inline-flex;align-items:center;justify-content:center;gap:.4em;height:2.15em;padding:0 .85em;border:0;border-radius:.52em;cursor:pointer;
   font-family:var(--disp);font-weight:800;font-stretch:75%;font-size:var(--fs);line-height:1;letter-spacing:.03em;text-decoration:none;isolation:isolate;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;white-space:nowrap;
   transition:transform .3s var(--spring),filter .2s,opacity .2s}
@@ -214,7 +209,7 @@ main{position:relative;padding:calc(2px + var(--host-top,0px)) calc(2px + var(--
 .skeet{background:var(--ultra);color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.28),inset 0 -.14em 0 rgba(0,0,0,.22),0 .5em 1.6em -.5em rgba(106,72,255,.6);--r1b:#fff;--r2:var(--volt);--rw:3px}
 .in .skeet,.ar.in .skeet{animation:glowU 2.8s ease-in-out .4s 1}
 .skeet::after{mix-blend-mode:normal;background-image:linear-gradient(104deg,transparent 38%,rgba(255,255,255,.38) 49%,transparent 60%)}
-/* The one call to action on a card keeps Marlin's beat and its icon's flick (transform and opacity only). */
+
 .btn.cta .bl{animation:beat 2.6s ease-in-out infinite}
 .btn.cta.yeet .ic{animation:flick 3.9s infinite}
 .btn.cta.skeet .ic{animation:aim 3.9s 1.2s infinite}
@@ -237,16 +232,16 @@ main{position:relative;padding:calc(2px + var(--host-top,0px)) calc(2px + var(--
 .gpt[data-theme=light] .yeet{box-shadow:inset 0 0 0 1px rgba(0,0,0,.06),inset 0 -.14em 0 rgba(0,0,0,.12),0 .4em 1em -.5em rgba(90,100,0,.45)}
 .gpt[data-theme=light] .in .yeet,.gpt[data-theme=light] .ar.in .yeet{animation:glowYL 2.8s ease-in-out .4s 1}
 @keyframes glowYL{0%,100%{box-shadow:inset 0 0 0 1px rgba(0,0,0,.06),inset 0 -.14em 0 rgba(0,0,0,.12),0 .4em 1em -.5em rgba(90,100,0,.45)}50%{box-shadow:inset 0 0 0 1px rgba(0,0,0,.06),inset 0 -.14em 0 rgba(0,0,0,.12),0 .5em 1.4em -.4em rgba(106,72,255,.45)}}
-/* A button that can't act yet: still, dimmed. */
+
 .btn[disabled]:not(.spent):not(.okb):not(.charging):not(.signing){opacity:.42;filter:saturate(.55)}
 .btn[disabled] .bl,.btn[disabled]:not(.charging) .ic{animation:none}
-/* The wallet asks for the user's confirmation: the button holds, the bolt waits. */
+
 .btn.signing{background:var(--night);color:var(--volt);box-shadow:inset 0 0 0 1.5px var(--volt);animation:none}
 .btn.signing::after{display:none}
 .btn.signing .ic{animation:flick 1.3s infinite}
 .gpt[data-theme=light] .btn.signing,.gpt[data-theme=light] .btn.spent{background:var(--yc-raise);color:var(--ultra);box-shadow:inset 0 0 0 1.5px var(--ultra)}
 
-/* ---------- CHAT VIEW (Marlin): the host and card tokens, dark first ---------- */
+
 .gpt{--g-bg:#212121;--g-fg:#ECECEC;--g-mute:#A6A6A6;--g-bub:#303030;--g-line:rgba(255,255,255,.1);--g-side:#171717;
   --yc-bg:#100D29;--yc-fg:#F4F2FF;--yc-mute:#9C98C8;--yc-line:rgba(255,255,255,.08);--yc-raise:#1A1640;--yc-btn:#252055;--yc-accent:var(--volt);--yc-ultra:var(--ultra-2);
   background:var(--g-bg);color:var(--g-fg);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;transition:background .4s,color .4s}
@@ -261,7 +256,7 @@ html[data-theme=light]{background:#fff}
 .yc-h .meta{margin-left:auto;font:600 11.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--yc-mute);text-align:right}
 .yc-sub{margin:-6px 0 14px;font-size:15px;color:var(--yc-mute)}
 .amts{display:flex;gap:6px;margin-bottom:12px}
-/* Four in one row at any card width from 320 px: every chip may shrink (min-width 0), and the row gets tighter when narrow. */
+
 .amts>*{min-width:0;flex:1 1 0}
 .amts button{flex:1;height:38px;border:0;border-radius:12px;background:var(--yc-raise);color:var(--yc-fg);font:700 15px var(--mono);cursor:pointer;box-shadow:inset 0 0 0 1px var(--yc-line);transition:background .25s,color .25s,transform .3s var(--spring)}
 .amts button[aria-pressed=true]{background:var(--yc-fg);color:var(--yc-bg);transform:scale(1.04)}
@@ -279,14 +274,25 @@ html[data-theme=light]{background:#fff}
 .stp button:active{transform:scale(.86)}
 .stp button svg{width:14px;height:14px}
 .stp .v{width:26px;text-align:center;font:800 16px var(--mono)}
-.bsk-foot{display:flex;justify-content:space-between;align-items:baseline;margin:14px 2px 12px;font:600 13px var(--mono);color:var(--yc-mute)}
-.bsk-foot b{color:var(--yc-fg);font-size:15px}
+
+.spend{display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin:2px 2px 14px}
+.spend .lbl,.rows-h{font:600 11.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--yc-mute)}
+.spend b{font-weight:800;font-stretch:75%;font-size:56px;line-height:.9;letter-spacing:-.01em}
+.rows-h{display:flex;justify-content:space-between;margin:0 4px 8px}
+.row .sub .cn{color:var(--yc-mute);font:600 13px var(--disp);overflow:hidden;text-overflow:ellipsis}
+.yc.basket .rows{margin-bottom:14px}
+.row .est .min{display:block;margin-top:3px;font:600 11.5px var(--mono);color:var(--yc-mute)}
+.yc.basket.locked .row .est b{font-size:16px}
+.fine.qline{margin:0 4px 12px;font:600 12px var(--mono);color:var(--yc-mute)}.fine.qline.high{color:var(--rose)}
+.yc.basket .tx.change{display:block;margin:12px auto 0;padding:4px 8px;border:0;background:none;cursor:pointer;color:var(--yc-mute)}
+.yc.basket>.btn.cta{margin-top:2px}
+.yc.basket .fine.risk{margin-top:14px}
 .route{display:grid;grid-template-columns:auto 1fr auto 1fr auto;align-items:center;gap:6px;padding:14px 12px;border-radius:18px;background:var(--yc-raise);margin-bottom:12px;box-shadow:inset 0 0 0 1px var(--yc-line)}
 .node{display:grid;justify-items:center;gap:6px;font:600 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--yc-mute);text-align:center}
 .node i{width:40px;height:40px;border-radius:50%;display:grid;place-items:center}
 .node i svg{width:100%;height:100%}
 .node b{color:var(--yc-fg);font-size:12px}
-/* The wire: Marlin's round dashes; while a trade runs they travel by transform, not by stroke offset. */
+
 .wire{height:10px;overflow:hidden;position:relative}
 .wire i{position:absolute;left:-24px;right:0;top:3.5px;height:3px;border-radius:2px;background:radial-gradient(circle at 1.5px 1.5px,var(--yc-accent) 1.5px,transparent 1.6px) 0 0/12px 3px repeat-x}
 .route[data-state=run] .wire i{animation:wireRun .7s linear infinite}
@@ -356,11 +362,11 @@ html[data-theme=light]{background:#fff}
 .lb .mv{font:700 11px var(--mono);color:var(--mint);margin-left:6px}
 .fine{margin:12px 2px 0;font-size:12.5px;color:var(--yc-mute);display:flex;gap:6px;align-items:center}
 .fine svg{width:14px;height:14px}
-.fine.no-guarantee{font-size:11px;margin-top:8px;opacity:.85}
+.fine.no-guarantee{font-size:11px;margin-top:8px;opacity:.85;justify-content:flex-end;text-align:right}
 .ok-line{display:flex;align-items:center;gap:8px;margin-top:10px;font:700 14px var(--mono);color:var(--mint)}
 .ok-line svg{width:16px;height:16px}
 
-/* ---------- adapter: what the real cards carry beyond Marlin's components, in Marlin's own parts ---------- */
+
 .ar.shown{opacity:1}
 .outgoing{position:absolute;left:calc(2px + var(--host-left,0px));right:calc(2px + var(--host-right,0px));top:calc(2px + var(--host-top,0px));pointer-events:none;z-index:2}
 h1{margin:0}
@@ -375,7 +381,7 @@ h1{margin:0}
 .node i.cvi{overflow:hidden}
 .node i.cvi img{width:100%;height:100%;border-radius:50%;display:block}
 .lb .av.ltr{border-radius:50%;display:grid;place-items:center;color:var(--night);font:800 16px var(--disp);font-stretch:75%}
-/* The amount you type: the fourth chip of the amount row. */
+
 .amts label{flex:1;display:flex;align-items:center;justify-content:center;gap:2px;height:38px;border-radius:12px;background:var(--yc-raise);color:var(--yc-fg);font:700 15px var(--mono);box-shadow:inset 0 0 0 1px var(--yc-line);transition:background .25s,color .25s,transform .3s var(--spring);cursor:text}
 .amts label input{all:unset;width:3.2em;min-width:0;text-align:left;font:700 15px var(--mono);color:inherit;-moz-appearance:textfield}
 .amts label input::-webkit-outer-spin-button,.amts label input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
@@ -385,7 +391,7 @@ h1{margin:0}
 .amts label.on{background:var(--yc-fg);color:var(--yc-bg);transform:scale(1.04)}
 .amts label:focus-within{box-shadow:inset 0 0 0 2px var(--yc-accent)}
 .amts button:disabled,.amts label:has(input:disabled){opacity:.5;cursor:default}
-/* Narrow cards (320 to 400 px): the fourth chip ("$ Other") keeps its words inside itself and inside the card. */
+
 @media (max-width:400px){.amts{gap:4px}.amts button,.amts label,.amts label input{font-size:14px}.amts label{justify-content:flex-start;padding-left:8px;overflow:hidden}.amts label input{width:100%;flex:1}.amts label .hint{left:19px}}
 @media (max-width:345px){.amts button,.amts label,.amts label input{font-size:13px}.amts label{padding-left:6px}.amts label .hint{left:16px}}
 .stp button:disabled{opacity:.35;cursor:default}
@@ -418,7 +424,7 @@ h1{margin:0}
 .home-logo path{fill:currentColor}
 .mention{color:var(--yc-ultra);font-weight:700}
 
-/* ---------- XP and streak: the cards' own streak (flames and the dotted day ahead), on Marlin's surfaces ---------- */
+
 .xpbox{display:flex;flex-direction:column;gap:10px;background:var(--yc-raise);box-shadow:inset 0 0 0 1px var(--yc-line);border-radius:18px;padding:12px;margin:0 0 12px}
 .xpbox .top{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
 .xpnum{font:800 26px/1 var(--mono);letter-spacing:-.03em;color:var(--yc-accent)}
@@ -437,9 +443,9 @@ h1{margin:0}
 @keyframes today{0%{opacity:.6;transform:scale(.85)}70%,100%{opacity:0;transform:scale(1.1)}}
 .streak{font:600 12.5px var(--mono);color:var(--yc-mute)}
 
-/* ---------- daily spin: Marlin's wheel card around the cards' own wheel (src/wheel.js); one size, no zoom ---------- */
+
 .yc.wheel-card{overflow:hidden;contain:paint}
-/* wheel.js keeps room for its end zoom under the wheel; with the zoom off that strip (about a tenth) is taken back. */
+
 .spin-wheel{position:relative;width:100%;max-width:290px;aspect-ratio:1;justify-self:center;margin:0 auto -28px}
 .spin-wheel .wheel-stage{--wheel-zoom:1;--bulb:#FFF6C4}
 .spin-wheel .wheel-stage.tense .wheel-wrap{transform:none}
@@ -452,14 +458,14 @@ h1{margin:0}
 .spin-wheel .wheel-stage.st-won .wheel-hub{background:radial-gradient(circle at 50% 35%,color-mix(in srgb,var(--win) 75%,#fff) 0%,var(--win) 55%,color-mix(in srgb,var(--win) 55%,#000) 100%)}
 .spin-won{font:800 44px/1 var(--mono);letter-spacing:-.04em;color:var(--yc-accent);text-align:center}
 
-/* ---------- share: the picture, then save or share ---------- */
+
 .share-panel{display:grid;gap:8px;margin-top:12px;padding:8px;border-radius:18px;background:var(--yc-raise);box-shadow:inset 0 0 0 1px var(--yc-line)}
 .share-panel canvas{display:block;width:100%;height:auto;aspect-ratio:1200/630;border-radius:12px}
 
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
 }
-/* Signing: the inline email-code sign-in, the trade clock, each coin's state (motion on transform and opacity only). */
+
 
 .btn.hold{touch-action:manipulation;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 .btn .hold-fill{position:absolute;inset:0;border-radius:inherit;background:rgba(255,255,255,.6);mix-blend-mode:overlay;transform-origin:0 50%;transform:scaleX(0);z-index:2;pointer-events:none;transition:transform .2s ease-out}
@@ -468,8 +474,6 @@ h1{margin:0}
 .hold-hint{margin:8px 0 0;text-align:center;font:600 12.5px var(--mono);color:var(--yc-mute)}
 .hold-hint.nudge{color:var(--yc-accent);animation:holdnudge .45s var(--spring,ease-out)}
 .hold-hint.warn{color:var(--rose)}
-/* The trade button when the trade finishes on the YEET page: a tap, with a small lock after the mark. */
-.btn .ic.lock,.btn.cta.yeet .ic.lock,.btn.cta.skeet .ic.lock{width:.5em;height:.58em;margin-left:-.1em;opacity:.85;animation:none}
 @keyframes holdnudge{0%{transform:scale(1)}40%{transform:scale(1.08)}100%{transform:scale(1)}}
 .signin-label{display:block;margin:10px 0 4px;font-size:12.5px;font-weight:600;color:var(--yc-mute)}.ov-lead{margin:6px 0 10px;font-size:14.5px;line-height:1.4}
 
@@ -484,6 +488,7 @@ h1{margin:0}
 .settle{height:4px;margin:2px 0 14px;border-radius:4px;background:var(--yc-line);overflow:hidden}
 .settle i{display:block;height:100%;background:var(--yc-accent);transform-origin:0 50%;transform:scaleX(.04);transition:transform 1s linear}
 .settle-say{margin:10px 0 0}.pagebox{background:var(--yc-raise);box-shadow:inset 0 0 0 1px var(--yc-line)}.pagebox .tx{justify-self:start;margin-top:6px}.pagebox .acts-row{margin-top:8px;justify-content:flex-start}.pagebox .acts-row .btn{flex:0 0 auto}
+
 .legs .row[data-state=sign] .stat,.legs .row[data-state=send] .stat,.legs .row[data-state=swap] .stat{animation:breathe 1.6s ease-in-out infinite}
 .legs .stat{display:inline-block}.legs .stat.flip{animation:popin .45s var(--spring) both}
 @keyframes breathe{0%,100%{opacity:1}50%{opacity:.45}}
@@ -494,7 +499,6 @@ h1{margin:0}
 <symbol id="i-bolt" viewBox="0 0 20 28"><path d="M12.6 0 0 16.2h7.4L5.6 28 20 10.6h-7.6z" fill="currentColor"/></symbol>
 <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.4" fill="none" stroke="currentColor" stroke-width="2.8"/><circle cx="12" cy="12" r="3.3" fill="currentColor"/><path d="M12 .8v4M12 19.2v4M.8 12h4M19.2 12h4" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></symbol>
 <symbol id="i-flame" viewBox="0 0 24 24"><path d="M12.4 1.5c.6 3.6 5.6 6 5.6 11.8A6 6 0 0 1 6 13.6c0-2.9 1.5-4.6 2.7-5.7.1 1.9.9 3.1 2 3.6-.5-3.6.4-7.2 1.7-10z" fill="currentColor"/></symbol>
-<symbol id="i-lock" viewBox="0 0 16 18"><path d="M4.6 8.2V5.6a3.4 3.4 0 0 1 6.8 0v2.6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><rect x="2" y="8" width="12" height="9" rx="2.4" fill="currentColor"/></symbol>
 <symbol id="i-check" viewBox="0 0 16 16"><path d="m3 8.4 3.2 3.2L13 4.6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
 <symbol id="i-send" viewBox="0 0 20 20"><path d="M10 16.5v-13M4.5 9 10 3.5 15.5 9" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
 <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 2.5v11M2.5 8h11" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
@@ -516,12 +520,12 @@ const LOGOS={"BOME":"data:image/webp;base64,UklGRvYFAABXRUJQVlA4WAoAAAAQAAAAUwAA
 const SPIN={"base_xp":5,"streak_bonus_xp":25,"streak_draw":true,"parts":"xp_won = base_xp + draw_xp + streak_xp; draw_xp is one bonus_xp value; streak_xp is 0, or on a streak milestone streak_bonus_xp plus a second, independent bonus_xp draw","bonus_xp":[0,2,5,7,9,12,15,19,24,31,40],"bonus_weights":[23,21,15,10,8,6,5,4,2,2,4],"fair_version":"yeet-fair-1"};
 const TYPE=null;       // display outlines: Archivo Italic, wide and narrow (brand/tools/outline.py)
 const BRAND={"logo":{"box":"-40 180 4256 820","d":"M84 990Q45 990,16 984Q-12 979,-33 972L-13 849L82 849Q119 849,143 840Q167 830,182 814Q197 798,208 780L47 252L286 252L333 485Q336 500,340 522Q343 544,347 566Q351 588,353 605L363 605Q370 592,379 576Q388 559,397 542Q406 525,414 510Q423 494,429 483L556 252L797 252L479 736Q446 786,410 832Q374 877,329 913Q284 949,224 970Q164 990,84 990ZM1112 792Q1006 792,927 768Q848 744,804 694Q761 643,761 565Q761 500,781 448Q801 396,837 357Q874 317,925 292Q976 266,1038 253Q1100 240,1169 240Q1276 240,1352 264Q1429 287,1470 335Q1511 383,1511 459Q1511 472,1509 493Q1507 514,1499 554L994 554Q993 559,993 564Q993 568,993 573Q993 604,1008 624Q1022 645,1050 655Q1079 665,1121 665Q1151 665,1176 659Q1200 653,1218 642Q1235 632,1246 619Q1256 606,1259 592L1491 592Q1483 642,1450 680Q1416 717,1364 742Q1312 767,1248 780Q1183 792,1112 792ZM1013 452L1277 452Q1278 449,1278 446Q1278 443,1278 440Q1278 420,1266 404Q1253 387,1230 377Q1206 367,1172 367Q1128 367,1096 378Q1063 390,1042 410Q1022 429,1013 452ZM1903 792Q1797 792,1718 768Q1639 744,1595 694Q1552 643,1552 565Q1552 500,1572 448Q1592 396,1628 357Q1665 317,1716 292Q1767 266,1829 253Q1891 240,1960 240Q2067 240,2143 264Q2220 287,2261 335Q2302 383,2302 459Q2302 472,2300 493Q2298 514,2290 554L1785 554Q1784 559,1784 564Q1784 568,1784 573Q1784 604,1799 624Q1813 645,1841 655Q1870 665,1912 665Q1942 665,1967 659Q1991 653,2009 642Q2026 632,2037 619Q2047 606,2050 592L2282 592Q2274 642,2241 680Q2207 717,2155 742Q2103 767,2039 780Q1974 792,1903 792ZM1804 452L2068 452Q2069 449,2069 446Q2069 443,2069 440Q2069 420,2057 404Q2044 387,2021 377Q1997 367,1963 367Q1919 367,1887 378Q1854 390,1833 410Q1813 429,1804 452ZM2632 792Q2568 792,2522 780Q2475 769,2450 740Q2426 712,2426 660Q2426 650,2427 639Q2428 628,2430 616L2470 393L2365 393L2390 252L2504 252L2576 92L2748 92L2719 252L2870 252L2845 393L2694 393L2663 570Q2662 577,2661 584Q2660 590,2660 596Q2660 623,2677 637Q2694 651,2737 651L2800 651L2778 773Q2763 778,2735 782Q2707 787,2679 790Q2651 792,2632 792ZM2906.5 780L2923 688.5L3031.5 688.5L3015.5 780ZM3165 780L3096 516L3191.5 516L3214.5 636.5Q3216.5 646,3218 655.5Q3219.5 665.5,3221 674.5Q3222 683,3222.5 688.5L3227 688.5Q3230 682.5,3234 674Q3238 665.5,3242.5 655.5Q3247.5 645.5,3252 636.5L3313 516L3418.5 516L3436 636.5Q3437 642,3438 651Q3439 660.5,3440 670.5Q3441 680.5,3442 688.5L3446 688.5Q3450 681,3454.5 671.5Q3459 662,3464 652.5Q3468.5 643,3472 636.5L3538 516L3632.5 516L3470.5 780L3377.5 780L3359.5 662Q3358 651.5,3356.5 640.5Q3354.5 629.5,3353.5 620Q3352 610.5,3351.5 604.5L3347.5 604.5Q3344.5 611,3340 621Q3335 631,3329.5 641.5Q3324.5 652.5,3319.5 662.5L3260 780ZM3672 479.5L3683 417.5L3775 417.5L3764.5 479.5ZM3620.5 780L3666.5 516L3759 516L3712.5 780ZM3778 780L3824.5 516L3899 516L3897.5 560L3902 560Q3918.5 541.5,3937.5 531Q3957 520,3977.5 515Q3998 510,4017.5 510Q4052 510,4075.5 519.5Q4098.5 529,4110.5 547.5Q4122 566,4122 594.5Q4122 601.5,4121 609Q4120.5 616.5,4119 625L4091.5 780L3999 780L4025 633.5Q4025.5 630,4026 626.5Q4026 623,4026 619.5Q4026 606,4020.5 597Q4015.5 588,4004.5 583.5Q3994 579,3978.5 579Q3963.5 579,3949.5 583.5Q3935.5 588.5,3924 596.5Q3912.5 605,3904.5 617Q3897 628.5,3894.5 642.5L3870 780Z"},"mark":{"box":"0 0 32 32","d":"M3.5 2.5h7.2l5.3 8.2 5.3-8.2h7.2l-8.4 12.6h5.6L12.2 30.2l2.4-10.9H9.2l3.6-5.2z"}};     // {logo,mark}: the wordmark and the mark as {box,d}
-const WheelCard=(()=>({logic:{normalizeSpin:()=>null,normalizeLucky:()=>null}}))(window);
-const Fair=null; // packages/fair/fair.mjs: the fair wheel's check, run in the card (views with the wheel; null elsewhere) // src/wheel-card.js: the daily wheel (views home and wheel) and the lucky wheel (view lucky)
+const WheelCard=(()=>({logic:{normalizeSpin:()=>null,normalizeLucky:()=>null}}))(window); // src/wheel-card.js: the daily wheel (views home and wheel) and the lucky wheel (view lucky)
+const Fair=null; // packages/fair/fair.mjs: the fair wheel's check, run in the card (views with the daily wheel; null elsewhere)
 const SIGNING=(()=>null)(null);   // src/trade-signing.js over src/vendor/wallet-request.mjs
 const signerCfg={"app_id":null,"script":null,"page":null};  // {app_id,script,page}: build-time; a result's _meta['yeet/signer'] overrides
-const BUILD="63d54bcaa0bcc87c3d0be4db835b6b71ca766aab";     // the yeet-win commit this template was built from; null for a local build
-const APP={"manage_url":"https://chatgpt.com/plugins","refresh_label":"Refresh YEET in ChatGPT","refresh_steps":"open YEET there, select Refresh, then start a new chat"};         // {manage_url,refresh_label,refresh_steps}: where the person refreshes the app in ChatGPT
+const BUILD="9f70e0ef635f360112192454d9d395d582cd2040";     // the yeet-win commit this template was built from; null for a local build
+const APP={"manage_url":"https://chatgpt.com/plugins?directoryTab=personal","refresh_label":"Refresh YEET in ChatGPT","refresh_steps":"open YEET there, select Refresh, then start a new chat"};         // {manage_url,refresh_label,refresh_steps}: where the person refreshes the app in ChatGPT
 const CONFIRM_KEY='yeet/confirm',SIGNER_KEY='yeet/signer',BUILD_KEY='yeet/build',FAILURE_KEY='yeet/failure';
 const POLL_MS=5000,POLL_MAX=360,SKEW_MS=2000,MAX_PARTS=99,AMOUNT_MAX=25,MORE_USDC='5';
 const FINAL=new Set(['success','partial','refunded','failed']);
@@ -547,6 +551,8 @@ let back=null;             // the holdings a basket was opened from, for the Bac
 let shareOpen=false,shareSay=null,lastKind=null,prevKeys=new Map();
 let roster=null;           // {proposal_id,symbols}: every coin of the YEET basket, also those stepped to 0 parts
 let hold=null;             // {title,text}: why the stepped parts can't be quoted yet (a coin under the minimum, or no parts)
+let peek=null;             // the proposal_id whose shares are locked by Preview YEET (estimates and the YEET button); null: edit
+let previewing=null;       // the proposal_id whose Preview YEET waits for a fresh quote; the card locks when it comes
 let spinBusy=false,spinRecalled=false,luckyData=null,homeStack=null;
 spinWon=(VIEW==='home'||VIEW==='wheel')&&state.spin?state.spin:null;
 let expiryTimer=null,pollTimer=null,polls=0,pollFailures=0,lastKey=null,lastHeight=-1,heightFrame=null;
@@ -582,7 +588,7 @@ function takeAccount(meta){
 }
 const viaPageAccount=()=>!!account&&!account.email;
 const pageMode=()=>viaPageAccount()&&!!signerCfg.page;
-const PAGE_HINT='Opens secure trading on the YEET page.';
+const PAGE_HINT='Finishes on the YEET page.';
 const PAGE_DEVICE='yeet.page-device.';
 function pageDevice(){try{return !!account?.user&&window.localStorage.getItem(PAGE_DEVICE+account.user)==='1'}catch{return false}}
 function markPageDevice(){try{if(account?.user&&!account.email)window.localStorage.setItem(PAGE_DEVICE+account.user,'1')}catch{/* without storage the card asks once more next time */}}
@@ -744,6 +750,7 @@ function show(data,meta){
   const cur=current?.kind==='basket'?current.data:null;
   if(cur&&cur.proposal_id===data.proposal_id&&data.revision<cur.revision)return;
   if(state.trade_id&&state.proposal_id===data.proposal_id){current={kind:'receipt',data:{trade_id:state.trade_id,direction:data.direction,status:'submitted',legs:[]}};render();poll(0);return}
+  if(previewing===data.proposal_id){peek=data.proposal_id;previewing=null}else if(peek!==data.proposal_id)peek=null;
   takeConfirm(data,meta);keepRoster(data);if(!hold){draft=null;amountDraft=null}inlineError=null;
   if(TRADE.key!==`${data.proposal_id}:${data.revision}`&&!busy){TRADE.phase='idle';TRADE.key=null}
  }
@@ -753,6 +760,7 @@ function show(data,meta){
  if(kind==='lucky')luckyData=data;
  if(kind==='spin'){
   spinWon=data;saveState({spin:spinToday(data)??undefined});
+  if(data&&typeof data==='object'&&'fair_next' in data){fairNext=data.fair_next;fairFromSpin=true}
   const at=current?.kind==='home'?'xp':current?.kind==='checkin'?'checkin':null;
   if(at){
    const x=current.data[at]||{};const m=x.next_streak_milestone&&x.next_streak_milestone.days>data.streak_days?x.next_streak_milestone:null;
@@ -815,7 +823,7 @@ const firstSeen=new Map(); // trade_id -> when this card first showed it (elapse
 const FAIL_NOTE={inline:'This card couldn’t send your trade. Nothing was sent.',page_timeout:'The YEET page didn’t finish the trade. Ask in the chat for your trade status.',
  expired:'Time ran out before the trade went out. Nothing was sent. Refresh for a new quote.',not_sent:'Nothing was sent. Your funds are still in your wallet.',
  wallet:'This sign-in has a different wallet than your YEET account. Nothing was sent.',
- page_cancelled:'You stopped this trade. Nothing was sent. Your funds are still in your wallet.'};
+ page_cancelled:'You stopped this trade. Nothing was sent. Your funds are still in your wallet.',page_expired:'Time ran out. Nothing was sent.'};
 const SAFE='Nothing left their wallet.';
 const REFUSED={COST_TOO_HIGH:`The trade was stopped before anything was sent, because the swap cost had risen above the YEET limit. ${SAFE}`,
  REQUOTE_REQUIRED:`The trade was stopped before anything was sent, because the price moved past their minimum between the quote and the hold. ${SAFE} The card shows a fresh quote.`,
@@ -826,8 +834,9 @@ const REFUSED={COST_TOO_HIGH:`The trade was stopped before anything was sent, be
  expired:`Time ran out before the trade went out. ${SAFE} A fresh quote is needed.`,not_sent:`The trade was not sent. ${SAFE}`,
  inline:`The card could not send the trade from this window. ${SAFE}`,page_timeout:'The trade was not finished on the YEET page in time. Check its status before a retry.',
  wallet:`This device is signed in with another account than their YEET account, so the trade was not sent. ${SAFE}`,
- page_cancelled:`They stopped the trade before finishing it on the YEET page. ${SAFE} The unfinished trade closes by itself within 10 minutes; a retry needs a fresh quote.`};
-const PAGE_TOLD='Their YEET account uses Google or Apple, so this trade finishes on the YEET page the card opened: they confirm it is them there and press and hold. The card follows it and reports the result.';
+ page_cancelled:`They stopped the trade before finishing it on the YEET page. ${SAFE} The unfinished trade closes by itself within 10 minutes; a retry needs a fresh quote.`,
+ page_expired:`The trade was not signed on the YEET page in time, so it closed. ${SAFE} The card offers a fresh quote.`};
+const PAGE_TOLD='Their YEET account uses Google or Apple, so this trade finishes on the YEET page, which they open from the card: they confirm it is them there and press and hold. The card follows it and reports the result.';
 let activeRun=null;        // the signing machine of the trade this card is running (poke on return, cancel of the hand-off)
 function tellRefused(key,code,message){
  const own=OWN_MESSAGE.has(code)&&typeof message==='string'&&message?` ${message.slice(0,300)}`:'';
@@ -912,7 +921,7 @@ async function signinCode(){
   if(!(await sameAccount(g.s,u))){try{await g.s.logout?.()}catch{/* the session is not used either way */}
    g.stage='email';g.code='';g.error=otherAccount();g.wait=false;
    tell('signin','mismatch','device_trusted: false. The code was for a different YEET account than the one connected to ChatGPT. The card dropped that session and asks for the connected account, or the YEET page.');render();return}
-  signin=null;note='This device is trusted. Your trade is on its way.';tell('signin','unlocked-trade','device_trusted: true. The person added this device to their trusted devices with the emailed code, and their trade is continuing in the card.');g.resolve();return}
+  signin=null;note='Confirmed. Your trade is on its way.';tell('signin','unlocked-trade','device_trusted: true. The person added this device to their trusted devices with the emailed code, and their trade is continuing in the card.');g.resolve();return}
  catch{g.error='That didn’t work. Check the code, or use a different email.'}
  g.wait=false;render();
 }
@@ -921,46 +930,7 @@ function signinCancel(){const g=signin;signin=null;g?.reject(Error('cancelled'))
 function signinPage(){const g=signin;if(!g)return;signin=null;g.resolve('page')}
 const backInChat=()=>{if(!document.hidden)activeRun?.poke()};
 document.addEventListener('visibilitychange',backInChat);window.addEventListener('focus',backInChat);
-async function reopenPage(url){try{await openPage(url)}catch{try{await openLink(url)}catch{note='The YEET page couldn’t open here.';render()}}}
-const HINT='place'+'holder';   // the input's hint attribute
-/** How the person would name what they hold: the host says the device type (window.openai.userAgent.device.type). */
-function thisSurface(){
- const t=window.openai?.userAgent?.device?.type;
- return t==='mobile'?'This phone':t==='tablet'?'This tablet':t==='desktop'?'This computer':'This ChatGPT';
-}
-/** The trusted-devices step, only ever at a YEET or SKEET press: one question, one button, one code. The YEET page is
- *  always offered beside it, so nothing here says "not yet" without a button that gets the trade done. */
-function signinBox(){
- const g=signin,b=mark(el('div','signin'),`signin:${g.stage}`);b.dataset.role='signin';
- const code=g.stage==='code',known=!!account?.email,shown=known?(account.masked??'your email'):g.email;
- if(known)g.email=account.email;
- const offer=`${thisSurface()} isn’t on your trusted devices yet.`;
- const acts=el('div','acts-row');
- const page=()=>{if(signerCfg.page){const o=button('ghost xs','Trade on the YEET page instead',signinPage);o.dataset.role='signin-other';acts.append(o)}};
- const cancel=()=>{const x=button('ghost xs','Cancel',signinCancel);x.dataset.role='signin-cancel';acts.append(x)};
- const fail=()=>{if(g.error){const e=el('p','reason',g.error);e.setAttribute('role','alert');b.append(e)}};
- b.append(el('strong',null,'Trusted devices'));
- if(!code&&account&&!known){
-  b.append(mark(el('p','next',`${offer} Trade on the YEET page, and add it there.`),'no-email'));
-  if(signerCfg.page){const go=button('ink sm','Open the YEET page',signinPage);go.dataset.role='signin-page';const row=el('div','signin-row');row.append(go);b.append(row)}
-  cancel();b.append(acts);return b}
- b.append(mark(el('p','next',code?`Enter the code we emailed to ${shown}.`:known?`${offer} Add it to trade right in the chat?`:`${offer} Add it with the email of your YEET account.`),'unlock-lead'));
- if(!code&&known){
-  const go=button('ink sm',g.wait?'Sending…':'Add this device',signinSend);go.disabled=g.wait;go.dataset.role='signin-send';const row=el('div','signin-row');row.append(go);b.append(row);
-  fail();page();cancel();b.append(acts);return b}
- const f=el('input');f.id=code?'yc-device-code':'yc-device-email';
- const lab=el('label','signin-label',code?'6-digit code':'Your email');lab.htmlFor=f.id;b.append(lab);
- if(code){f.type='text';f.inputMode='numeric';f.maxLength=6;f.autocomplete='one-time-code';f.setAttribute(HINT,'123456');f.value=g.code;f.oninput=()=>{g.code=f.value}}
- else{f.type='email';f.inputMode='email';f.autocomplete='email';f.setAttribute(HINT,'you@example.com');f.value=g.email;f.oninput=()=>{g.email=f.value}}
- f.dataset.role=code?'signin-code':'signin-email';f.disabled=g.wait;
- f.onkeydown=e=>{if(e.key==='Enter')code?signinCode():signinSend()};
- const go=button('ink sm',g.wait?(code?'Checking…':'Sending…'):(code?'Trust this device':'Email me a code'),code?signinCode:signinSend);go.disabled=g.wait;go.dataset.role=code?'signin-go':'signin-send';
- const row=el('div','signin-row');row.append(f,go);b.append(row);
- fail();
- if(code){const again=button('ghost xs','Send again',async()=>{if(g.wait)return;g.wait=true;g.error=null;render();try{await g.s.sendCode(g.email);note='We sent a new code.'}catch{g.error='The code couldn’t be sent. Try again.'}g.wait=false;render()});again.dataset.role='signin-again';again.disabled=g.wait;acts.append(again)}
- page();cancel();b.append(acts);
- return b;
-}
+let pageErr=null;          // the page link that could not be opened here
 async function requestQuote(args){
  if(quoting){queuedQuote=args;render();return}
  quoting=true;inlineError=null;render();
@@ -1058,7 +1028,7 @@ function onAmountInput(raw){
  const p=current?.data,ui=basketUi;if(current?.kind!=='basket'||p.direction==='skeet'||busy||!ui||!roster)return;
  const n=Number(raw);if(raw===''||!Number.isFinite(n))return;
  const v=Math.min(ui.bounds.max,Math.max(ui.bounds.min,Math.round(n*100)/100));
- touchAmount();amountDraft=trimAmount(v);ui.trade.disabled=true;
+ touchAmount();amountDraft=trimAmount(v);if(ui.trade)ui.trade.disabled=true;if(ui.preview)ui.preview.disabled=true;
  for(const [c,x] of ui.chips)x.setAttribute('aria-pressed','false');ui.label?.classList.add('on');
  if(v!==n){if(ui.note)ui.note.textContent=`Pick an amount from ${ui.bounds.min} to ${ui.bounds.max} USDC.`;return}
  const parts=partsOf(p),shares=split(micro(amountDraft),parts),dir=Math.sign(v-(numIn(ui.total?.textContent)||0));
@@ -1102,11 +1072,51 @@ async function fromHolding(tool,args,button){
 }
 const skeet=(symbol,button)=>fromHolding('skeet_propose',{legs:[{symbol,percent:100}]},button);
 const yeetMore=(symbol,button)=>fromHolding('yeet_propose',{amount_usdc:MORE_USDC,legs:[{symbol,parts:1}]},button);
-function goBack(){if(!back||busy)return;current=back;back=null;draft=null;amountDraft=null;hold=null;note=null;inlineError=null;window.clearTimeout(expiryTimer);render()}
+function goBack(){if(!back||busy)return;current=back;back=null;peek=null;previewing=null;draft=null;amountDraft=null;hold=null;note=null;inlineError=null;window.clearTimeout(expiryTimer);render()}
 const BASE_XP=Number.isInteger(SPIN?.base_xp)?SPIN.base_xp:0;
 /** The catalog's coins, for a wheel drawn before the server has named one (an older home block without stamps). */
 const CATALOG=Object.keys(COINS).filter(s=>s!=='USDC'&&s!=='SOL');
+let wcard=null;
 const spinsLeft=x=>Number.isInteger(x?.spins_available)?x.spins_available:x?.spin_available===true?1:0;
+function wheelCard(){
+ if(wcard)return wcard;
+ wcard=WheelCard.createWheelCard({el,svg,cv,button,use,coinName,REDUCED,fair:Fair,logo:s=>s&&Object.hasOwn(LOGOS,s)?LOGOS[s]:null},{
+  canCall,holdable,fairSent:id=>Object.hasOwn(fairSent,id)?fairSent[id]:null,
+  busy(on){spinBusy=on;if(on)note=null;render()},
+  async spin(mode){
+   const lucky=mode==='lucky';
+   const args=lucky?{lucky_id:luckyData?.lucky?.lucky_id}:fairArgs();
+   let u;try{u=unwrap(await callTool(lucky?'lucky_spin':'daily_spin',args))}catch{u={data:{error:'TEMPORARILY_UNAVAILABLE'}}}
+   const k=kindOf(u.data);
+   if(k===(lucky?'lucky':'spin'))return {data:u.data};
+   if(!lucky&&args.spin_id){fairNext=null;fairFromSpin=true}
+   return {error:typeof u.data?.error==='string'&&Object.hasOwn(ERRORS,u.data.error)?u.data.error:'TEMPORARILY_UNAVAILABLE'};
+  },
+  landed(data){spinBusy=false;tellSpin(data);show(data,null)},
+  failed(code){spinBusy=false;note=ERRORS[code]?.[0]??ERRORS.TEMPORARILY_UNAVAILABLE[0];render()},
+  yeet(offer,b){fromHolding('yeet_propose',{amount_usdc:offer.amount_usdc,legs:[{symbol:offer.coin,parts:1}],lucky_id:offer.lucky_id},b)},
+ });
+ return wcard;
+}
+let fairNext=null,fairFromSpin=false;const fairSent={};
+/** A spin the person just made, for the model: the coin, the XP, the stamp count, the streak, an extra spin. */
+function tellSpin(d){
+ const L=WheelCard.logic.normalizeLucky(d);
+ if(L){if(L.coin)tell('lucky',`lucky:${L.lucky_id}`,`The lucky wheel landed on ${L.coin}. The offer on the card: YEET ${L.amount_usdc} USDC into ${L.coin} for a bonus daily spin and a ${L.coin} stamp.`);return}
+ if(!Number.isInteger(d?.xp_won))return;
+ const s=d.stamp&&safeSymbol(d.stamp.coin)?d.stamp:null,left=Number.isInteger(d.spins_available)?d.spins_available:0;
+ const stamp=s?` and a ${s.coin} stamp, ${s.filled} of ${s.slots} on their ${s.coin} card${s.set_completed?` (the set is complete${d.set_bonus_xp>0?`, ${d.set_bonus_xp} bonus XP`:''})`:''}`:'';
+ const extra=left>0?`${left} extra spin${left===1?'':'s'} earned and waiting${d.extra_spin_reason==='streak_milestone'?' (streak milestone)':d.extra_spin_reason==='trade_bonus'?' (bonus from their YEET)':''}`:'no extra spin';
+ const remind=Number.isInteger(d.streak_days)&&left===0?` Today's spins are done.`:'';
+ tell('spin',`spin:${d.next_spin_at}:${d.total}`,`Daily check-in done. The wheel${s?` landed on ${s.coin}:`:' paid'} ${d.xp_won} XP${stamp}. Streak: ${d.streak_days} day${d.streak_days===1?'':'s'}; ${extra}; ${Number(d.total).toLocaleString('en-US')} XP in all.${remind}`);
+}
+/** The wheel card for what the card holds now: the home xp block, today's last spin, a lucky wheel. */
+function wheelSection(xp){
+ const w=wheelCard();
+ if(!fairFromSpin)fairNext=xp&&typeof xp==='object'?xp.fair_next??null:null;
+ w.sync(WheelCard.logic.modelOf({xp,spin:spinWon,lucky:luckyData,busy:spinBusy,base:BASE_XP,streakBonus:SPIN?.streak_bonus_xp,fallbackCoins:CATALOG,note}));
+ return w.node;
+}
 async function recallSpin(){
  if(spinRecalled||spinWon||!canCall())return;spinRecalled=true;
  let u;try{u=unwrap(await callTool('daily_spin',{}))}catch{return}
@@ -1161,7 +1171,7 @@ function button(cls,text,onclick,iconId){
  return b;
 }
 function fundButton(url){
- const a=el('a','btn yeet md wide run cta');const bl=el('span','bl');bl.append(el('span',null,'Add funds'),use('i-arrow','ic'));a.append(bl);
+ const a=el('a','btn yeet md wide run cta');const bl=el('span','bl');bl.append(el('span',null,'Add funds'));a.append(bl);
  a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.dataset.role='fund';
  a.onclick=async e=>{if(!host.canOpen&&typeof window.openai?.openExternal!=='function')return;e.preventDefault();try{await openLink(url)}catch{note='This link couldn’t open here.';render()}};
  const box=el('div','acts-row');box.append(a);return mark(box,'fund');
@@ -1240,7 +1250,7 @@ function tradeButton(p,live){
  b.disabled=ph==='idle'?!live:true;b.dataset.role='trade';b.dataset.phase=ph;
  if(ph!=='idle')return b;
  if(pageMode()){
-  b.dataset.mode='page';b.querySelector('.bl').append(use('i-lock','ic lock'));
+  b.dataset.mode='page';
   b.setAttribute('aria-label',`${skeet?'SKEET':'YEET'}. ${PAGE_HINT}`);
   const hint=el('p','hold-hint',PAGE_HINT);hint.dataset.role='page-hint';b.hint=hint;
   b.onclick=e=>{e.preventDefault();if(!b.disabled)tap()};
@@ -1306,7 +1316,7 @@ async function sendPicture(mode,cv){
  catch{shareSay='This picture can’t be saved here. Take a screenshot of it.'}
  render();
 }
-function shareButton(){const b=button('ghost sm',shareOpen?'Close':'Share',()=>{shareOpen=!shareOpen;shareSay=null;render()},shareOpen?null:'i-send');b.dataset.role='share';b.setAttribute('aria-expanded',String(shareOpen));return b}
+function shareButton(){const b=button('ghost sm',shareOpen?'Close':'Share',()=>{shareOpen=!shareOpen;shareSay=null;render()},null);b.dataset.role='share';b.setAttribute('aria-expanded',String(shareOpen));return b}
 function sharePanel(scene){
  const box=mark(el('div','share-panel'),'share');const cv=el('canvas');cv.setAttribute('role','img');cv.setAttribute('aria-label',`YEET share picture: ${scene.lines.join(' ')} ${listOf(scene.coins.slice(0,5))}`);
  box.append(cv);
@@ -1333,17 +1343,32 @@ function route(direction,symbols,state,say){
  return box;
 }
 const landsIn=s=>Number.isInteger(s)&&s>=240?`About ${Math.round(s/60)} minutes`:'Usually 2 to 3 minutes';
+function openPreview(p){
+ if(busy||quoting||draft||amountDraft!==null||hold)return;note=null;inlineError=null;
+ if(canTap(p)||!canCall()){peek=p.proposal_id;render();return}
+ previewing=p.proposal_id;refresh(p.proposal_id);
+}
+function closePreview(){if(busy)return;peek=null;previewing=null;confirm=null;window.clearTimeout(expiryTimer);note=null;render()}
 function renderBasket(p){
  const skeet=p.direction==='skeet';
  if(!skeet&&(!roster||roster.proposal_id!==p.proposal_id))keepRoster(p);
+ if(previewing&&!quoting)previewing=null;
  const parts=skeet?[]:partsOf(p);
  const rows=skeet?p.legs.slice(0,5).map(l=>({sym:safeSymbol(l.symbol),leg:l})):roster.symbols.map(s=>({sym:s,leg:legOf(p,s)}));
  const traded=rows.filter((r,i)=>skeet||parts[i]>0).map(r=>r.sym).filter(Boolean);
  const sum=parts.reduce((a,b)=>a+b,0),amt=amountOf(p),shares=skeet?null:split(micro(amt),parts);
- const ests=skeet?null:estimates(p,parts);
- const c=card('basket',skeet?'SKEET to USDC':'Your basket',skeet?'Coins → USDC':'USDC → coins');c.dataset.direction=skeet?'skeet':'yeet';
- const ui={rows:[],gets:null,pay:null,total:null,trade:null,note:null,field:null,chips:[],bounds:null,mins:null};
- if(!skeet){
+ const t=p.totals||{},key=`${p.proposal_id}:${p.revision}`;
+ const locked=peek===p.proposal_id||busy||(!!signin||TRADE.phase!=='idle')&&TRADE.key===key;
+ const multi=!skeet&&rows.length>1;
+ const n=traded.length,verb=skeet?'SKEET':'YEET';
+ const c=card(locked?'basket locked':'basket',skeet?'SKEET to USDC':'Your basket',`${n} coin${n===1?'':'s'}`);
+ c.dataset.direction=skeet?'skeet':'yeet';c.dataset.step=locked?'preview':'edit';
+ const ui={rows:[],gets:null,pay:null,total:null,trade:null,preview:null,note:null,field:null,chips:[],bounds:null,mins:null};
+ const short=!skeet&&(Array.isArray(p.warnings)?p.warnings:[]).includes('BALANCE_LOW');
+ {const s=mark(el('div','spend'),'spend');s.dataset.role='spend';
+  const v=skeet?mark(el('b','num',`≈ ${money(t.out_usd)??'—'}`),'total',true):mark(el('b','num',usdFmt.format(Number(amt)||0)),'total',true);
+  s.append(el('span','lbl',skeet?'You get':'You spend'),v);if(!skeet)ui.total=v;c.append(s)}
+ if(!skeet&&!locked){
   const b=amountBounds(p,parts),cur=Number(amt)||0;ui.bounds=b;
   const box=mark(el('div','amts'),'amts');box.setAttribute('role','group');box.setAttribute('aria-label','Amount');
   const presets=presetsOf(perTrade(p)).filter(v=>v>=b.min&&v<=b.cap);if(presets.length>3)presets.splice(cur===presets[2]?1:2,1);
@@ -1355,82 +1380,74 @@ function renderBasket(p){
   f.setAttribute('aria-label','Amount in USDC');f.dataset.role='amount';f.disabled=off;
   f.oninput=()=>{lab.classList.toggle('empty',f.value==='');onAmountInput(f.value)};f.onchange=()=>onAmountCommit(f.value);
   lab.append(f,hint);box.append(lab);ui.field=f;ui.label=lab;c.append(box);
+  const cap=limitsLine(p.limits);if(cap)c.append(mark(el('p','fine caps',cap),'caps',true));
  }
+ const ests=!skeet&&locked?estimates(p,parts):null;
+ const head=el('div','rows-h');head.append(el('span',null,'Coins'),el('span',null,skeet?'You sell':locked?'You get':multi?'Parts':'Share'));c.append(head);
  const list=el('div','rows');
  rows.forEach(({sym,leg:l},i)=>{
-  const zero=!skeet&&parts[i]===0;
+  const zero=!skeet&&parts[i]===0;if(locked&&zero)return;
   const r=mark(el('div',zero?'row zero':'row'),`row:${sym}`);r.append(cv(sym));
   const nm=el('div','nm');nm.append(el('div','tk',sym??'?'));const sub=el('div','sub');
-  if(skeet)sub.append(el('span','pc',`${amount(l.amount_in)??'—'} ${sym??''}`.trim()));
+  if(skeet){const name=coinName(sym);if(name&&name!==sym)sub.append(el('span','cn',name))}
   else{const pc=num('pc',pctOf(parts,i),`pc:${sym}`),usd=num('usd',shares?usdMicro(shares[i]):'$0.00',`usd:${sym}`);pc.dataset.role='share';sub.append(pc,usd);ui.rows[i]={pc,usd}}
   nm.append(sub);r.append(nm);
-  if(!skeet&&Number.isInteger(parts[i])){
+  if(skeet){const e=el('div','est');e.append(el('b',null,`${amount(l.amount_in)??'—'} ${sym??''}`.trim()),num(null,money(l.est_out_usd)?`≈ ${money(l.est_out_usd)}`:'—'));r.append(e)}
+  else if(locked){
+   const e=el('div','est');e.dataset.role='get';e.append(mark(el('b','num',`≈ ${ests.rows[i]?.amt??'—'} ${sym}`),`get:${sym}`,true));
+   if(typeof l?.min_out==='string'&&DECIMAL.test(l.min_out)&&Number(l.min_out)>0){const m=el('span','min',`at least ${amount(l.min_out)}`);m.dataset.role='min';e.append(m)}
+   r.append(e);
+  }else if(multi&&Number.isInteger(parts[i])){
    const s=el('div','stp');s.setAttribute('role','group');s.setAttribute('aria-label',`${sym} parts`);
    const minus=el('button');minus.type='button';minus.append(use('i-minus'));minus.setAttribute('aria-label',`Less ${sym}`);minus.onclick=()=>onStep(i,-1);minus.disabled=busy||!step(parts,i,-1);
    const plus=el('button');plus.type='button';plus.append(use('i-plus'));plus.setAttribute('aria-label',`More ${sym}`);plus.onclick=()=>onStep(i,1);plus.disabled=busy||!step(parts,i,1);
    const v=num('v',String(parts[i]),`v:${sym}`);v.dataset.role='parts';v.setAttribute('aria-label',`${parts[i]} of ${sum} parts`);
    s.append(minus,v,plus);r.append(s);
-  }else if(skeet){const e=el('div','est');e.append(el('b',null,money(l.est_out_usd)?`≈ ${money(l.est_out_usd)}`:'—'));r.append(e)}
+  }
   list.append(r);
  });
  c.append(list);
- const t=p.totals||{};
- {const f=el('div','bsk-foot');const a=el('span'),z=el('span');
-  if(skeet){a.append(num(null,String(traded.length),'parts'),document.createTextNode(` coin${traded.length===1?'':'s'}`));z.append(document.createTextNode('Get '),mark(el('b','num',`≈ ${money(t.out_usd)??'—'}`),'total',true))}
-  else{a.append(num(null,String(sum),'parts'),document.createTextNode(' parts'));const tb=mark(el('b','num',usdFmt.format(Number(amt)||0)),'total',true);z.append(document.createTextNode('Total '),tb);ui.total=tb}
-  f.append(a,z);c.append(f)}
- const short=!skeet&&(Array.isArray(p.warnings)?p.warnings:[]).includes('BALANCE_LOW');
- const warns=(Array.isArray(p.warnings)?p.warnings:[]).filter(w=>Object.hasOwn(WARN,w)&&w!=='COST_HIGH'&&w!=='BALANCE_LOW');
- if(warns.length){const box=mark(el('div','chips'),'warns');for(const w of warns)box.append(el('span','chip plain',WARN[w]));c.append(box)}
  if(hold){const h=alertBox(hold.title,hold.text,'hold');h.dataset.role='hold';c.append(h)}
  else if(inlineError){const e=ERRORS[inlineError]||ERRORS.TEMPORARILY_UNAVAILABLE;c.append(alertBox(e[0],OWN_MESSAGE.has(inlineError)&&inlineMessage?inlineMessage.slice(0,500):e[1],'problem'))}
- c.append(route(p.direction,traded,busy?'run':'idle',busy?'On its way':'Quote'));
- const kv=mark(el('dl','kv'),'kv');
- if(skeet){
-  const sells=el('dd','gets');for(const r of rows)if(r.sym)sells.append(num(null,`${amount(r.leg.amount_in)??'—'} ${r.sym}`));
-  const d=el('div');d.append(el('dt',null,'You sell'),sells);kv.append(d);
-  kv.append(kvRow('You get',num(null,`≈ ${money(t.out_usd)??'—'}`,'get')));
+ const acts=el('div','acts-row');let said=null,expired=false;
+ if(!locked){
+  const wait=!!previewing&&quoting;
+  const pv=button(`${skeet?'skeet':'yeet'} lg wide run cta`,wait?'Getting your quote…':`Preview ${verb}`,()=>openPreview(p));pv.dataset.role='preview';
+  pv.disabled=busy||quoting||!!draft||amountDraft!==null||!!hold;ui.preview=pv;c.append(mark(pv,'preview'));
+  if(note)said=noteLine(note);
+  else if(hold)said=noteLine(skeet?'Change the coins to get a new quote.':'Change the parts or the amount to get a new quote.');
+  else if(!wait&&(quoting||draft||amountDraft!==null))said=noteLine('Updating quote…');
+  else if(!canCall())said=noteLine('Open this card in the chat to trade.');
  }else{
-  const pay=num(null,`${(Number(amt)||0).toFixed(2)} USDC`,'pay');ui.pay=pay;kv.append(kvRow('You pay',pay));
-  const gets=el('dd','gets');rows.forEach((r,i)=>{if(parts[i]>0&&r.sym)gets.append(num(null,`≈ ${ests.rows[i]?.amt??'—'} ${r.sym}`,`get:${r.sym}`))});
-  const d=el('div');d.append(el('dt',null,'You get'),gets);kv.append(d);ui.gets=gets;
+  const warns=(Array.isArray(p.warnings)?p.warnings:[]).filter(w=>Object.hasOwn(WARN,w)&&w!=='COST_HIGH'&&w!=='BALANCE_LOW');
+  if(warns.length){const box=mark(el('div','chips'),'warns');for(const w of warns)box.append(el('span','chip plain',WARN[w]));c.append(box)}
+  {const bits=[];
+   if(skeet){const legs=p.legs.slice(0,5);if(legs.length&&legs.every(l=>typeof l?.min_out==='string'&&DECIMAL.test(l.min_out)&&Number(l.min_out)>0))bits.push(`At least ${usdFmt.format(legs.reduce((a,l)=>a+Number(l.min_out),0))}`)}
+   bits.push(`Cost ${pct(t.cost_pct)??'—'}`,`Lands in ${landsIn(t.time_estimate_s).replace(/^Usually/,'usually').replace(/^About/,'about')}`);
+   const q=mark(el('p','fine qline',bits.join(' · ')),'quote',true);q.dataset.role='quote';if((p.warnings||[]).includes('COST_HIGH'))q.classList.add('high');c.append(q)}
+  const live=canTap(p)&&!short;
+  if(signin&&TRADE.key===key)c.append(signinBox());
+  else if(live&&canCall()&&signerCfg.script&&!signerP)loadSigner().then(s=>s?.session()).catch(()=>{});
+  const primary=tradeButton(p,live);ui.trade=primary;if(!signin){c.append(primary);if(short&&TRADE.phase==='idle'){const w=mark(el('p','hold-hint warn','Not enough USDC for this basket. Deposit USDC or pick a smaller amount.'),'short',true);w.dataset.role='short';w.setAttribute('role','status');c.append(w)}else if(primary.hint&&live)c.append(primary.hint)}
+  expired=!busy&&!quoting&&!draft&&amountDraft===null&&!live&&!short&&TRADE.phase==='idle';
+  if(expired&&canCall()){const r=button('ghost sm','Refresh quote',()=>refresh(p.proposal_id));r.dataset.role='refresh';acts.append(r)}
+  if(!busy&&!signin&&TRADE.phase==='idle'){const x=el('button','tx change','Change');x.type='button';x.onclick=closePreview;x.dataset.role='change';c.append(x)}
+  if(note)said=noteLine(note);
+  else if(quoting)said=noteLine('Updating quote…');
+  else if(signin)said=null;
+  else if(busy)said=noteLine(TRADE.phase==='preparing'?'Getting your trade ready…':'Sending your trade…');
+  else if(!canCall())said=noteLine('Open this card in the chat to trade.');
+  else if(expired)said=noteLine('This quote ran out.');
  }
- {const stale=amountDraft!==null||!!draft,legs=rows.filter((r,i)=>r.sym&&(skeet||parts[i]>0)).map(r=>r.leg);
-  const ok=legs.length>0&&legs.every(l=>typeof l?.min_out==='string'&&DECIMAL.test(l.min_out)&&Number(l.min_out)>0);
-  if(ok){const dd=el('dd','gets');dd.dataset.role='min';
-   if(stale)dd.append(num(null,'—'));
-   else if(skeet)dd.append(num(null,usdFmt.format(legs.reduce((a,l)=>a+Number(l.min_out),0)),'min'));
-   else for(const r of rows)if(r.sym&&legs.includes(r.leg))dd.append(num(null,`${amount(r.leg.min_out)??'—'} ${r.sym}`,`min:${r.sym}`));
-   const d=el('div');d.append(el('dt',null,'At least'),dd);kv.append(d);ui.mins=dd}}
- kv.append(kvRow('Cost',num((p.warnings||[]).includes('COST_HIGH')?'cost high':'cost',pct(t.cost_pct)??'—','cost')));
- kv.append(kvRow('Lands in',document.createTextNode(landsIn(t.time_estimate_s))));
- if(amountDraft!==null||draft)kv.classList.add('stale');
- c.append(kv);
- const live=canTap(p)&&!short;
- {const e=mark(el('p','est-note',`Estimate. The live price is taken when you ${skeet?'SKEET':'YEET'}.`),'estimate',true);e.dataset.role='estimate';c.append(e)}
- if(signin&&TRADE.key===`${p.proposal_id}:${p.revision}`)c.append(signinBox());
- else if(live&&canCall()&&signerCfg.script&&!signerP)loadSigner().then(s=>s?.session()).catch(()=>{});
- const primary=tradeButton(p,live);ui.trade=primary;if(!signin){c.append(primary);if(short&&TRADE.phase==='idle'){const w=mark(el('p','hold-hint warn','Not enough USDC for this basket. Add funds or pick a smaller amount.'),'short',true);w.dataset.role='short';w.setAttribute('role','status');c.append(w)}else if(primary.hint&&live)c.append(primary.hint)}
- const expired=!busy&&!quoting&&!draft&&amountDraft===null&&!live&&!short&&TRADE.phase==='idle';
- const acts=el('div','acts-row');
- if(expired&&canCall()){const r=button('ghost sm','Refresh quote',()=>refresh(p.proposal_id));r.dataset.role='refresh';acts.append(r)}
  if(back&&!busy){const r=button('ghost sm','Back',goBack);r.dataset.role='back';acts.append(r)}
  if(acts.childElementCount)c.append(mark(acts,'actions'));
- let said=null;
- if(note)said=noteLine(note);
- else if(hold)said=noteLine(skeet?'Change the coins to get a new quote.':'Change the parts or the amount to get a new quote.');
- else if(quoting||draft||amountDraft!==null)said=noteLine('Updating quote…');
- else if(signin)said=null;
- else if(busy)said=noteLine(TRADE.phase==='preparing'?'Getting your trade ready…':'Sending your trade…');
- else if(!canCall())said=noteLine('Open this card in the chat to trade.');
- else if(expired)said=noteLine('Ask again for a fresh basket.');
  if(said){ui.note=said;c.append(said)}
- const cap=!skeet?limitsLine(p.limits):null;if(cap)c.append(mark(el('p','fine caps',cap),'caps',true));
- if(!skeet)c.append(el('p','fine','Meme coins can go to zero.'));
+ if(!skeet)c.append(mark(el('p','fine risk','Memecoins can go to zero.'),'risk',true));
+ c.append(noGuarantee());
  basketUi=skeet?null:ui;
  return c;
 }
-const TRADE_TITLE={signing:'Sending',submitted:'Sent',settling:'Swapping',success:'YEETED.',partial:'Partly done',refunded:'Refunded',failed:'Didn’t go through',requote_required:'Price moved'};
+const TRADE_TITLE={signing:'Not sent yet',submitted:'Sent',settling:'Swapping',success:'YEETED.',partial:'Partly done',refunded:'Refunded',failed:'Didn’t go through',requote_required:'Price moved'};
 /** Where a leg's funds are at each status: [YEET, SKEET]. FAILED has no line; the refund reason covers it. */
 const FUNDS_AT={not_sent:['still in your wallet','still in your wallet'],sent:['on the way to the 1Click deposit address','on the way to the 1Click deposit address'],PENDING_DEPOSIT:['on the way to the 1Click deposit address','on the way to the 1Click deposit address'],KNOWN_DEPOSIT_TX:['at the 1Click deposit address','at the 1Click deposit address'],INCOMPLETE_DEPOSIT:['at the 1Click deposit address, short of the quote','at the 1Click deposit address, short of the quote'],PROCESSING:['being swapped','being swapped'],SUCCESS:['in your wallet','in your wallet'],REFUNDED:['refunded to your wallet','refunded to your wallet']};
 const ROUTE_STATE={success:'done',partial:'done',refunded:'off',failed:'off'};
@@ -1494,7 +1511,7 @@ function paintSettle(u){
  if(!u)return;const ms=(u.since.to??now())-u.since.from;
  u.meta.textContent=`${u.n} of ${u.total} landed · ${mmss(ms)}`;
  if(u.bar)u.bar.style.transform=`scaleX(${(0.04+0.92*Math.min(1,ms/SETTLE_MS)).toFixed(3)})`;
- if(u.say)u.say.textContent=u.page?'Finish on the YEET page, then come back here.':ms<SETTLE_MS?'Each coin is its own swap. Usually 2 to 3 minutes.':'Taking longer than usual. It keeps going, and this card follows it.';
+ if(u.say)u.say.textContent=ms<SETTLE_MS?'Each coin is its own swap. Usually 2 to 3 minutes.':'Taking longer than usual. It keeps going, and this card follows it.';
 }
 function renderReceipt(t){
  const skeet=t.direction==='skeet';const final=FINAL.has(t.status);const legs=Array.isArray(t.legs)?t.legs.slice(0,5):[];
@@ -1515,23 +1532,27 @@ function renderReceipt(t){
   c.append(legRows(t));
  }else{
   const stopped=mine?.phase==='failed',page=!stopped&&mine?.step==='page';
-  const title=stopped?(mine.reason==='page_cancelled'?'Stopped':TRADE_TITLE.failed):page?'Finish on the YEET page':t.status==='partial'?`${landed} of ${legs.length} landed`:mine&&t.status==='signing'?(mine.phase==='sending'?'On its way':'Sending'):TRADE_TITLE[t.status]??'Your trade';
+  const title=stopped?(mine.reason==='page_cancelled'?'Stopped':mine.reason==='page_expired'?'Time ran out':TRADE_TITLE.failed):page?'Waiting on the YEET page':t.status==='partial'?`${landed} of ${legs.length} landed`:mine&&t.status==='signing'?(mine.phase==='sending'?'On its way':'Getting it ready'):TRADE_TITLE[t.status]??'Your trade';
   c=card('receipt',title,skeet?'SKEET':'YEET');
   if(!final&&!stopped&&legs.length){
    const m=c.querySelector('.meta');const bar=el('div','settle');bar.setAttribute('aria-hidden','true');const fill=el('i');bar.append(fill);
    const say=el('p','next settle-say');say.setAttribute('role','status');
-   settleUi={meta:m,bar:fill,say,n:landed,total:legs.length,since:sinceOf(t),page};
+   settleUi={meta:m,bar:fill,say:page?null:say,n:landed,total:legs.length,since:sinceOf(t),page};
    c.append(bar);paintSettle(settleUi);
    if(page&&mine.page){const again=mine.back>0;const box=mark(el('div','yc-alert pagebox'),again?'page-back':'page');box.setAttribute('role','status');
-    box.append(el('strong',null,again?'Not finished yet':'The YEET page is open'),el('span',null,again?'Nothing has moved. Open the YEET page again to finish, or cancel.':'Press and hold there to send this trade. This card continues by itself.'));
-    const url=mine.page,acts=el('div','acts-row page-acts');
-    const a=button('ink sm','Open the YEET page',()=>reopenPage(url));a.dataset.role='sign-page';
-    const x=button('ghost xs','Cancel',()=>activeRun?.cancelPage());x.dataset.role='page-cancel';
-    acts.append(a,x);box.append(acts);c.append(box)}
+    box.append(el('strong',null,again?'Not finished yet':'Finish on the YEET page'),el('span',null,again?'Nothing has moved. Open the YEET page again to finish, or cancel.':'This trade waits for you on the YEET page. Nothing is sent until you press and hold there.'));
+    const url=mine.page;
+    const a=button(`${skeet?'skeet':'yeet'} lg wide cta`,'Open the YEET page',()=>reopenPage(url));a.dataset.role='sign-page';box.append(a);
+    if(pageErr===url){const e=el('p','reason','The YEET page couldn’t open here. Open this link in your browser:');e.setAttribute('role','alert');e.dataset.role='page-error';
+     const l=el('code','page-link',url);l.dataset.role='page-link';box.append(e,l)}
+    const acts=el('div','acts-row page-acts');const x=button('ghost xs','Cancel',()=>activeRun?.cancelPage());x.dataset.role='page-cancel';
+    acts.append(x);box.append(acts);c.append(box)}
   }
   if(syms.length)c.append(route(t.direction,syms,stopped?'off':ROUTE_STATE[t.status]??'run',stopped?'Stopped':page?'Waiting':ROUTE_SAY[t.status]??'On its way'));
   if(legs.length)c.append(legRows(t));
-  if(settleUi)c.append(settleUi.say);
+  if(settleUi?.say)c.append(settleUi.say);
+  if(stopped&&mine.reason==='page_expired'){const pid=mine.first?.proposal_id??state.proposal_id;
+   if(pid&&canCall()){const acts=mark(el('div','acts-row'),'expired');const f=button('yeet lg wide cta','Get a fresh quote',()=>freshQuote(pid));f.dataset.role='fresh-quote';acts.append(f);c.append(acts)}}
   if(got.length){const kv=mark(el('dl','kv'),'got');kv.style.marginTop='12px';const g=el('dd','gets');for(const r of got)g.append(el('span','num',`${amount(r.amount)} ${r.symbol}`));const d=el('div');d.append(el('dt',null,'You got'),g);kv.append(d);c.append(kv)}
   if(xp)c.append(xpLine(t));
  }
@@ -1608,7 +1629,7 @@ function renderUpdate(){
  const [title,body]=ERRORS.APP_OUTDATED;
  const c=card('problem update',title,null);c.dataset.code='APP_OUTDATED';c.dataset.role='app-update';c.setAttribute('role','status');
  c.append(el('p','msg',body));
- const a=el('a','btn yeet md wide run cta');const bl=el('span','bl');bl.append(el('span',null,APP.refresh_label),use('i-arrow','ic'));a.append(bl);
+ const a=el('a','btn yeet md wide run cta');const bl=el('span','bl');bl.append(el('span',null,APP.refresh_label));a.append(bl);
  a.href=APP.manage_url;a.target='_blank';a.rel='noopener noreferrer';a.dataset.role='refresh-link';a.setAttribute('title',APP.refresh_steps);
  a.onclick=async e=>{if(!host.canOpen&&typeof window.openai?.openExternal!=='function')return;e.preventDefault();try{await openLink(APP.manage_url)}catch{note='This link couldn’t open here.';render()}};
  const box=mark(el('div','acts-row'),'refresh-app');box.dataset.role='refresh-app';box.append(a);c.append(box);

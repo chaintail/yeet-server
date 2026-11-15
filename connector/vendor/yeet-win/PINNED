@@ -1,10 +1,10 @@
 repo: chaintail/yeet-win
-branch: vendor/terms-card (local, not in chaintail/yeet-win: yeet-win feat/terms-card 586cc24 cherry-picked onto vendor/terms-fair e2225ad as 63d54bc; recipe in connector/docs/SUBMIT-BUILD.md "Vendored yeet-win")
-commit: 63d54bcaa0bcc87c3d0be4db835b6b71ca766aab
-built: widget (node build.mjs at 63d54bc); router and signer unchanged from e2225ad: router (tsc 7.0.2), signer (scripts/build-signer.mjs, esbuild 0.28.2, @privy-io/js-sdk-core 0.79.5, sha256 a4affb0c76ce)
+branch: ship/20261115 (local, not in chaintail/yeet-win: yeet-win feat/basket-preview2 ae73a8a merged with feat/terms-card 586cc24 as 9f70e0e; recipe in connector/docs/SUBMIT-BUILD.md "Vendored yeet-win")
+commit: 9f70e0ef635f360112192454d9d395d582cd2040
+built: widget and contract (scripts/vendor-yeet-win.sh at 9f70e0e, node build.mjs); signer rebuilt by the script byte-identical (scripts/build-signer.mjs, esbuild 0.28.2, @privy-io/js-sdk-core 0.79.5, sha256 a4affb0c76ce); router kept unchanged from e2225ad (tsc 7.0.2): the script's router build from 9f70e0e was not taken
+edited: none. The contract is 9f70e0e's contracts/yeet-tools.json byte for byte: it already carries the neutral text at every overlay pointer and the tools-9 terms card shape (yeet-win main took both); its one difference from the previous hand-edited file is x-yeet-app.manage_url (Personal tab, yeet-win 688d69b)
 files:
   contracts/yeet-tools.json
   widget/basket-v1.html coin-v1.html fund-v1.html home-v1.html leaderboard-v1.html lucky-v1.html overview-v1.html portfolio-v1.html receipt-v1.html referral-v1.html templates.json terms-v1.html wheel-v1.html yeet-signer.js 
   router/dist/src/**
   router/test/fixtures/*.json
-edited: contracts/yeet-tools.json descriptions neutralised to the yeet-win int/submission text (byte-identical to its contracts/yeet-tools.json at bdd334b); ours are in connector/mcp/descriptions.private.json, applied at load; then the terms card shape change of 586cc24 applied to it (x-yeet-cards.terms, yeet_terms.card, yeet_accept_terms widgetAccessible and card_build, $defs.terms.mode description, tools-9 and tools_hash 1eaf725b…)

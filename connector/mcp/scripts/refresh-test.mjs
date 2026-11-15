@@ -41,9 +41,10 @@ const APP_REFRESH={url:PERSONAL,steps:'open YEET there, select Refresh, then sta
 const NOTE=updateNote();
 
 test('the page is the contract’s one constant; the server’s card build is the vendored pin and is stamped in every vendored template',()=>{
- assert.deepEqual(APP,contract['x-yeet-app']);assert.equal(APP.manage_url,'https://chatgpt.com/plugins');
- // The server's refresh link is the Personal tab of that page (owner, 2026-11-14); the vendored cards keep their own.
- assert.equal(REFRESH_URL,PERSONAL);assert.ok(REFRESH_URL.startsWith(`${APP.manage_url}?`));
+ assert.deepEqual(APP,contract['x-yeet-app']);assert.equal(APP.manage_url,PERSONAL);
+ // The server's refresh link is the Personal tab of that page (owner, 2026-11-14); since yeet-win 688d69b the
+ // contract's manage_url (and so the cards' link) is the same Personal tab.
+ assert.equal(REFRESH_URL,PERSONAL);assert.equal(REFRESH_URL,APP.manage_url);
  assert.equal(CARD_BUILD,vendoredBuild());assert.equal(CARD_BUILD,vendoredPin(),'the same pin GET /version reports as yeet_win_commit');
  assert.match(CARD_BUILD,/^[0-9a-f]{40}$/);
  assert.deepEqual(WIDGET_VIEWS,Object.keys(CARDS));
