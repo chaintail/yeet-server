@@ -1,11 +1,24 @@
-# folio-ai (private)
+# YEET server
 
-folio-ai: Folio's AI connector, configured for YEET. It is published as `chaintail/folio-ai`; the product, its
-hosts, directories and environment variables keep the YEET names.
+The server behind YEET, the plugin that buys (YEET) and sells (SKEET) memecoins inside ChatGPT from the person's own
+wallet: `chatgpt.yeet.win` (sign-in server, core and the plugin endpoint) and `mcp.yeet.win` (the agent route).
 
-Private side of YEET: the ChatGPT connector (sign-in server, core, connector), its Privy sign-in bundle, the trade
-engine and the deployment files. The public side (router, landing page, tool contract, card widget) is
-`chaintail/yeet-win`; the pieces used here are vendored from a pinned commit.
+- **chaintail/yeet-win.** The tool contract, the cards and the router are built there and vendored here from one
+  pinned commit: `connector/vendor/yeet-win/PINNED`, `connector/vendor/README.md`.
+- **History.** Every commit keeps its original date. The code as deployed at the hackathon close is tagged
+  `hackathon-deadline` (`9256535`, dated 2026-11-14 18:02 EST); the commits after it are the later work and the
+  public-build commits.
+- **Run the tests.** Node 24: `cd connector && npm ci && npm test`, or
+  `./runtests.sh` for one summary line. Nothing needs a key: the trade engine, Privy and the quote service run against
+  fakes.
+- **Deployed commit.** `GET https://chatgpt.yeet.win/version` reports `server_commit`, the id of the running build.
+  Build `e808287` is `9256535`; build `711a995` is `387f27c`.
+- **Not in this repository:** the ChatGPT-facing wording (tool descriptions, result guidance, server instructions) and
+  the sign-in configuration. `connector/mcp/guidance.mjs` and `instructions.mjs` keep their structure with neutral text,
+  and 58 tests that check the deployed wording are skipped: `core/ledger-route/deposit-rpc.test.mjs` (1), `core/pipeline/funding.test.mjs` (2), `core/xp/connector.test.mjs` (1), `core/xp/stamps.test.mjs` (1), `mcp/scripts/coin-test.mjs` (1), `mcp/scripts/dual-contract-test.mjs` (1), `mcp/scripts/guidance-test.mjs` (27), `mcp/scripts/how-it-works-test.mjs` (1), `mcp/scripts/refresh-test.mjs` (6), `mcp/scripts/routing-test.mjs` (5), `mcp/scripts/sdk-registration-test.mjs` (2), `mcp/scripts/signing-meta-test.mjs` (1), `mcp/scripts/terms-test.mjs` (8), `test/acceptance.test.mjs` (1). Left out of the run: `core/xp/connector.test.mjs`, `mcp/scripts/descriptions-overlay-test.mjs`.
+- **Licence.** All rights reserved, Chaintail Labs Inc., see [LICENSE](LICENSE).
+
+## Origin
 
 Port of the Folio connector from `stock-app` `origin/dev` (0e4002821) `research/folio-mcp/current`, following
 `YEET-PORT-PLAN.md` Lanes A and B. The first commit is the verbatim import; the following commits are the YEET edits.
