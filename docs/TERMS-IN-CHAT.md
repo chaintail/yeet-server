@@ -68,6 +68,10 @@ The flow:
 
 (This passage quotes ChatGPT-facing wording that is not part of this repository.)
 
+### The terms card (tools-9, owner 2026-11-15: "Let's make a card for it")
+
+(This passage quotes ChatGPT-facing wording that is not part of this repository.)
+
 `TERMS_REQUIRED` is sent as an error result (the tools' output schemas are closed objects, and an error result is the
 only shape every tool can return without loosening them): `isError`, the JSON text (error, message, terms, missing
 ids, guidance) and no `structuredContent`, which an MCP client checks against the tool's success-only output schema.

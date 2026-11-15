@@ -119,6 +119,8 @@ export function overviewText(r){
  const win=r.top_winner?` Biggest winner: ${r.top_winner.symbol}, up ${r.top_winner.pct}% on their average YEET price.`:'';
  const open=r.checkin_open===true?' Today\'s daily check-in is still open.':'';
  const paused=r.trading==='paused'?' Trading is paused right now.':'';
+ // The current terms not accepted: the terms come first, and no next step is offered until they are (owner, 2026-11-15).
+ if(r.terms?.accepted===false)return `YEET overviewText: ${r.username} ${bits.join(', ')} ${paused} ${r.terms.mode==='page'?', which they accept on the YEET terms page':': the YEET terms card is up'}.`;
  // Someone with no landed trade yet gets the two first-steps buttons of the layout note, not the suggestions.
  if(newcomer(r)&&r.trading!=='paused')return `${r.username}: ${bits.join(', ')}.${open}${paused} Offer next: the two first-steps buttons of the YEET layout note.`;
  return `${r.username}: ${bits.join(', ')}.${open}${win}${paused} Offer next: ${r.suggestions.filter(s=>s?.id!=='referral').map(s=>`${s.label} ("${s.say}")`).join('; ')}.`;
@@ -143,7 +145,7 @@ export function minimumText(r,networks){
 /** yeet_terms and yeet_accept_terms: what the model reads first, in one line; the JSON follows in structuredContent. */
 /** yeet_profile's text for the model: the name, XP, tier and streak. Nothing else of the overview is in it. */
 export const profileText=r=>`Profile: ${r.username}${r.xp===null?'':`, ${r.xp} XP`} (${r.tier})${r.streak_days===null?'':`, ${r.streak_days}-day streak`}.`;
-export const termsText=r=>r.terms.accepted?`The person accepted the YEET terms.`:`The person has not accepted the YEET terms. For your yeet_accept_terms call only, never shown to the person: version ${r.terms.version} and the id in brackets before each statement. Statements: ${r.terms.statements.map(s=>`[${s.id}${s.required?'':', optional'}] ${s.text} ${s.url}`).join(' | ')}`;
+export const termsText=r=>r.terms.accepted?`The person accepted the YEET terms.`:`The person has not accepted the YEET terms.${r.terms.mode==='page'?'':"YEET termsText."} For your yeet_accept_terms call only, never shown to the person: version ${r.terms.version} and the id in brackets before each statement. Statements: ${r.terms.statements.map(s=>`[${s.id}${s.required?'':', optional'}] ${s.text} ${s.url}`).join(' | ')}`;
 export const acceptText=r=>`Recorded: the person accepted the YEET terms. They are in.${r.overview?` ${overviewText(r.overview)}`:''}`;
 /** yeet_how_it_works: each section as one line, with its link when it has one. */
 export const howText=r=>`How YEET works. ${r.how_it_works.sections.map(s=>`${s.title}: ${s.text}${s.url?` (${s.url})`:''}`).join(' | ')}`;

@@ -1,6 +1,6 @@
 import {advertisedScopes} from '#scope-catalog';
 import {normalize,toolMessage,isRetryable,CANNOT_FILL_MESSAGE} from '#contracts/errors';
-import {refusalGuidance,consentNote,updateNote} from './guidance.mjs';
+import {refusalGuidance,consentNote,refusedNote,updateNote} from './guidance.mjs';
 import {appRefresh} from './refresh.mjs';
 import {META_KEYS} from './tool-contract.mjs';
 /** ctx: as in guidance.mjs (the registered tool names); without it the guidance assumes every tool is there.
@@ -36,6 +36,8 @@ export function toolError(value,ctx,{tool}={}){
  const meta={...(META_KEYS.failure?{[META_KEYS.failure]:card}:{}),...(code==='REAUTH_REQUIRED'?{'mcp/www_authenticate':[`Bearer error="insufficient_scope", scope="${advertisedScopes().join(' ')}"`]}:{})};
  // The layout notes (guidance.mjs UI), each its own text block after the JSON: the update card on APP_OUTDATED, the
  // consent layout on TERMS_REQUIRED when the terms are accepted in the chat. Text only: the failure stays as it is.
- const note=code==='APP_OUTDATED'?updateNote():terms&&terms.mode!=='page'?consentNote():undefined;
+ // TERMS_REQUIRED from any other tool brings the terms card (yeet_terms), with the list layout for a chat without cards;
+ // from yeet_accept_terms itself (the model's own list) the list layout alone.
+ const note=code==='APP_OUTDATED'?updateNote():terms&&terms.mode!=='page'?(tool==='yeet_accept_terms'?consentNote():refusedNote()):undefined;
  return {isError:true,content:[{type:'text',text:JSON.stringify(data)},...(note?[{type:'text',text:note}]:[])],...(Object.keys(meta).length?{_meta:meta}:{})};
 }

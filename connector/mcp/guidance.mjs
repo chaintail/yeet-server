@@ -8,6 +8,9 @@ const APP=contract['x-yeet-app'];
 export const COPY=Object.freeze({
 
  terms:{
+
+  card:"YEET terms.card.",
+
   due_chat:"YEET terms.due_chat: {url}.",
   due_page:"YEET terms.due_page.",
   missing:"YEET terms.missing.",
@@ -32,7 +35,7 @@ export const COPY=Object.freeze({
 
   newcomer:"YEET yeet_overview.newcomer: {username}.",
 
-  terms_chat:"YEET yeet_overview.terms_chat: {username} {url}.",
+  terms_chat:"YEET yeet_overview.terms_chat.",
   terms_page:"YEET yeet_overview.terms_page: {username}.",
   lead_none:" YEET yeet_overview.lead_none.",
   lead_fund:", YEET yeet_overview.lead_fund.",
@@ -361,7 +364,7 @@ function coinGuidance(r){
 }
 const BY_TOOL={
  yeet_overview:overviewGuidance,
- yeet_terms:r=>r.terms?.accepted?COPY.terms.accepted:termsGuidance(r.terms),
+ yeet_terms:r=>r.terms?.accepted?COPY.terms.accepted:r.terms?.mode==='page'?COPY.terms.due_page:COPY.terms.card,
  yeet_accept_terms:()=>COPY.terms.recorded,
  yeet_how_it_works:()=>COPY.how_it_works.answer,
  yeet_referral:r=>r.status==='applied'?fill(COPY.referral.applied,{code:r.code}):r.status==='skipped'?COPY.referral.skipped:COPY.referral.open,
@@ -427,6 +430,12 @@ export const UI=Object.freeze({
  closing:"YEET UI.closing.",
  welcome_checkin:" YEET UI.welcome_checkin.",
  consent:"YEET UI.consent.",
+
+ card:"YEET UI.card: {where} {after}.",
+ card_where_overview:", YEET UI.card_where_overview.",
+ card_after_terms:"YEET UI.card_after_terms.",
+
+ card_refused:"YEET UI.card_refused.",
  next:"YEET UI.next: {count} {buttons} {closing}.",
  next_wheel:"YEET UI.next_wheel.",
  next_rest:"YEET UI.next_rest.",
@@ -441,6 +450,10 @@ export const UI=Object.freeze({
 const hasCheckin=ctx=>!ctx||!ctx.tools||ctx.tools.has('yeet_checkin');
 
 export const consentNote=()=>UI.consent;
+
+export const cardNote=({where='',after=UI.card_after_terms}={})=>`${fill(UI.card,{where,after})}\n\n${UI.consent}`;
+
+export const refusedNote=()=>`${UI.card_refused}\n\n${UI.consent}`;
 
 export const updateNote=(url=REFRESH_URL)=>fill(UI.update,{url});
 const standardButtons=ctx=>hasCheckin(ctx)?`${UI.next_wheel}, ${UI.next_rest}`:UI.next_rest;
@@ -459,12 +472,18 @@ export function uiFor(name,result,ctx){
  if(!result||typeof result!=='object')return undefined;
  try{
   if(name==='yeet_overview'){
-   if(result.terms?.accepted===false)return chatTerms(result.terms)?UI.consent:undefined;
+   if(result.terms?.accepted===false){
+    if(!chatTerms(result.terms))return undefined;
+
+    const fresh=newcomer(result)&&result.trading!=='paused';
+    const after=fresh?firstNote(ctx,{source:'overview\'s suggestions',named:Array.isArray(result.suggestions)?!result.suggestions.some(s=>s?.id==='username'):undefined}):nextNote(ctx);
+    return cardNote({where:UI.card_where_overview,after});
+   }
    const fresh=newcomer(result)&&result.trading!=='paused';
    const welcome=fill(UI.welcome,{checkin:hasCheckin(ctx)?UI.welcome_checkin:'',buttons:fresh?UI.welcome_first:UI.welcome_suggestions,closing:fresh?'':UI.closing}).trimEnd();
    return fresh?`${welcome} ${firstNote(ctx)}`:welcome;
   }
-  if(name==='yeet_terms')return chatTerms(result.terms)?UI.consent:undefined;
+  if(name==='yeet_terms')return chatTerms(result.terms)?cardNote():undefined;
   if(name==='yeet_accept_terms'){
    if(result.terms?.accepted!==true)return undefined;
    const o=result.overview;
