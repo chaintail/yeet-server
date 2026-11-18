@@ -5,6 +5,7 @@
 import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {z} from 'zod';
 import {hasScope} from '#scope-catalog';
+import {instrumentToolCalls} from '#shared/log.mjs';
 
 const SYMBOL=z.string().regex(/^\$?[A-Za-z0-9]{2,12}$/).describe('Coin symbol, e.g. WIF.');
 const USDC=z.string().regex(/^\d{1,7}(\.\d{1,6})?$/);
@@ -79,5 +80,7 @@ export function createAgentMcpServer({token,callCore}){
    catch(e){return refusal(e)}
   });
  }
+ // One tool_call line per tools/call, at dispatch (shared/log.mjs): also the calls the SDK refuses before a handler.
+ instrumentToolCalls(server,{endpoint:'agent',token});
  return server;
 }

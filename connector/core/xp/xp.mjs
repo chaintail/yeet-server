@@ -5,6 +5,7 @@
 // awards, and each award's dedupe key is the trade id. The tracker's onSettled hook is the normal path; trade_status
 // settles too when it sees a final trade with no row yet (an event lost to a crash between the tracker's write and
 // the hook), and either path repeated adds nothing.
+import {log as slog} from '#shared/log.mjs';
 import {fairWheelOn} from './fair.mjs';
 import path from 'node:path';
 import {openLedger,dayOf,DEFAULT_RULES} from './ledger.mjs';
@@ -61,7 +62,7 @@ export function openXp({file=':memory:',secret,now=Date.now,coins,luckyCoins,fai
   /** onSettled subscriber (tracker event shape). Never throws. */
   onSettled(e){
    try{settleTrade(e)}
-   catch(err){console.error(JSON.stringify({event:'xp_settle_failed',trade:e?.tradeId,error:String(err?.message??err).slice(0,200)}))}
+   catch(err){slog.error('xp_settle_failed',{trade:e?.tradeId,error:String(err?.message??err).slice(0,200)})}
   },
   /** A verified sign-in: once per UTC day. */
   signIn:who=>ledger.award(who,'sign_in',dayOf(ledger.iso())),

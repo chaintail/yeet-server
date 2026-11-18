@@ -135,6 +135,22 @@ null and the two P2 tools are not registered. It is just XP: no money, no prizes
 - `recent_wins` is always `[]`: the contract wants `{symbol, pct}`, and stored data has what each leg paid and
   received but no later price, so no gain can be stated truthfully.
 
+## Logs
+
+core, as and mcp write one JSON line per event to stdout (`connector/shared/log.mjs`: `ts` UTC, `svc`, `level`,
+`event`, fields): an `http_request` line for every request (path and query keys only, status, ms, client address from
+`Cf-Connecting-Ip`, country, user agent, request id shared between mcp/as and core, account id when signed in), a
+`tool_call` line per MCP tool call (argument keys and sizes only) and `warn` lines for security events (`account_created`,
+`account_cap_reached`, `sign_in_ok`/`sign_in_failed`, `token_issued`/`token_refreshed`/`token_rejected`, `terms_accepted`,
+`agent_approved`/`agent_denied`, `agent_registered`, `device_login_linked`, `rate_limited`, `region_blocked`,
+`input_rejected`, `core_call_failed`, `wrong_route`, operator and admin calls). Tokens, cookies,
+OAuth codes, full email addresses and signed payloads are never written. `YEET_LOG_LEVEL` (debug|info|warn|error, unset
+or empty = info) sets the floor; `/health` lines are debug. `ops/compose.yml` sends the three services to the host
+journal (`logging: journald`, tag `yeet-<container name>`), so the lines survive a recreate; the change takes effect on
+the next `up -d` that recreates the containers. Read them with (`--since` is the host's local time)
+`journalctl CONTAINER_TAG=yeet-yeet-core-1 --since "2026-11-13 00:00" -o cat` (likewise `yeet-yeet-as-1`,
+`yeet-yeet-mcp-1`; add `| jq -c 'select(.level=="warn")'` to see only security lines). `docker logs` keeps working.
+
 ## Environment variables (names only)
 
 - Sign-in server: `ISSUER`, `RESOURCE`, `PUBLIC_BASE_URL`, `PUBLIC_MODE`, `COOKIE_SECURE`, `TRUST_PROXY`, `ACCESS_TTL`,

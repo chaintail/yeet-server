@@ -2,6 +2,7 @@
 // created on first use from the environment ($STATE_DIR/trade.sqlite, ONECLICK_JWT, SOLANA_RPC_URL, BASE_RPC_URL, the
 // fee payer and the limits). In-process tests (TEST_PROFILE=1 only) swap in fakes for 1Click, the wallets and the
 // drivers with configureTradeEngine.
+import {log as slog} from '#shared/log.mjs';
 import {openTradeDb} from './db.mjs';
 import {createPipeline} from '../pipeline/pipeline.mjs';
 import {didFor} from '../identity-store.mjs';
@@ -14,7 +15,7 @@ const listeners=new Set();
 /** Subscribes to the tracker's onSettled event (XP, lane E). Returns the undo. A listener's failure is contained. */
 export function onTradeSettled(fn){listeners.add(fn);return()=>listeners.delete(fn)}
 const settled=e=>{
- console.log(JSON.stringify({event:'trade_settled',trade:e.tradeId,direction:e.direction,status:e.status}));
+ slog.info('trade_settled',{trade:e.tradeId,direction:e.direction,status:e.status});
  for(const fn of listeners)try{fn(e)}catch{}
 };
 

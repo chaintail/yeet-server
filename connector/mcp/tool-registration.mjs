@@ -9,6 +9,7 @@ import {SIGNER_META_KEY,signerMetaFromEnv} from '#shared/signing.mjs';
 import {staleness as processStaleness,staleKey,appRefresh,withRefresh,BUILD_META_KEY,TOOLS_VERSIONS,classifyToolsVersion,loggedVersion} from './refresh.mjs';
 import {refreshGuidance} from './guidance.mjs';
 import {hasScope} from '#scope-catalog';
+import {log as slog,instrumentToolCalls} from '#shared/log.mjs';
 import {withLinkToken} from '#shared/link-token.mjs';
 /**
  * The card's signer for one result. The trade page address is handed out only bound to the account (the core's
@@ -161,8 +162,10 @@ for(const t of TOOLS)if(!t.route)throw Error(`No core route for contract tool ${
 /** Results that carry `_meta['yeet/signer']` (CARD-SIGNING.md section 2.3a): the overview (its card checks the device
  * sign-in and shows the sign-in when needed), the proposals the card trades from and the trade answers it follows. Card-only, like the confirm code; never in structuredContent or content. */
 export const SIGNER_TOOLS=new Set(['yeet_propose','yeet_quote','skeet_propose','execute_trade','submit_trade_signature','trade_status']);
+/** The default for createMcpServer's `log` (one JSON line per event): through the shared logger. */
+const sharedLine=line=>{try{const {event,...fields}=JSON.parse(line);slog.info(event,fields)}catch{}};
 /** toolsVersions: {current, past} (refresh.mjs TOOLS_VERSIONS, the contract's); log: one JSON line per event. */
-export function createMcpServer({token,callCore,env=process.env,staleness=processStaleness,toolsVersions=TOOLS_VERSIONS,log=line=>console.error(line)}) {
+export function createMcpServer({token,callCore,env=process.env,staleness=processStaleness,toolsVersions=TOOLS_VERSIONS,log=sharedLine}) {
  const server=new McpServer({name:'yeet',version:'0.2.0'},{instructions:instructionsFor(env)});
  // Signing set up here (https RESOURCE, PRIVY_APP_ID, vendored signer): the signing cards declare the signing domains
  // and the trade results tell the card where the signer and the signing page are. Otherwise both stay off.
@@ -235,7 +238,7 @@ export function createMcpServer({token,callCore,env=process.env,staleness=proces
     const guidance=tellRefresh&&isObject?withRefresh(refreshGuidance(),own):own;
     const refresh=tellRefresh&&name==='yeet_overview'&&isObject?{app_refresh:appRefresh()}:{};
     const parsed=output.safeParse(guidance?{...data,...refresh,guidance}:data);
-    if(!parsed.success){console.error(JSON.stringify({event:'output_rejected',tool:name,issues:parsed.error.issues.slice(0,4).map(i=>({path:i.path.join('.'),code:i.code,message:String(i.message).slice(0,80)}))}));return toolError({error:'TEMPORARILY_UNAVAILABLE'},ctx,{tool:name});}
+    if(!parsed.success){slog.error('output_rejected',{tool:name,issues:parsed.error.issues.slice(0,4).map(i=>({path:i.path.join('.'),code:i.code,message:String(i.message).slice(0,80)}))});return toolError({error:'TEMPORARILY_UNAVAILABLE'},ctx,{tool:name});}
     const text=TEXT[name]?TEXT[name](name==='yeet_fund'?parsed.data:result,name==='yeet_fund'?deposit?.networks:undefined):JSON.stringify(parsed.data);
     // Card only: the server's card build, so a card built from another commit can tell it is stale.
     const cardMeta={[BUILD_META_KEY]:staleness.build,...(confirm?{[CONFIRM_META_KEY]:confirm}:{}),...(account?{[ACCOUNT_META_KEY]:account}:{}),...(deposit?{[DEPOSIT_META_KEY]:deposit}:{}),...(chart?{[CHART_META_KEY]:chart}:{}),...(signer&&SIGNER_TOOLS.has(name)?{[SIGNER_META_KEY]:boundSigner(signer,hint)}:{})};
@@ -253,5 +256,7 @@ export function createMcpServer({token,callCore,env=process.env,staleness=proces
    }catch(e){return toolError(e,ctx,{tool:name})}
   });
  }
+ // One tool_call line per tools/call, at dispatch (shared/log.mjs): also the calls the SDK refuses before a handler.
+ instrumentToolCalls(server,{endpoint:'chatgpt',token});
  return server;
 }

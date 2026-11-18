@@ -74,6 +74,7 @@ import {
 } from "#shared/common.mjs";
 import { betaFullRoutes, betaFullHref, BETA_FULL_LINE } from "./beta-full.mjs";
 import { regionGate } from "./region-page.mjs";
+import { log, accessLog, setAccount, safeClientId, learnRoutes } from "#shared/log.mjs";
 import { issuableScopes } from "./scopes.mjs";
 import { loginMethods } from "./login-methods.mjs";
 import { signupEmailStep, signupEmailRoutes, stepReader, stepGuard, stepAccount, StepChanged, changedBody, STEP_PATH } from "./signup-email.mjs";
@@ -326,6 +327,23 @@ provider.on("userinfo.error", (ctx, error) =>
   diagnostic("oauth_userinfo_rejected", { error_code: error?.error, status: ctx.status }),
 );
 provider.on("grant.success", observeToken);
+// Security lines (shared/log.mjs): a token issued (authorization code) or refreshed, and a token request refused.
+const grantTypeOf = (ctx) =>
+  ["authorization_code", "refresh_token"].includes(ctx.oidc?.params?.grant_type) ? ctx.oidc.params.grant_type : "other";
+const grantAccount = (ctx) =>
+  ctx.oidc?.entities?.AccessToken?.accountId ?? ctx.oidc?.entities?.Grant?.accountId ?? ctx.oidc?.entities?.RefreshToken?.accountId ?? null;
+const clientOf = (ctx) => safeClientId(ctx.oidc?.client?.clientId);
+provider.on("grant.success", (ctx) => {
+  setAccount(grantAccount(ctx));
+  log.warn(grantTypeOf(ctx) === "refresh_token" ? "token_refreshed" : "token_issued", {
+    grant_type: grantTypeOf(ctx), client_id: clientOf(ctx), account: grantAccount(ctx), status: ctx.status,
+  });
+});
+provider.on("grant.error", (ctx, error) =>
+  log.warn("token_rejected", {
+    grant_type: grantTypeOf(ctx), error: typeof error?.error === "string" ? error.error : "other", client_id: clientOf(ctx), status: ctx.status,
+  }),
+);
 // A registered client that redeems an authorization code is kept; one that never does expires (adapter.mjs).
 provider.on("grant.success", (ctx) => {
   if (ctx.oidc?.params?.grant_type === "authorization_code" && ctx.oidc.client)
@@ -374,6 +392,8 @@ try {
 if (ssrfFailed) throw Error("CIMD startup fails closed");
 const app = express();
 app.disable("x-powered-by");
+// One access line per request on every host this server answers (shared/log.mjs), the agent host included.
+app.use(accessLog({ svc: "as" }));
 app.use((q, r, next) => {
   if (q.path === "/me") {
     r.once("finish", () => diagnostic("oauth_userinfo_result", { status: r.statusCode }));
@@ -404,11 +424,13 @@ if (PUBLIC)
 function limit(max) {
   const allow = rateLimiter({ perClient: max, global: max * 10 });
   return (q, r, next) => {
-    if (!allow(q.ip ?? "unknown"))
+    if (!allow(q.ip ?? "unknown")) {
+      log.warn("rate_limited", { path: q.originalUrl.split("?")[0].slice(0, 200), limit: max });
       return r
         .set("Retry-After", "60")
         .status(429)
         .json({ error: "development rate limit" });
+    }
     next();
   };
 }
@@ -630,6 +652,8 @@ async function finishConnect(q, r, d) {
       scopes: [...grant.getOIDCScope().split(" "), ...grant.getResourceScope(RESOURCE).split(" ")].filter(Boolean),
     });
   accountConsent(d.session.accountId, { grantId });
+  setAccount(d.session.accountId);
+  log.warn("agent_approved", { account: d.session.accountId, client_id: safeClientId(d.params.client_id), scopes: granted });
   await provider.interactionFinished(q, r, { consent: { grantId } }, { mergeWithLastSubmission: true });
 }
 /** The bound sign-in form: the account's methods only, the hint and the destination posted back to /account/login. */
@@ -843,7 +867,11 @@ const waitlistAllow = rateLimiter({ perClient: 5, global: 100 });
 const sendBetaFull = betaFullRoutes(app, {
   document: authDocument, cookie, equal, originOK, formBody,
   core: (body) => coreSend("/waitlist", "", secret("core-as"), body),
-  limit: (q) => waitlistAllow(q.ip ?? "unknown"),
+  limit: (q) => {
+    const ok = waitlistAllow(q.ip ?? "unknown");
+    if (!ok) log.warn("rate_limited", { path: q.originalUrl.split("?")[0].slice(0, 200), limit: 5 });
+    return ok;
+  },
 });
 // Card signing (sign-page.mjs): the signer script the trade card loads, and the first-party signing page with its two
 // routes. The page's caller is the Privy user signed in on the page, matched to the account already linked to it.
@@ -980,6 +1008,7 @@ app.post("/interaction/:uid", formBody, async (q, r, next) => {
       return;
     }
     if (d.prompt.name === "consent" && q.body.decision === "cancel") {
+      log.warn("agent_denied", { account: d.session?.accountId ?? null, client_id: safeClientId(d.params?.client_id) });
       await provider.interactionFinished(q, r, { error: "access_denied", error_description: "The person cancelled" }, { mergeWithLastSubmission: false });
       return;
     }
@@ -1010,9 +1039,13 @@ app.use((e, _q, r, _n) => {
   observeServerError(null, e);
   return r.status(400).json({ error: "request rejected" });
 });
+// The path words the access line may write (shared/log.mjs): this app's own route definitions.
+learnRoutes(app);
 export const server = app.listen(port("AS_PORT", 38312), process.env.LISTEN_HOST || "0.0.0.0");
 const admin = express();
 admin.disable("x-powered-by");
+// Every operator call is written at warn (shared/log.mjs).
+admin.use(accessLog({ svc: "as", privileged: () => true }));
 admin.use(express.json({ limit: "8kb" }));
 admin.use((q, r, next) => {
   if (!equal(q.headers.authorization, `Bearer ${secret("operator")}`))
@@ -1022,6 +1055,7 @@ admin.use((q, r, next) => {
 admin.post("/policy", async (q, r) => {
   try {
     const { account, disconnect, reconnect, suspended } = q.body;
+    setAccount(account);
     const client = operatorClient(q.body.client, {
       privy: process.env.PRIVY_LOGIN === "1",
       test: TEST,
@@ -1047,4 +1081,5 @@ admin.post("/policy", async (q, r) => {
     r.sendStatus(503);
   }
 });
+learnRoutes(admin);
 export const adminServer = admin.listen(port("ADMIN_PORT", 38317), process.env.LISTEN_HOST || "0.0.0.0");

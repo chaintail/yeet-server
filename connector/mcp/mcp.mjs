@@ -9,11 +9,14 @@ import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/st
 import {AS,RESOURCE,CORE,secret,PUBLIC,port} from '#shared/common.mjs';
 import {readGeoblock,blockedCountry,regionGatedRoute,REGION_BLOCKED} from '#shared/region.mjs';
 import {toolMessage} from '#contracts/errors';
+import {log,accessLog,setAccount,requestIdHeader,learnRoutes,ERROR_CODE} from '#shared/log.mjs';
 const app=express();app.disable('x-powered-by');
+// One access line per request on both hosts (shared/log.mjs), health checks included at debug.
+app.use(accessLog({svc:'mcp'}));
 // The sanctions geoblock (shared/region.mjs, YEET_GEOBLOCK, off by default): on both hosts, a tool call that would
 // create an account or prepare or send a trade is refused with REGION_BLOCKED before core is asked. Reads go through.
 const GEOBLOCK=readGeoblock();
-const regionRefusal=(country,route)=>{console.log(JSON.stringify({event:'region_blocked',country,route}));return {error:REGION_BLOCKED,message:toolMessage(REGION_BLOCKED),retryable:false}};
+const regionRefusal=(country,route)=>{log.warn('region_blocked',{country,route:String(route).split('?')[0].slice(0,120)});return {error:REGION_BLOCKED,message:toolMessage(REGION_BLOCKED),retryable:false}};
 // Health first: the container check runs without the public Host header.
 app.get('/health',(_q,r)=>r.json({ok:true}));
 // The agent endpoint (mcp/agent.mjs, connector/docs/AGENT-ROUTE.md) answers only requests whose Host is the agent host; such a
@@ -45,21 +48,21 @@ export const coreTimeout=(route,method)=>method==='GET'&&route==='/overview'?800
 app.post(resourcePath,async(req,res)=>{
  const bearer=req.headers.authorization?.match(/^Bearer (\S+)$/i)?.[1];
  const auth=await authenticate(bearer,{introspect:b=>introspectBearer(b,'mcp-resource','introspection'),validate:validatePrincipal});
- if(auth.status){if(auth.status===401)challenge(res);return res.status(auth.status).json({error:auth.error})}
- const token=auth.token;
+ if(auth.status){authFailed(auth,bearer,'chatgpt');if(auth.status===401)challenge(res);return res.status(auth.status).json({error:auth.error})}
+ const token=auth.token;setAccount(token.sub);
  const blocked=blockedCountry(req.headers,GEOBLOCK);
  // The agent route: a token of an agent client never reaches the ChatGPT tools (WRONG_ROUTE, with the agent URL).
  if(AGENT_ON&&validatePrincipal(token).route==='agent')return wrongRouteAnswer(req,res,'agent');
- if(AGENT_ON&&token.aud!==RESOURCE){challenge(res);return res.status(401).json({error:'invalid_token'})}
+ if(AGENT_ON&&token.aud!==RESOURCE){log.warn('token_rejected',{endpoint:'chatgpt',reason:'audience'});challenge(res);return res.status(401).json({error:'invalid_token'})}
  async function callCore(route,body){
   const method=body===undefined?'GET':'POST';
   if(blocked&&regionGatedRoute(route,body))throw regionRefusal(blocked,route);
   try{
-   const r=await fetch(CORE+route,{method,redirect:'error',headers:{authorization:`Bearer ${secret('core-mcp')}`,'x-delegated-bearer':bearer,'content-type':'application/json'},
+   const r=await fetch(CORE+route,{method,redirect:'error',headers:{authorization:`Bearer ${secret('core-mcp')}`,'x-delegated-bearer':bearer,'content-type':'application/json',...requestIdHeader()},
     ...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(coreTimeout(route,method))});
    const raw=await r.text();if(Buffer.byteLength(raw)>128*1024)throw Error('Bound');
-   const result=JSON.parse(raw);if(!r.ok)throw {error:result.error??(r.status===401?'REAUTH_REQUIRED':'TEMPORARILY_UNAVAILABLE'),fund_url:result.fund_url,waitlist_url:result.waitlist_url,message:result.message,terms:result.terms,missing:result.missing,reason:result.reason};return result;
-  }catch(e){if(!e.error)console.error(JSON.stringify({event:'core_call_failed',route:String(route).slice(0,60),method,error:String(e?.name??'')+' '+String(e?.message??e).slice(0,120)}));throw {error:e.error??'TEMPORARILY_UNAVAILABLE',fund_url:e.fund_url,waitlist_url:e.waitlist_url,message:e.error?e.message:undefined,terms:e.terms,missing:e.missing,reason:e.reason}}
+   const result=JSON.parse(raw);if(!r.ok){coreRefused(route,method,r.status,result?.error);throw {error:result.error??(r.status===401?'REAUTH_REQUIRED':'TEMPORARILY_UNAVAILABLE'),fund_url:result.fund_url,waitlist_url:result.waitlist_url,message:result.message,terms:result.terms,missing:result.missing,reason:result.reason}}return result;
+  }catch(e){if(!e.error)log.warn('core_call_failed',{route:String(route).split('?')[0].slice(0,60),method,status:null,error:/^[A-Za-z]{1,40}$/.test(e?.name??'')?e.name:'other'});throw {error:e.error??'TEMPORARILY_UNAVAILABLE',fund_url:e.fund_url,waitlist_url:e.waitlist_url,message:e.error?e.message:undefined,terms:e.terms,missing:e.missing,reason:e.reason}}
  }
  const server=createMcpServer({token,callCore});
  const transport=new StreamableHTTPServerTransport({sessionIdGenerator:undefined,enableJsonResponse:true});
@@ -70,10 +73,18 @@ app.all(resourcePath,(_q,r)=>r.sendStatus(405));app.use((_e,_q,r,_n)=>r.sendStat
  * names the code and the right URL (shared/agent-route.mjs wrongRoute). */
 function wrongRouteAnswer(req,res,expected){
  const w=wrongRoute(expected);
+ log.warn('wrong_route',{expected});
  return res.status(403).json({jsonrpc:'2.0',id:req.body?.id??null,error:{code:-32003,message:w.message,data:w}});
 }
 // ---- the agent endpoint (only with YEET_AGENT_ROUTE=on) ----
 const agentApp=express.Router();
+/** A bearer the AS did not vouch for (401) or could not be checked (503): a security line, never the bearer. */
+function authFailed(auth,bearer,endpoint){
+ if(auth.status===401)log.warn('token_rejected',{endpoint,bearer_present:!!bearer});
+ else log.warn('token_check_unavailable',{endpoint,status:auth.status});
+}
+/** Core answered 4xx/5xx: a warn line with the route (no query), status and the error code. */
+const coreRefused=(route,method,status,error)=>log.warn('core_call_failed',{route:String(route).split('?')[0].slice(0,120),method,status,error:typeof error==='string'&&ERROR_CODE.test(error)?error:error==null?null:'other'});
 if(AGENT_ON){
  const AGENT_RESOURCE=agentResource(),agentPath=new URL(AGENT_RESOURCE).pathname||'/';
  const agentPrm='/.well-known/oauth-protected-resource'+agentPath.replace(/\/$/,'');
@@ -83,22 +94,22 @@ if(AGENT_ON){
  agentApp.post(agentPath,async(req,res)=>{
   const bearer=req.headers.authorization?.match(/^Bearer (\S+)$/i)?.[1];
   const auth=await authenticate(bearer,{introspect:b=>introspectBearer(b,'mcp-resource','introspection'),validate:validatePrincipal});
-  if(auth.status){if(auth.status===401)agentChallenge(res);return res.status(auth.status).json({error:auth.error})}
-  const principal=validatePrincipal(auth.token);
+  if(auth.status){authFailed(auth,bearer,'agent');if(auth.status===401)agentChallenge(res);return res.status(auth.status).json({error:auth.error})}
+  const principal=validatePrincipal(auth.token);setAccount(principal.subject);
   // A ChatGPT token here: WRONG_ROUTE with the ChatGPT URL. An agent token for another resource: not valid here.
   if(principal.route!=='agent')return wrongRouteAnswer(req,res,'chatgpt');
-  if(auth.token.aud!==AGENT_RESOURCE){agentChallenge(res);return res.status(401).json({error:'invalid_token'})}
+  if(auth.token.aud!==AGENT_RESOURCE){log.warn('token_rejected',{endpoint:'agent',reason:'audience'});agentChallenge(res);return res.status(401).json({error:'invalid_token'})}
   const blocked=blockedCountry(req.headers,GEOBLOCK);
   async function callCore(route,body){
    const method=body===undefined?'GET':'POST';let r,raw;
    if(blocked&&regionGatedRoute(route,body))throw regionRefusal(blocked,route);
    try{
-    r=await fetch(CORE+route,{method,redirect:'error',headers:{authorization:`Bearer ${secret('core-mcp')}`,'x-delegated-bearer':bearer,'content-type':'application/json'},
+    r=await fetch(CORE+route,{method,redirect:'error',headers:{authorization:`Bearer ${secret('core-mcp')}`,'x-delegated-bearer':bearer,'content-type':'application/json',...requestIdHeader()},
      ...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(route==='/agent/submit'||route==='/agent/prepare'?25_000:route==='/agent/quote'?15_000:8000)});
     raw=await r.text();if(Buffer.byteLength(raw)>128*1024)throw Error('Bound');
-   }catch{throw {error:'TEMPORARILY_UNAVAILABLE',retryable:true}}
-   let out;try{out=JSON.parse(raw)}catch{throw {error:r.status===401?'REAUTH_REQUIRED':'TEMPORARILY_UNAVAILABLE',retryable:r.status!==401}}
-   if(!r.ok)throw {...out,error:out?.error??(r.status===401?'REAUTH_REQUIRED':'TEMPORARILY_UNAVAILABLE')};
+   }catch(e){log.warn('core_call_failed',{route:String(route).split('?')[0].slice(0,60),method,status:null,error:/^[A-Za-z]{1,40}$/.test(e?.name??'')?e.name:'other'});throw {error:'TEMPORARILY_UNAVAILABLE',retryable:true}}
+   let out;try{out=JSON.parse(raw)}catch{coreRefused(route,method,r.status,'not_json');throw {error:r.status===401?'REAUTH_REQUIRED':'TEMPORARILY_UNAVAILABLE',retryable:r.status!==401}}
+   if(!r.ok){coreRefused(route,method,r.status,out?.error);throw {...out,error:out?.error??(r.status===401?'REAUTH_REQUIRED':'TEMPORARILY_UNAVAILABLE')}}
    return out;
   }
   const server=createAgentMcpServer({token:auth.token,callCore});
@@ -108,4 +119,6 @@ if(AGENT_ON){
  agentApp.all(agentPath,(_q,r)=>r.sendStatus(405));
  agentApp.use((_q,r)=>r.sendStatus(404));
 }
+// The path words the access line may write (shared/log.mjs): both endpoints' own route definitions.
+learnRoutes(app,agentApp);
 export const server=app.listen(port('CONNECTOR_PORT',38313),process.env.LISTEN_HOST||'0.0.0.0');

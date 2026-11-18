@@ -2,6 +2,7 @@
 // blocked country to sign-in, consent, agent approval, the trade page, the funding page or the wallet set-up gets
 // HTTP 451: a plain page for a browser, `{error: "REGION_BLOCKED", country}` for the pages' own JSON calls (the same
 // answer as the region gate it is ported from, shared/region.mjs). The terms page, sign-out, static files and the OAuth endpoints are not touched.
+import {log} from '#shared/log.mjs';
 import {document,html} from './auth-pages.mjs';
 import {readGeoblock,blockedCountry,regionGatedPath,REGION_BLOCKED} from '#shared/region.mjs';
 export const REGION_TITLE='Not available in your region';
@@ -16,7 +17,7 @@ export function regionGate(config=readGeoblock()){
   if(!config.on||!regionGatedPath(q.path))return next();
   const country=blockedCountry(q.headers,config);
   if(!country)return next();
-  console.log(JSON.stringify({event:'region_blocked',country,path:q.path}));
+  log.warn('region_blocked',{country,path:q.path});
   r.set('Cache-Control','no-store');
   if(isJson(q))return r.status(451).json({error:REGION_BLOCKED,country});
   return r.status(451).type('html').send(document(REGION_TITLE,regionBody()));
