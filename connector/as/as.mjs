@@ -74,7 +74,7 @@ import {
 } from "#shared/common.mjs";
 import { betaFullRoutes, betaFullHref, BETA_FULL_LINE } from "./beta-full.mjs";
 import { regionGate } from "./region-page.mjs";
-import { log, accessLog, setAccount } from "#shared/log.mjs";
+import { log, accessLog, setAccount, safeClientId } from "#shared/log.mjs";
 import { issuableScopes } from "./scopes.mjs";
 import { loginMethods } from "./login-methods.mjs";
 import { signupEmailStep, signupEmailRoutes, stepReader, stepGuard, stepAccount, StepChanged, changedBody, STEP_PATH } from "./signup-email.mjs";
@@ -332,7 +332,7 @@ const grantTypeOf = (ctx) =>
   ["authorization_code", "refresh_token"].includes(ctx.oidc?.params?.grant_type) ? ctx.oidc.params.grant_type : "other";
 const grantAccount = (ctx) =>
   ctx.oidc?.entities?.AccessToken?.accountId ?? ctx.oidc?.entities?.Grant?.accountId ?? ctx.oidc?.entities?.RefreshToken?.accountId ?? null;
-const clientOf = (ctx) => String(ctx.oidc?.client?.clientId ?? "").slice(0, 200) || null;
+const clientOf = (ctx) => safeClientId(ctx.oidc?.client?.clientId);
 provider.on("grant.success", (ctx) => {
   setAccount(grantAccount(ctx));
   log.warn(grantTypeOf(ctx) === "refresh_token" ? "token_refreshed" : "token_issued", {
@@ -653,7 +653,7 @@ async function finishConnect(q, r, d) {
     });
   accountConsent(d.session.accountId, { grantId });
   setAccount(d.session.accountId);
-  log.warn("agent_approved", { account: d.session.accountId, client_id: String(d.params.client_id ?? "").slice(0, 200), scopes: granted });
+  log.warn("agent_approved", { account: d.session.accountId, client_id: safeClientId(d.params.client_id), scopes: granted });
   await provider.interactionFinished(q, r, { consent: { grantId } }, { mergeWithLastSubmission: true });
 }
 /** The bound sign-in form: the account's methods only, the hint and the destination posted back to /account/login. */
@@ -1008,7 +1008,7 @@ app.post("/interaction/:uid", formBody, async (q, r, next) => {
       return;
     }
     if (d.prompt.name === "consent" && q.body.decision === "cancel") {
-      log.warn("agent_denied", { account: d.session?.accountId ?? null, client_id: String(d.params?.client_id ?? "").slice(0, 200) });
+      log.warn("agent_denied", { account: d.session?.accountId ?? null, client_id: safeClientId(d.params?.client_id) });
       await provider.interactionFinished(q, r, { error: "access_denied", error_description: "The person cancelled" }, { mergeWithLastSubmission: false });
       return;
     }

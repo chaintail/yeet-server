@@ -9,8 +9,7 @@ import {SIGNER_META_KEY,signerMetaFromEnv} from '#shared/signing.mjs';
 import {staleness as processStaleness,staleKey,appRefresh,withRefresh,BUILD_META_KEY,TOOLS_VERSIONS,classifyToolsVersion,loggedVersion} from './refresh.mjs';
 import {refreshGuidance} from './guidance.mjs';
 import {hasScope} from '#scope-catalog';
-import {log as slog,loggedTool} from '#shared/log.mjs';
-export {loggedTool,resultClass} from '#shared/log.mjs';
+import {log as slog,instrumentToolCalls} from '#shared/log.mjs';
 import {withLinkToken} from '#shared/link-token.mjs';
 /**
  * The card's signer for one result. The trade page address is handed out only bound to the account (the core's
@@ -180,7 +179,7 @@ export function createMcpServer({token,callCore,env=process.env,staleness=proces
   const output=zodSchema(z,schemas.output);
   const versioned=Object.hasOwn(schemas.advertisedInput.properties??{},'app_version');
   server.registerTool(name,{title:tool.title,description:tool.description,inputSchema:registrationInput(z,name),outputSchema:output,
-   annotations:tool.annotations,_meta:{...meta(scope),...toolMeta(name)}},loggedTool(name,token,async(input,extra)=>{
+   annotations:tool.annotations,_meta:{...meta(scope),...toolMeta(name)}},async(input,extra)=>{
    const granted=token.scope?.split(' ')??[];
    // An old scope name counts as its current one (yeet:trade is yeet:prepare).
    if(!hasScope(granted,scope))return toolError({error:'REAUTH_REQUIRED'},ctx,{tool:name});
@@ -255,7 +254,9 @@ export function createMcpServer({token,callCore,env=process.env,staleness=proces
     const content=[{type:'text',text},...(update?[{type:'text',text:update}]:[]),...(TEXT[name]&&parsed.data.guidance?[{type:'text',text:parsed.data.guidance}]:[]),...(ui?[{type:'text',text:ui}]:[]),...(style?[{type:'text',text:style}]:[])];
     return {structuredContent:parsed.data,...(Object.keys(cardMeta).length?{_meta:cardMeta}:{}),content};
    }catch(e){return toolError(e,ctx,{tool:name})}
-  }));
+  });
  }
+ // One tool_call line per tools/call, at dispatch (shared/log.mjs): also the calls the SDK refuses before a handler.
+ instrumentToolCalls(server,{endpoint:'chatgpt',token});
  return server;
 }

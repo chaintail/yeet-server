@@ -3,7 +3,7 @@
 // answer is plain JSON; a refusal is {error, message, retryable, ...}.
 import {wrongRoute} from '#shared/agent-route.mjs';
 import {OP_ID,AgentError} from './agents.mjs';
-import {log as slog} from '#shared/log.mjs';
+import {log as slog,safeClientId} from '#shared/log.mjs';
 
 /** The default for `log` (one JSON line per event): through the shared logger (shared/log.mjs). */
 const sharedLine=line=>{try{const {event,...fields}=JSON.parse(line);slog.warn(event,fields)}catch{}};
@@ -48,7 +48,7 @@ export function mountAgentRoutes(app,{agents,terms,log=sharedLine}){
    }
    const out=await fn(await agents(),q.subject,q.principal.client,q.body??{});
    // An agent key registered for the account: the server-side half of an agent approval (never the key itself).
-   if(q.path==='/agent/register')slog.warn('agent_registered',{account:q.subject,client_id:String(q.principal.client??'').slice(0,200)});
+   if(q.path==='/agent/register')slog.warn('agent_registered',{account:q.subject,client_id:safeClientId(q.principal.client)});
    r.json(out);
   }catch(e){
    if(e instanceof AgentError&&e.code==='INVALID_ARGUMENT')slog.warn('input_rejected',{route:q.path,tool:null,code:e.code});

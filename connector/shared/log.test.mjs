@@ -3,7 +3,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
-import {log,accessLog,setSink,setAccount,requestIdHeader,pathAndQueryKeys,clientAddress,emailDomain,loggedTool,resultClass} from './log.mjs';
+import {log,accessLog,setSink,setAccount,requestIdHeader,pathAndQueryKeys,clientAddress,emailDomain,resultClass,argShape,redactPath,safeClientId,scrub} from './log.mjs';
+import {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
+import {createMcpServer} from '../mcp/tool-registration.mjs';
+import {createAgentMcpServer} from '../mcp/agent.mjs';
+import {allScopes} from '#scope-catalog';
 
 const BEARER='eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ5ZWV0LXByaXZ5LWFiYyJ9.c2lnbmF0dXJlLXZhbHVl';
 const COOKIE='_session=s3cr3t-cookie-value; _interaction=another-secret-cookie';
@@ -49,21 +54,106 @@ test('a request with a bearer token, a cookie, a code= query and an email leaves
  assert.equal(ev.email,'[email]@example-mail.com');assert.equal(ev.rid,sentRid);assert.equal(ev.svc,'mcp');
 });
 
-test('the tool line has argument keys and sizes, never values',async()=>{
+// An MCP client connected in memory to one of our servers: every call goes through the SDK's tools/call dispatch.
+async function connected(server){
+ const [a,b]=InMemoryTransport.createLinkedPair();
+ const client=new Client({name:'log-test',version:'0'});
+ await Promise.all([server.connect(a),client.connect(b)]);
+ return {call:(name,args)=>client.request({method:'tools/call',params:{name,arguments:args}},{parse:x=>x,safeParse:x=>({success:true,data:x})}).catch(e=>({thrown:e})),close:()=>client.close()};
+}
+const TOKEN={scope:allScopes.join(' '),sub:'yeet-privy-abc'};
+
+test('the tool line has argument keys, types and sizes, never values',async()=>{
  const c=capture();
  try{
-  const ok=loggedTool('yeet_propose',{sub:'yeet-privy-abc'},async()=>({structuredContent:{}}));
-  await ok({amount_usdc:'5',note:EMAIL,token:BEARER});
-  const bad=loggedTool('execute_trade',{sub:'yeet-privy-abc'},async()=>({isError:true,content:[{type:'text',text:JSON.stringify({error:'LIMIT_EXCEEDED'})}]}));
-  await bad({confirm:CODE});
+  const m=await connected(createMcpServer({token:TOKEN,callCore:async()=>{throw {error:'LIMIT_EXCEEDED'}},env:{YEET_P2:'1'},log:()=>{}}));
+  await m.call('yeet_propose',{coins:['BONK'],amount_usdc:5,note:EMAIL,token:BEARER});
+  await m.close();
  }finally{c.restore()}
  const all=c.lines.join('\n');
  for(const s of SECRETS)assert.ok(!all.includes(s),`leaked: ${s}`);
- const [a,b]=c.parsed();
- assert.equal(a.event,'tool_call');assert.equal(a.tool,'yeet_propose');assert.equal(a.account,'yeet-privy-abc');assert.equal(a.result,'ok');
- assert.deepEqual(Object.keys(a.args),['amount_usdc','note','token']);assert.equal(a.args.note,JSON.stringify(EMAIL).length);
- assert.equal(b.result,'LIMIT_EXCEEDED');
+ const lines=c.parsed().filter(l=>l.event==='tool_call');
+ assert.equal(lines.length,1);
+ const [a]=lines;
+ assert.equal(a.tool,'yeet_propose');assert.equal(a.account,'yeet-privy-abc');assert.equal(a.endpoint,'chatgpt');
+ assert.deepEqual(a.args.note,{type:'string',size:EMAIL.length});assert.deepEqual(a.args.coins,{type:'array',size:1});
  assert.equal(resultClass({isError:true,structuredContent:{error:'TERMS_REQUIRED'}}),'TERMS_REQUIRED');
+});
+
+// Review finding 1: an id in the path (the provider's interaction uid, its /auth resume uid) is a sign-in credential.
+test('regression: path ids are never logged; the route template or :id is',async()=>{
+ const UID='Xq2k9_LmZ8vB3nT1yR4wAbC',UUID='5f2b1c9d-4e3a-4b6c-8d7e-9f0a1b2c3d4e';
+ const c=capture();
+ try{
+  const app=express();app.use(accessLog({svc:'as'}));
+  app.get('/interaction/:uid',(q,r)=>{log.warn('rate_limited',{path:q.originalUrl.split('?')[0]});r.sendStatus(200)});
+  // Like the provider's koa app: answered without an Express route.
+  app.use((q,r)=>{log.warn('region_blocked',{country:'IR',path:q.path,route:q.path});r.sendStatus(302)});
+  await withServer(app,async base=>{await fetch(`${base}/interaction/${UID}?x=1`);await fetch(`${base}/auth/${UID}`);await fetch(`${base}/reg/${UUID}`)});
+  await settle();
+ }finally{c.restore()}
+ const all=c.lines.join('\n');
+ assert.ok(!all.includes(UID)&&!all.includes(UUID),'an id from the path was logged');
+ const paths=c.parsed().filter(l=>l.event==='http_request').map(l=>l.path);
+ assert.deepEqual(paths,['/interaction/:uid','/auth/:id','/reg/:id']);
+ assert.equal(redactPath('/sign/trades/t_abcdefghij0123456789/requests'),'/sign/trades/:id/requests');
+ assert.equal(redactPath('/.well-known/oauth-protected-resource'),'/.well-known/oauth-protected-resource');
+ assert.equal(redactPath('/leaderboard/:board{/:window}'),'/leaderboard/:board{/:window}');
+});
+
+// Review finding 2: a CIMD client id is an https URL whose query can carry values and a percent-encoded email.
+test('regression: URL client ids are origin + path only; URL queries and %40 emails are scrubbed',()=>{
+ const CIMD='https://client.example/cimd/meta.json?owner=alice.person%40example-mail.com&k=v#frag';
+ assert.equal(safeClientId(CIMD),'https://client.example/cimd/meta.json');
+ assert.equal(safeClientId('chatgpt-registered-123'),'chatgpt-registered-123');
+ assert.equal(safeClientId('https://'+'a'.repeat(300)+'.example/x').length<=200,true);
+ const c=capture();
+ try{log.warn('token_issued',{client_id:CIMD,note:`from ${CIMD}`,other:'alice.person%40example-mail.com'})}finally{c.restore()}
+ const all=c.lines.join('\n');
+ assert.ok(!all.includes('alice.person')&&!all.includes('owner=')&&!all.includes('frag'),all);
+ const [l]=c.parsed();
+ assert.equal(l.client_id,'https://client.example/cimd/meta.json');assert.equal(l.other,'[email]@example-mail.com');
+ assert.equal(scrub('see https://x.example/a?code=Zz9&e=1 now'),'see https://x.example/a now');
+});
+
+// Review finding 3: the logger must never throw into the caller, whatever the input, at any level.
+test('regression: a deeply nested argument or a failing logger never changes the tool answer',async()=>{
+ let deep=[];for(let i=0;i<12000;i++)deep=[deep];
+ assert.deepEqual(argShape({app_version:deep}),{app_version:{type:'array',size:1}});
+ const prev=process.env.YEET_LOG_LEVEL;
+ for(const level of ['error','info']){
+  process.env.YEET_LOG_LEVEL=level;
+  const c=capture();let out;
+  try{
+   const m=await connected(createMcpServer({token:TOKEN,callCore:async()=>{throw {error:'TEMPORARILY_UNAVAILABLE'}},env:{},log:()=>{}}));
+   out=await m.call('yeet_overview',{app_version:deep});await m.close();
+  }finally{c.restore();if(prev===undefined)delete process.env.YEET_LOG_LEVEL;else process.env.YEET_LOG_LEVEL=prev}
+  assert.ok(!out.thrown,`threw: ${out.thrown}`);
+  assert.ok(!JSON.stringify(out.content??'').includes('Maximum call stack'),'the answer was replaced by a RangeError');
+ }
+ // A sink that throws, a field whose getter throws: nothing reaches the caller.
+ const prevSink=setSink(()=>{throw Error('sink down')});
+ try{assert.doesNotThrow(()=>log.warn('x',{get bad(){throw Error('getter')}}))}finally{setSink(prevSink)}
+ const c=capture();
+ try{log.warn('x',{get bad(){throw Error('getter')}})}finally{c.restore()}
+ assert.deepEqual(c.parsed().map(l=>l.event),['log_error']);
+});
+
+// Review finding 4: one tool_call line per tools/call, also when the SDK refuses the input or the tool is unknown.
+test('regression: invalid input, unknown tools and ok calls each emit exactly one tool_call line',async()=>{
+ const c=capture();
+ try{
+  const chat=await connected(createMcpServer({token:TOKEN,callCore:async()=>({}),env:{},log:()=>{}}));
+  await chat.call('submit_trade_signature',{});
+  await chat.call('no_such_tool',{a:1});
+  await chat.close();
+  const agent=await connected(createAgentMcpServer({token:TOKEN,callCore:async()=>({ok:true})}));
+  await agent.call('agent_register_key',{});
+  await agent.call('agent_how_it_works',{});
+  await agent.close();
+ }finally{c.restore()}
+ const calls=c.parsed().filter(l=>l.event==='tool_call').map(l=>[l.endpoint,l.tool,l.result]);
+ assert.deepEqual(calls,[['chatgpt','submit_trade_signature','invalid_input'],['chatgpt','no_such_tool','unknown_tool'],['agent','agent_register_key','invalid_input'],['agent','agent_how_it_works','ok']]);
 });
 
 test('health checks are debug: off by default and with YEET_LOG_LEVEL empty, on at debug',async()=>{
