@@ -9,7 +9,7 @@ import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/st
 import {AS,RESOURCE,CORE,secret,PUBLIC,port} from '#shared/common.mjs';
 import {readGeoblock,blockedCountry,regionGatedRoute,REGION_BLOCKED} from '#shared/region.mjs';
 import {toolMessage} from '#contracts/errors';
-import {log,accessLog,setAccount,requestIdHeader} from '#shared/log.mjs';
+import {log,accessLog,setAccount,requestIdHeader,learnRoutes,ERROR_CODE} from '#shared/log.mjs';
 const app=express();app.disable('x-powered-by');
 // One access line per request on both hosts (shared/log.mjs), health checks included at debug.
 app.use(accessLog({svc:'mcp'}));
@@ -62,7 +62,7 @@ app.post(resourcePath,async(req,res)=>{
     ...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(coreTimeout(route,method))});
    const raw=await r.text();if(Buffer.byteLength(raw)>128*1024)throw Error('Bound');
    const result=JSON.parse(raw);if(!r.ok){coreRefused(route,method,r.status,result?.error);throw {error:result.error??(r.status===401?'REAUTH_REQUIRED':'TEMPORARILY_UNAVAILABLE'),fund_url:result.fund_url,waitlist_url:result.waitlist_url,message:result.message,terms:result.terms,missing:result.missing,reason:result.reason}}return result;
-  }catch(e){if(!e.error)log.warn('core_call_failed',{route:String(route).split('?')[0].slice(0,60),method,status:null,error:String(e?.name??'')+' '+String(e?.message??e).slice(0,120)});throw {error:e.error??'TEMPORARILY_UNAVAILABLE',fund_url:e.fund_url,waitlist_url:e.waitlist_url,message:e.error?e.message:undefined,terms:e.terms,missing:e.missing,reason:e.reason}}
+  }catch(e){if(!e.error)log.warn('core_call_failed',{route:String(route).split('?')[0].slice(0,60),method,status:null,error:/^[A-Za-z]{1,40}$/.test(e?.name??'')?e.name:'other'});throw {error:e.error??'TEMPORARILY_UNAVAILABLE',fund_url:e.fund_url,waitlist_url:e.waitlist_url,message:e.error?e.message:undefined,terms:e.terms,missing:e.missing,reason:e.reason}}
  }
  const server=createMcpServer({token,callCore});
  const transport=new StreamableHTTPServerTransport({sessionIdGenerator:undefined,enableJsonResponse:true});
@@ -84,7 +84,7 @@ function authFailed(auth,bearer,endpoint){
  else log.warn('token_check_unavailable',{endpoint,status:auth.status});
 }
 /** Core answered 4xx/5xx: a warn line with the route (no query), status and the error code. */
-const coreRefused=(route,method,status,error)=>log.warn('core_call_failed',{route:String(route).split('?')[0].slice(0,120),method,status,error:typeof error==='string'?error.slice(0,60):null});
+const coreRefused=(route,method,status,error)=>log.warn('core_call_failed',{route:String(route).split('?')[0].slice(0,120),method,status,error:typeof error==='string'&&ERROR_CODE.test(error)?error:error==null?null:'other'});
 if(AGENT_ON){
  const AGENT_RESOURCE=agentResource(),agentPath=new URL(AGENT_RESOURCE).pathname||'/';
  const agentPrm='/.well-known/oauth-protected-resource'+agentPath.replace(/\/$/,'');
@@ -107,7 +107,7 @@ if(AGENT_ON){
     r=await fetch(CORE+route,{method,redirect:'error',headers:{authorization:`Bearer ${secret('core-mcp')}`,'x-delegated-bearer':bearer,'content-type':'application/json',...requestIdHeader()},
      ...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(route==='/agent/submit'||route==='/agent/prepare'?25_000:route==='/agent/quote'?15_000:8000)});
     raw=await r.text();if(Buffer.byteLength(raw)>128*1024)throw Error('Bound');
-   }catch(e){log.warn('core_call_failed',{route:String(route).split('?')[0].slice(0,60),method,status:null,error:String(e?.name??'')+' '+String(e?.message??e).slice(0,120)});throw {error:'TEMPORARILY_UNAVAILABLE',retryable:true}}
+   }catch(e){log.warn('core_call_failed',{route:String(route).split('?')[0].slice(0,60),method,status:null,error:/^[A-Za-z]{1,40}$/.test(e?.name??'')?e.name:'other'});throw {error:'TEMPORARILY_UNAVAILABLE',retryable:true}}
    let out;try{out=JSON.parse(raw)}catch{coreRefused(route,method,r.status,'not_json');throw {error:r.status===401?'REAUTH_REQUIRED':'TEMPORARILY_UNAVAILABLE',retryable:r.status!==401}}
    if(!r.ok){coreRefused(route,method,r.status,out?.error);throw {...out,error:out?.error??(r.status===401?'REAUTH_REQUIRED':'TEMPORARILY_UNAVAILABLE')}}
    return out;
@@ -119,4 +119,6 @@ if(AGENT_ON){
  agentApp.all(agentPath,(_q,r)=>r.sendStatus(405));
  agentApp.use((_q,r)=>r.sendStatus(404));
 }
+// The path words the access line may write (shared/log.mjs): both endpoints' own route definitions.
+learnRoutes(app,agentApp);
 export const server=app.listen(port('CONNECTOR_PORT',38313),process.env.LISTEN_HOST||'0.0.0.0');

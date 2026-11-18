@@ -29,7 +29,7 @@ import {requireLinkKey,withLinkToken} from '#shared/link-token.mjs';
 import {acceptanceOf,recordAcceptance,acceptViaLink,referralOf,decideReferral,referralCode} from './terms-store.mjs';
 import {createAccountLogin,withCardAccount,hintFor} from './account-login.mjs';
 import {hasScope} from '#scope-catalog';
-import {log,accessLog,setAccount} from '#shared/log.mjs';
+import {log,accessLog,setAccount,learnRoutes} from '#shared/log.mjs';
 // Accounts are created on the first verified sign-in (identity-store.mjs). The identity app is Privy in
 // production and the development stub only under TEST_PROFILE=1 with DEV_IDENTITY_STUB=1.
 const devStub=TEST&&process.env.DEV_IDENTITY_STUB==='1';
@@ -82,7 +82,7 @@ const app=express();app.disable('x-powered-by');
 app.use(accessLog({svc:'core',trustRequestId:true,privileged:q=>q.role==='operator',warnFrom:400}));
 app.use(express.json({limit:'32kb'}));
 /** An input the server refused: the route, the tool and where (field paths and zod codes), never the values. */
-const inputRejected=(q,tool,error)=>log.warn('input_rejected',{route:q.route?.path??q.path,tool:tool??null,issues:(error?.issues??[]).slice(0,10).map(i=>({path:(i.path??[]).join('.').slice(0,80),code:i.code}))});
+const inputRejected=(q,tool,error)=>log.warn('input_rejected',{route:q.route?.path??q.path,tool:tool??null,issues:(error?.issues??[]).slice(0,10).map(i=>({path:(i.path??[]).slice(0,8).map(x=>typeof x==='number'||/^[a-z_][a-z0-9_]{0,40}$/.test(String(x))?x:':key').join('.'),code:/^[a-z_]{1,40}$/.test(i.code)?i.code:'other'}))});
 app.get('/health',(_q,r)=>r.json({ok:true}));
 // Public facts about this deployment (version.mjs); read once at start, the settings are fixed for the process.
 const VERSION=Object.freeze(versionInfo());
@@ -500,4 +500,6 @@ app.post('/username',(q,r)=>{
  }
 });
 app.use((_e,_q,r,_n)=>r.status(400).json({error:'invalid request'}));
+// The path words the access line may write (shared/log.mjs): this app's own route definitions.
+learnRoutes(app);
 export const server=app.listen(port('CORE_PORT',38316),process.env.LISTEN_HOST||'0.0.0.0');

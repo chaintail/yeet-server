@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
-import {log,accessLog,setSink,setAccount,requestIdHeader,pathAndQueryKeys,clientAddress,emailDomain,resultClass,argShape,redactPath,safeClientId,scrub} from './log.mjs';
+import {log,accessLog,setSink,setAccount,requestIdHeader,pathAndQueryKeys,clientAddress,emailDomain,resultClass,argShape,redactPath,safeClientId,scrub,learnRoutes} from './log.mjs';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
 import {createMcpServer} from '../mcp/tool-registration.mjs';
@@ -67,7 +67,7 @@ test('the tool line has argument keys, types and sizes, never values',async()=>{
  const c=capture();
  try{
   const m=await connected(createMcpServer({token:TOKEN,callCore:async()=>{throw {error:'LIMIT_EXCEEDED'}},env:{YEET_P2:'1'},log:()=>{}}));
-  await m.call('yeet_propose',{coins:['BONK'],amount_usdc:5,note:EMAIL,token:BEARER});
+  await m.call('yeet_propose',{legs:[{coin:'BONK'}],amount_usdc:5,note:EMAIL,token:BEARER});
   await m.close();
  }finally{c.restore()}
  const all=c.lines.join('\n');
@@ -76,7 +76,8 @@ test('the tool line has argument keys, types and sizes, never values',async()=>{
  assert.equal(lines.length,1);
  const [a]=lines;
  assert.equal(a.tool,'yeet_propose');assert.equal(a.account,'yeet-privy-abc');assert.equal(a.endpoint,'chatgpt');
- assert.deepEqual(a.args.note,{type:'string',size:EMAIL.length});assert.deepEqual(a.args.coins,{type:'array',size:1});
+ assert.deepEqual(a.args.legs,{type:'array',size:1});assert.deepEqual(a.args.amount_usdc,{type:'number',size:0});assert.equal(a.args.note,undefined);
+ assert.deepEqual(a.args['(other)'],{type:'keys',size:2},'note and token are not schema keys: counted, never named');
  assert.equal(resultClass({isError:true,structuredContent:{error:'TERMS_REQUIRED'}}),'TERMS_REQUIRED');
 });
 
@@ -96,9 +97,38 @@ test('regression: path ids are never logged; the route template or :id is',async
  assert.ok(!all.includes(UID)&&!all.includes(UUID),'an id from the path was logged');
  const paths=c.parsed().filter(l=>l.event==='http_request').map(l=>l.path);
  assert.deepEqual(paths,['/interaction/:uid','/auth/:id','/reg/:id']);
+ assert.equal(redactPath('/sign/trades/t_abcdefghij0123456789/requests'),'/sign/:id/:id/:id','not learned yet');
+ {const a=express();a.post('/sign/trades/:id/requests',()=>{});learnRoutes(a)}
  assert.equal(redactPath('/sign/trades/t_abcdefghij0123456789/requests'),'/sign/trades/:id/requests');
  assert.equal(redactPath('/.well-known/oauth-protected-resource'),'/.well-known/oauth-protected-resource');
- assert.equal(redactPath('/leaderboard/:board{/:window}'),'/leaderboard/:board{/:window}');
+ // A template-looking segment in a caller's path is not trusted: templates are written only from a matched route.
+ assert.equal(redactPath('/auth/:canary'),'/auth/:id');
+});
+
+// Second review, finding 1: short lowercase ids (8-12 characters, any position, trailing slash) passed the old
+// heuristic. Now only allowlisted words (the provider's paths, our mounts, our own route definitions) are written.
+test('regression: path segments are an allowlist; short lowercase ids are redacted',async()=>{
+ for(const [raw,want] of [['/auth/abcdefgh/resume','/auth/:id/resume'],['/interaction/abcdefghijkl/','/interaction/:id/'],
+  ['/abcdefgh','/:id'],['/session/end/confirm','/session/end/confirm'],['/.well-known/openid-configuration','/.well-known/openid-configuration'],
+  ['/account/qwertyuiop/x','/account/:id/:id'],['/token?code=abc','/token']])assert.equal(redactPath(raw),want,raw);
+ const ID='abcdefgh';const c=capture();
+ try{
+  const app=express();app.use(accessLog({svc:'mcp'}));
+  app.get('/coins/:symbol',(_q,r)=>r.sendStatus(200));app.get('/zebra-route/list',(_q,r)=>r.sendStatus(200));
+  app.use((q,r)=>{log.warn('rate_limited',{path:q.originalUrl.split('?')[0]});r.sendStatus(404)});
+  learnRoutes(app);
+  await withServer(app,async base=>{
+   for(const host of ['chatgpt.yeet.win','mcp.yeet.win']){
+    await fetch(`${base}/auth/${ID}/resume`,{headers:{host}});await fetch(`${base}/zebra-route/${ID}/`,{headers:{host}});
+   }
+   await fetch(`${base}/coins/${ID}`);
+  });
+  await settle();
+ }finally{c.restore()}
+ assert.ok(!c.lines.join('\n').includes(ID),'a short id from the path was logged');
+ const paths=c.parsed().filter(l=>l.event==='http_request').map(l=>l.path);
+ // zebra-route is a word of a registered route (learned); the template answers for a matched route.
+ assert.deepEqual(paths,['/auth/:id/resume','/zebra-route/:id/','/auth/:id/resume','/zebra-route/:id/','/coins/:symbol']);
 });
 
 // Review finding 2: a CIMD client id is an https URL whose query can carry values and a percent-encoded email.
@@ -153,7 +183,28 @@ test('regression: invalid input, unknown tools and ok calls each emit exactly on
   await agent.close();
  }finally{c.restore()}
  const calls=c.parsed().filter(l=>l.event==='tool_call').map(l=>[l.endpoint,l.tool,l.result]);
- assert.deepEqual(calls,[['chatgpt','submit_trade_signature','invalid_input'],['chatgpt','no_such_tool','unknown_tool'],['agent','agent_register_key','invalid_input'],['agent','agent_how_it_works','ok']]);
+ assert.deepEqual(calls,[['chatgpt','submit_trade_signature','invalid_input'],['chatgpt',null,'unknown_tool'],['agent','agent_register_key','invalid_input'],['agent','agent_how_it_works','ok']]);
+});
+
+// Second review, finding 2: an unknown tool name is the caller's text (it can be a URL with a password).
+test('regression: an unknown tool name, unknown argument names, a forged address or query key are never logged',async()=>{
+ const NAME='https://user:canaryPassword@host/';const c=capture();
+ try{
+  const chat=await connected(createMcpServer({token:TOKEN,callCore:async()=>({}),env:{},log:()=>{}}));
+  await chat.call(NAME,{canaryArgKey:1});
+  await chat.call('submit_trade_signature',{trade_id:'t_x',canarySecretKey:'v'});
+  await chat.close();
+  const app=express();app.use(accessLog());app.get('/token',(_q,r)=>r.sendStatus(200));
+  await withServer(app,base=>fetch(`${base}/token?canaryQueryKey=1&state=s`,{headers:{'cf-connecting-ip':'canary-not-an-ip','cf-ipcountry':'canary','x-http-method-override':'x'}}));
+  await settle();
+ }finally{c.restore()}
+ const all=c.lines.join('\n');
+ assert.ok(!/canary/i.test(all),all);
+ const [unknown,known]=c.parsed().filter(l=>l.event==='tool_call');
+ assert.equal(unknown.tool,null);assert.equal(unknown.result,'unknown_tool');assert.equal(unknown.tool_name_length,NAME.length);assert.deepEqual(unknown.args,{'(other)':{type:'keys',size:1}});
+ assert.equal(known.tool,'submit_trade_signature');assert.deepEqual(known.args['(other)'],{type:'keys',size:1});
+ const access=c.parsed().find(l=>l.event==='http_request');
+ assert.deepEqual(access.query_keys,['state']);assert.equal(access.query_other,1);assert.equal(access.client,'invalid');assert.equal(access.country,null);
 });
 
 test('health checks are debug: off by default and with YEET_LOG_LEVEL empty, on at debug',async()=>{
@@ -187,7 +238,7 @@ test('core takes a well-formed caller request id; privileged and 4xx lines are w
 });
 
 test('helpers',()=>{
- assert.deepEqual(pathAndQueryKeys('/auth?client_id=x&code=y&code=z'),{path:'/auth',query_keys:['client_id','code']});
+ assert.deepEqual(pathAndQueryKeys('/auth?client_id=x&code=y&code=z'),{path:'/auth',query_keys:['client_id','code'],query_other:0});
  assert.equal(clientAddress({headers:{'x-forwarded-for':'198.51.100.1, 10.0.0.1'}}),'198.51.100.1');
  assert.equal(clientAddress({headers:{},socket:{remoteAddress:'127.0.0.1'}}),'127.0.0.1');
  assert.equal(emailDomain(EMAIL),'example-mail.com');assert.equal(emailDomain('nope'),null);

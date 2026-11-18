@@ -74,7 +74,7 @@ import {
 } from "#shared/common.mjs";
 import { betaFullRoutes, betaFullHref, BETA_FULL_LINE } from "./beta-full.mjs";
 import { regionGate } from "./region-page.mjs";
-import { log, accessLog, setAccount, safeClientId } from "#shared/log.mjs";
+import { log, accessLog, setAccount, safeClientId, learnRoutes } from "#shared/log.mjs";
 import { issuableScopes } from "./scopes.mjs";
 import { loginMethods } from "./login-methods.mjs";
 import { signupEmailStep, signupEmailRoutes, stepReader, stepGuard, stepAccount, StepChanged, changedBody, STEP_PATH } from "./signup-email.mjs";
@@ -1039,6 +1039,8 @@ app.use((e, _q, r, _n) => {
   observeServerError(null, e);
   return r.status(400).json({ error: "request rejected" });
 });
+// The path words the access line may write (shared/log.mjs): this app's own route definitions.
+learnRoutes(app);
 export const server = app.listen(port("AS_PORT", 38312), process.env.LISTEN_HOST || "0.0.0.0");
 const admin = express();
 admin.disable("x-powered-by");
@@ -1079,4 +1081,5 @@ admin.post("/policy", async (q, r) => {
     r.sendStatus(503);
   }
 });
+learnRoutes(admin);
 export const adminServer = admin.listen(port("ADMIN_PORT", 38317), process.env.LISTEN_HOST || "0.0.0.0");

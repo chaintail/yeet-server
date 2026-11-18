@@ -11,6 +11,7 @@
 // fixed `log_error` line. No untrusted value is serialized or walked deeply to size it.
 import {AsyncLocalStorage} from 'node:async_hooks';
 import {randomUUID} from 'node:crypto';
+import {isIP} from 'node:net';
 
 const LEVELS={debug:10,info:20,warn:30,error:40};
 const SVC=new Set(['core','as','mcp']);
@@ -40,19 +41,42 @@ export function safeClientId(v){
  if(/^[a-z][a-z0-9+.-]*:\/\//i.test(s)){try{const u=new URL(s);return scrubString((u.origin+u.pathname).slice(0,200))}catch{return '[invalid-url]'}}
  return scrubString(s.slice(0,200));
 }
-// ---- paths: the route template, or the path with every id-like segment as :id ----
-// Static words longer than the short-word rule below that appear in our own and the provider's paths.
-const LONG_WORDS=new Set(['openid-configuration','oauth-authorization-server','oauth-protected-resource','identity-config','login-refresh','how-it-works','email-linked','privy-login','agent-files.json']);
-// A static path word: lowercase letters with . _ - (a leading dot for .well-known), under 16 characters, no digits.
-const SHORT_WORD=/^\.?[a-z][a-z._-]{0,14}$/;
-// A template segment of an Express route: `:uid`, `:board{`, `{/:window}`, `*rest`.
-const TEMPLATE=/^[{]?[:*][A-Za-z_][A-Za-z0-9_]*[}]?$|^[{]?[A-Za-z_]*[{][:*][A-Za-z_]+[}]?$/;
-const keepSegment=seg=>seg===''||LONG_WORDS.has(seg)||SHORT_WORD.test(seg)||TEMPLATE.test(seg)||/^:[A-Za-z_]+\{$|^[{:A-Za-z_}]*:[A-Za-z_]+\}$/.test(seg);
-/** A path for a log line: no query, and every segment that is not a known static word or a template part as `:id`. */
-export function redactPath(path){
- const p=String(path??'').split(/[?#]/)[0].slice(0,400);
- return p.split('/').slice(0,20).map(seg=>keepSegment(seg)?seg:':id').join('/').slice(0,200);
+// ---- paths: an ALLOWLIST of static words; every other segment is :id ----
+// A path segment is logged only when it is a word of our own route definitions (learnRoutes, at startup, from every
+// Express app and router) or of the fixed list below (the OIDC provider's own paths and our app.use mount points,
+// which Express does not keep as strings). Anything else, whatever it looks like, is `:id`: unknown is redacted.
+const FIXED_WORDS=['auth','resume','token','introspection','revocation','me','userinfo','jwks','reg','session','end','confirm',
+ 'success','interaction','login','consent','request','device','backchannel','.well-known','openid-configuration',
+ 'oauth-authorization-server','oauth-protected-resource','health','version','cards','account','fund','sign','api','approve',
+ 'agent','mcp','privy-login','wallets','terms','favicon.ico'];
+const WORDS=new Set(FIXED_WORDS);
+const LITERAL=/^[A-Za-z0-9._~-]{1,60}$/;
+function learnPattern(pattern){
+ for(const seg of String(pattern).split('/'))for(const part of seg.split(/[{}]/))
+  if(part&&!part.startsWith(':')&&!part.startsWith('*')&&LITERAL.test(part))WORDS.add(part);
 }
+function learnStack(stack,depth){
+ if(!Array.isArray(stack)||depth>6)return;
+ for(const layer of stack){
+  const p=layer?.route?.path;
+  if(typeof p==='string')learnPattern(p);else if(Array.isArray(p))p.filter(x=>typeof x==='string').forEach(learnPattern);
+  if(layer?.handle?.stack)learnStack(layer.handle.stack,depth+1);
+ }
+}
+/** Adds the literal path words of every route registered on these Express apps or routers to the allowlist. Call once
+ * each app has all its routes (before listen). Never throws. */
+export function learnRoutes(...apps){
+ for(const a of apps){try{learnStack(a?.router?.stack??a?.stack,0)}catch{}}
+}
+/** A path for a log line: no query, every segment that is not an allowlisted static word as `:id`. */
+export function redactPath(path){
+ try{
+  const p=String(path??'').split(/[?#]/)[0].slice(0,400);
+  return p.split('/').slice(0,20).map(seg=>seg===''||WORDS.has(seg)?seg:':id').join('/').slice(0,200);
+ }catch{return ':id'}
+}
+// A value the logger built itself from code (a route template): written as is, not redacted again.
+class Trusted{constructor(v){this.v=v}}
 // Field names that carry a path or a client id in any event: redacted wherever they appear.
 const PATH_KEY=/^(path|route)$/,CLIENT_KEY=/^(client_id|client)$/;
 export function scrub(value,depth=0){
@@ -64,7 +88,7 @@ export function scrub(value,depth=0){
  for(const k in value){
   if(!Object.hasOwn(value,k))continue;if(++n>40)break;
   const v=value[k];
-  out[k]=SECRET_KEY.test(k)?'[redacted]':PATH_KEY.test(k)&&typeof v==='string'&&v.startsWith('/')?redactPath(v):CLIENT_KEY.test(k)&&typeof v==='string'?safeClientId(v):scrub(v,depth+1);
+  out[k]=v instanceof Trusted?v.v:SECRET_KEY.test(k)?'[redacted]':PATH_KEY.test(k)&&typeof v==='string'&&v.startsWith('/')?redactPath(v):CLIENT_KEY.test(k)&&typeof v==='string'?safeClientId(v):scrub(v,depth+1);
  }
  return out;
 }
@@ -103,17 +127,27 @@ const RID=/^[A-Za-z0-9-]{8,64}$/;
 const cap=(v,n)=>typeof v==='string'?v.slice(0,n):undefined;
 /** The person's address: Cloudflare's Cf-Connecting-Ip, else the first X-Forwarded-For hop, else the socket. */
 export function clientAddress(q){
- const cf=cap(q.headers?.['cf-connecting-ip'],64)?.trim();if(cf)return cf;
- const xff=cap(q.headers?.['x-forwarded-for'],512)?.split(',')[0].trim();if(xff)return xff.slice(0,64);
+ // Header values are the caller's: only a well-formed IP address is written, anything else is 'invalid'.
+ const ip=v=>isIP(v)?v:'invalid';
+ const cf=cap(q.headers?.['cf-connecting-ip'],64)?.trim();if(cf)return ip(cf);
+ const xff=cap(q.headers?.['x-forwarded-for'],512)?.split(',')[0].trim();if(xff)return ip(xff.slice(0,64));
  return q.socket?.remoteAddress??null;
 }
+const METHODS=new Set(['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS']);
+const COUNTRY=/^[A-Z0-9]{2}$/;
+// Query keys are the caller's too: only these (the OAuth/OIDC parameters and the ones our pages read) are written by
+// name; the others are counted.
+const QUERY_KEYS=new Set(['client_id','redirect_uri','response_type','response_mode','scope','state','code','code_challenge',
+ 'code_challenge_method','resource','prompt','login_hint','id_token_hint','nonce','request_uri','request','max_age','ui_locales',
+ 'claims','acr_values','display','error','error_description','iss','post_logout_redirect_uri','user_code','back','deposit',
+ 'filter','from','h','next','page','query','redirect','reference_id','t','trade_id','username']);
 /** Path without the query string, and the query's keys (never its values). */
 export function pathAndQueryKeys(rawUrl){
  const url=String(rawUrl??'');const i=url.indexOf('?');
- const path=(i<0?url:url.slice(0,i)).slice(0,200);
- if(i<0)return {path,query_keys:[]};
- const keys=[...new Set([...new URLSearchParams(url.slice(i+1)).keys()])].slice(0,20).map(k=>k.slice(0,40));
- return {path,query_keys:keys};
+ const path=(i<0?url:url.slice(0,i)).slice(0,400);
+ if(i<0)return {path,query_keys:[],query_other:0};
+ const all=[...new Set([...new URLSearchParams(url.slice(i+1,i+1+8192)).keys()])];
+ return {path,query_keys:all.filter(k=>QUERY_KEYS.has(k)).slice(0,20),query_other:all.filter(k=>!QUERY_KEYS.has(k)).length};
 }
 /** Express middleware, first on every app: one `http_request` line per request when its response ends (or the client
  * goes away). trustRequestId: take a well-formed x-request-id from the caller (core, called by mcp and as only);
@@ -124,7 +158,8 @@ export function pathAndQueryKeys(rawUrl){
  * files, 404s). Both go through redactPath. */
 export function routePath(q,rawPath){
  const tpl=q.route?.path;
- if(typeof tpl==='string')return redactPath((typeof q.baseUrl==='string'?q.baseUrl:'')+tpl);
+ // The template is our code (`/interaction/:uid`); the mount prefix, if any, is checked like any path.
+ if(typeof tpl==='string')return new Trusted(((typeof q.baseUrl==='string'&&q.baseUrl?redactPath(q.baseUrl):'')+tpl).slice(0,200));
  return redactPath(rawPath);
 }
 export function accessLog({svc,trustRequestId=false,privileged=()=>false,warnFrom=500}={}){
@@ -135,7 +170,7 @@ export function accessLog({svc,trustRequestId=false,privileged=()=>false,warnFro
    const incoming=q.headers['x-request-id'];
    const rid=trustRequestId&&typeof incoming==='string'&&RID.test(incoming)?incoming:randomUUID();
    store={rid,account:undefined,...(SVC.has(svc)?{svc}:{})};
-   const {path:rawPath,query_keys}=pathAndQueryKeys(q.originalUrl??q.url);
+   const {path:rawPath,query_keys,query_other}=pathAndQueryKeys(q.originalUrl??q.url);
    let done=false;
    const end=()=>{
     try{
@@ -145,8 +180,8 @@ export function accessLog({svc,trustRequestId=false,privileged=()=>false,warnFro
      const path=routePath(q,rawPath);
      const level=rawPath==='/health'?'debug':isPrivileged||status>=warnFrom?'warn':'info';
      const account=store.account??(typeof q.subject==='string'&&q.subject?q.subject.slice(0,100):undefined);
-     als.run(store,()=>log(level,'http_request',{rid,method:q.method,path,query_keys,status,ms:Number((process.hrtime.bigint()-start)/1000n)/1000,
-      client:clientAddress(q),country:cap(q.headers['cf-ipcountry'],8)??null,ua:cap(q.headers['user-agent'],200)??null,
+     als.run(store,()=>log(level,'http_request',{rid,method:METHODS.has(q.method)?q.method:'OTHER',path,query_keys,...(query_other?{query_other}:{}),status,ms:Number((process.hrtime.bigint()-start)/1000n)/1000,
+      client:clientAddress(q),country:COUNTRY.test(q.headers['cf-ipcountry']??'')?q.headers['cf-ipcountry']:null,ua:cap(q.headers['user-agent'],200)??null,
       ...(account?{account}:{}),...(isPrivileged?{privileged:true}:{}),...(r.writableFinished?{}:{aborted:true})}));
     }catch{logError()}
    };
@@ -158,12 +193,15 @@ export function accessLog({svc,trustRequestId=false,privileged=()=>false,warnFro
 }
 /** Argument keys with a shallow type and size each, never the values and never by serializing them: a string's or an
  * array's length, an object's own key count (counted up to 1000), 0 otherwise. At most 30 keys. Never throws. */
-export function argShape(args){
+export function argShape(args,allowed){
  try{
   if(!args||typeof args!=='object'||Array.isArray(args))return {};
-  const out={};let n=0;
+  const out={};let n=0,other=0;
   for(const k in args){
-   if(!Object.hasOwn(args,k))continue;if(++n>30)break;
+   if(!Object.hasOwn(args,k))continue;
+   // Argument names are the caller's: only the tool's own schema keys are written; the others are counted.
+   if(allowed&&!allowed.has(k)){other++;continue}
+   if(++n>30)break;
    let v,type,size=0;
    try{v=args[k]}catch{v=undefined}
    if(typeof v==='string'){type='string';size=v.length}
@@ -172,19 +210,23 @@ export function argShape(args){
    else type=v===null?'null':typeof v;
    out[String(k).slice(0,40)]={type,size};
   }
+  if(other)out['(other)']={type:'keys',size:other};
   return out;
  }catch{return {}}
 }
 /** The result class of a tools/call answer: ok; the error code the model was given (our JSON refusals); invalid_input
  * (the SDK refused the arguments before the handler); unknown_tool; output_invalid; threw (the handler threw, the SDK
  * answered with its message). Never throws. */
+/** An error code as our contracts write them (TERMS_REQUIRED); anything else is not written. */
+export const ERROR_CODE=/^[A-Z][A-Z0-9_]{1,40}$/;
 export function resultClass(out,{known=true}={}){
  try{
   if(!known)return 'unknown_tool';
   if(!out?.isError)return 'ok';
-  if(typeof out.structuredContent?.error==='string')return out.structuredContent.error.slice(0,60);
+  const code=e=>typeof e==='string'&&ERROR_CODE.test(e)?e:'error';
+  if(typeof out.structuredContent?.error==='string')return code(out.structuredContent.error);
   const text=typeof out.content?.[0]?.text==='string'?out.content[0].text:'';
-  try{const e=JSON.parse(text)?.error;if(typeof e==='string')return e.slice(0,60)}catch{}
+  try{const e=JSON.parse(text)?.error;if(typeof e==='string')return code(e)}catch{}
   if(/Input validation error|Invalid arguments for tool/.test(text))return 'invalid_input';
   if(/Output validation error/.test(text))return 'output_invalid';
   if(/^(MCP error -?\d+: )?Tool \S+ (not found|disabled)/.test(text))return 'unknown_tool';
@@ -200,6 +242,8 @@ export function instrumentToolCalls(mcpServer,{endpoint='chatgpt',token}={}){
   const orig=handlers?.get?.('tools/call');
   if(typeof orig!=='function'){log.error('log_error',{what:'tools_call_handler_missing',endpoint});return}
   const known=name=>{try{return Object.hasOwn(mcpServer._registeredTools??{},name)}catch{return false}};
+  // The tool's own argument names (its zod input shape), the only names written.
+  const keysOf=name=>{try{const i=mcpServer._registeredTools[name]?.inputSchema;const shape=i?.shape??i?._zod?.def?.shape;return new Set(shape?Object.keys(shape):[])}catch{return new Set()}};
   handlers.set('tools/call',async(request,extra)=>{
    const start=performance.now();let out,threw=false;
    try{return out=await orig(request,extra)}
@@ -208,8 +252,10 @@ export function instrumentToolCalls(mcpServer,{endpoint='chatgpt',token}={}){
     try{
      const name=typeof request?.params?.name==='string'?request.params.name:'';
      const isKnown=known(name);
-     log.info('tool_call',{endpoint,tool:isKnown?name:String(name).replace(/[^A-Za-z0-9_-]/g,'').slice(0,64),account:typeof token?.sub==='string'?token.sub:null,
-      result:!isKnown?'unknown_tool':threw?'threw':resultClass(out),ms:Math.round(performance.now()-start),args:argShape(request?.params?.arguments)});
+     // A name that is not a registered tool is the caller's text: never written, only its length.
+     log.info('tool_call',{endpoint,tool:isKnown?name:null,...(isKnown?{}:{tool_name_length:typeof request?.params?.name==='string'?request.params.name.length:null}),
+      account:typeof token?.sub==='string'?token.sub:null,result:!isKnown?'unknown_tool':threw?'threw':resultClass(out),ms:Math.round(performance.now()-start),
+      args:argShape(request?.params?.arguments,isKnown?keysOf(name):new Set())});
     }catch{logError()}
    }
   });
