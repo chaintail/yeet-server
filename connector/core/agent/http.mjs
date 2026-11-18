@@ -3,6 +3,10 @@
 // answer is plain JSON; a refusal is {error, message, retryable, ...}.
 import {wrongRoute} from '#shared/agent-route.mjs';
 import {OP_ID,AgentError} from './agents.mjs';
+import {log as slog} from '#shared/log.mjs';
+
+/** The default for `log` (one JSON line per event): through the shared logger (shared/log.mjs). */
+const sharedLine=line=>{try{const {event,...fields}=JSON.parse(line);slog.warn(event,fields)}catch{}};
 
 /** [method, path, scope] of every agent route. */
 export const AGENT_ROUTE_SCOPES=Object.freeze([
@@ -32,7 +36,7 @@ export function routeGuard(q,r,next){
 }
 
 /** The routes. agents(): the agent service (createAgents); terms(subject): {accepted, page_url?}. */
-export function mountAgentRoutes(app,{agents,terms,log=line=>console.error(line)}){
+export function mountAgentRoutes(app,{agents,terms,log=sharedLine}){
  const handler=(fn,{needsTerms=true}={})=>async(q,r)=>{
   if(q.role!=='mcp')return r.sendStatus(403);
   r.set('Cache-Control','no-store');
@@ -42,8 +46,12 @@ export function mountAgentRoutes(app,{agents,terms,log=line=>console.error(line)
     if(!t.accepted)return r.status(403).json({error:'TERMS_REQUIRED',retryable:false,
      message:`The YEET account has not accepted the current YEET terms. Ask the person to accept them${t.page_url?` at ${t.page_url}`:' in ChatGPT or on yeet.win'}, then try again.`,...(t.page_url?{terms_url:t.page_url}:{})});
    }
-   r.json(await fn(await agents(),q.subject,q.principal.client,q.body??{}));
+   const out=await fn(await agents(),q.subject,q.principal.client,q.body??{});
+   // An agent key registered for the account: the server-side half of an agent approval (never the key itself).
+   if(q.path==='/agent/register')slog.warn('agent_registered',{account:q.subject,client_id:String(q.principal.client??'').slice(0,200)});
+   r.json(out);
   }catch(e){
+   if(e instanceof AgentError&&e.code==='INVALID_ARGUMENT')slog.warn('input_rejected',{route:q.path,tool:null,code:e.code});
    if(e instanceof AgentError)return r.status(e.status).json({error:e.code,message:e.message,retryable:RETRYABLE.has(e.code),...(e.extra??{})});
    if(e?.name==='TradeError'){
     log(JSON.stringify({event:'agent_trade_refused',route:q.path,code:e.code,detail:String(e.detail??'').slice(0,200)}));

@@ -10,6 +10,7 @@
 // Idempotent: the user's linked wallets are read first and a chain that has a wallet is never created again;
 // concurrent calls for one person share one run; the create key is stable per person, chain and 10-minute window
 // (a replay answers the same wallet) and moves on after a failure (Privy caches 4xx/5xx answers against a key).
+import {log as slog} from '#shared/log.mjs';
 import {createHash} from 'node:crypto';
 import {createPrivyApi,privyConfig,PrivyApiError} from './privy-api.mjs';
 import {signerAttachment} from './signer-privy.mjs';
@@ -36,7 +37,7 @@ export function walletSetupConfig(env=process.env){
  return {privy,legacySignerId:q&&ID.test(q)?q:null};
 }
 
-const log=(event,fields)=>console.log(JSON.stringify({event,...fields}));
+const log=(event,fields)=>slog.info(event,fields);
 
 /**
  * ensure(accountId, did) -> {ready, chains: {base, solana}: {address, created, signer: 'attached'|'missing'}}.

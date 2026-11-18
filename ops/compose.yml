@@ -22,6 +22,8 @@ services:
   as:
     <<: *runtime
     restart: unless-stopped
+    # Logs go to the host journal, so they outlive a container recreate (README.md, Logs).
+    logging: {driver: journald, options: {tag: 'yeet-{{.Name}}'}}
     command: [as/server.mjs, as]
     environment:
       ISSUER: ${ISSUER:-}
@@ -60,6 +62,7 @@ services:
       STATE_DIR: /state
       CORE_INTERNAL: ${CORE_INTERNAL:-}
       YEET_DAILY_CAP_USDC: ${YEET_DAILY_CAP_USDC:-}
+      YEET_LOG_LEVEL: ${YEET_LOG_LEVEL:-}
     env_file: [{path: /var/lib/yeet-connector/config/as.env, required: false}]
     ports: ['127.0.0.1:38860:38312']
     volumes: ['/var/lib/yeet-connector/as-state:/state', '/var/lib/yeet-connector/secrets/as:/secrets:ro']
@@ -69,6 +72,7 @@ services:
   mcp:
     <<: *runtime
     restart: unless-stopped
+    logging: {driver: journald, options: {tag: 'yeet-{{.Name}}'}}
     command: [mcp/server.mjs, mcp]
     environment:
       ISSUER: ${ISSUER:-}
@@ -90,6 +94,7 @@ services:
       TRUST_PROXY: ${TRUST_PROXY:-}
       YEET_GEOBLOCK: ${YEET_GEOBLOCK:-}
       YEET_GEOBLOCK_COUNTRIES: ${YEET_GEOBLOCK_COUNTRIES:-}
+      YEET_LOG_LEVEL: ${YEET_LOG_LEVEL:-}
     env_file: [{path: /var/lib/yeet-connector/config/connector.env, required: false}]
     ports: ['127.0.0.1:38861:38313']
     volumes: ['/var/lib/yeet-connector/secrets/mcp:/secrets:ro']
@@ -99,6 +104,7 @@ services:
   core:
     <<: *runtime
     restart: unless-stopped
+    logging: {driver: journald, options: {tag: 'yeet-{{.Name}}'}}
     command: [core/server.mjs, core]
     environment:
       ISSUER: ${ISSUER:-}
@@ -204,6 +210,7 @@ services:
       # Where the YEET terms are accepted: chat (default) or page (the /account/terms page). connector/core/terms.mjs.
       YEET_TERMS_MODE: ${YEET_TERMS_MODE:-}
       STATE_DIR: /state
+      YEET_LOG_LEVEL: ${YEET_LOG_LEVEL:-}
     # Secret values (PRIVY_APP_SECRET, YEET_PRIVY_AUTHORIZATION_KEY, ONECLICK_JWT, YEET_XP_SECRET) only from this file.
     env_file: [{path: /var/lib/yeet-connector/config/core.env, required: false}]
     volumes: ['/var/lib/yeet-connector/core-state:/state', '/var/lib/yeet-connector/secrets/core:/secrets:ro']

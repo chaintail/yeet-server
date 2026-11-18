@@ -5,6 +5,7 @@
 import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {z} from 'zod';
 import {hasScope} from '#scope-catalog';
+import {loggedTool} from '#shared/log.mjs';
 
 const SYMBOL=z.string().regex(/^\$?[A-Za-z0-9]{2,12}$/).describe('Coin symbol, e.g. WIF.');
 const USDC=z.string().regex(/^\d{1,7}(\.\d{1,6})?$/);
@@ -72,12 +73,12 @@ const refusal=e=>{
 export function createAgentMcpServer({token,callCore}){
  const server=new McpServer({name:'yeet-agent',version:'0.1.0'},{instructions:'YEET for agents. Call agent_how_it_works first. Every result is JSON; refusals carry error, message and retryable.'});
  for(const [name,[title,description,shape,route,scope,readOnly]] of Object.entries(TOOLS)){
-  server.registerTool(name,{title,description,inputSchema:shape,annotations:{readOnlyHint:readOnly,openWorldHint:false,destructiveHint:false}},async(args)=>{
+  server.registerTool(name,{title,description,inputSchema:shape,annotations:{readOnlyHint:readOnly,openWorldHint:false,destructiveHint:false}},loggedTool(name,token,async(args)=>{
    if(!hasScope(typeof token.scope==='string'?token.scope.split(' '):[],scope))return refusal({error:'REAUTH_REQUIRED',message:'This connection lacks the permission for this tool. Connect YEET again and approve it.',retryable:false});
    if(!route)return result({text:HOW_IT_WORKS});
    try{const [path,body]=route(args??{});return result(await callCore(path,body))}
    catch(e){return refusal(e)}
-  });
+  },{endpoint:'agent'}));
  }
  return server;
 }

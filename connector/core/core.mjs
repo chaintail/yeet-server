@@ -29,6 +29,7 @@ import {requireLinkKey,withLinkToken} from '#shared/link-token.mjs';
 import {acceptanceOf,recordAcceptance,acceptViaLink,referralOf,decideReferral,referralCode} from './terms-store.mjs';
 import {createAccountLogin,withCardAccount,hintFor} from './account-login.mjs';
 import {hasScope} from '#scope-catalog';
+import {log,accessLog,setAccount} from '#shared/log.mjs';
 // Accounts are created on the first verified sign-in (identity-store.mjs). The identity app is Privy in
 // production and the development stub only under TEST_PROFILE=1 with DEV_IDENTITY_STUB=1.
 const devStub=TEST&&process.env.DEV_IDENTITY_STUB==='1';
@@ -57,14 +58,14 @@ onTradeSettled(e=>{if(p2On()&&!String(e?.accountId??'').startsWith(AGENT_PREFIX)
 const HOME_XP_KEYS=homeXpKeys(toolSchemas.yeet_home.output);
 // The card draws the wheel from the contract's x-yeet-spin; the server draws the award. Refuse to start if they differ.
 checkSpinTable(contract['x-yeet-spin']);
-const xpSafe=(what,fn,fallback)=>{try{return fn()}catch(e){console.error(JSON.stringify({event:'xp_failed',what,error:String(e?.message??e).slice(0,200)}));return fallback}};
+const xpSafe=(what,fn,fallback)=>{try{return fn()}catch(e){log.error('xp_failed',{what,error:String(e?.message??e).slice(0,200)});return fallback}};
 // Lucky wheel (xp/lucky.mjs). The claim runs from the tracker's settle event and again from every trade_status read
 // (as trade XP does), so a lost event still claims; lucky.settle claims once whatever the path.
 const luckyClaim=(engine,accountId,tradeId,view)=>{
  const x=xpRuntime(),proposal=engine.proposalOf({accountId},tradeId);
  if(!x.lucky.linked(proposal))return;
  const r=x.lucky.settle(accountId,proposal,view??engine.status({accountId},tradeId));
- if(r.fresh)console.log(JSON.stringify({event:'lucky_claimed',trade:tradeId,grant:r.grant?.id??null}));
+ if(r.fresh)log.info('lucky_claimed',{trade:tradeId,grant:r.grant?.id??null});
 };
 function luckySettled(e){
  if(e?.direction!=='yeet')return;
@@ -76,7 +77,12 @@ const luckyAvailable=engine=>{
  if(availability?.client!==engine.client)availability={client:engine.client,check:createAvailability({probe:quoteProbe({client:engine.client,catalog:engine.catalog})})};
  return availability.check.available;
 };
-const app=express();app.disable('x-powered-by');app.use(express.json({limit:'32kb'}));
+const app=express();app.disable('x-powered-by');
+// One access line per request (shared/log.mjs): the caller's (mcp, as) request id, warn from 400 and for operator calls.
+app.use(accessLog({svc:'core',trustRequestId:true,privileged:q=>q.role==='operator',warnFrom:400}));
+app.use(express.json({limit:'32kb'}));
+/** An input the server refused: the route, the tool and where (field paths and zod codes), never the values. */
+const inputRejected=(q,tool,error)=>log.warn('input_rejected',{route:q.route?.path??q.path,tool:tool??null,issues:(error?.issues??[]).slice(0,10).map(i=>({path:(i.path??[]).join('.').slice(0,80),code:i.code}))});
 app.get('/health',(_q,r)=>r.json({ok:true}));
 // Public facts about this deployment (version.mjs); read once at start, the settings are fixed for the process.
 const VERSION=Object.freeze(versionInfo());
@@ -84,7 +90,7 @@ app.get('/version',(_q,r)=>r.json(VERSION));
 app.use((q,r,next)=>{const token=q.headers.authorization?.replace(/^Bearer /,'');q.role=['mcp','as','operator'].find(role=>equal(token,secret(`core-${role}`)));if(!q.role)return r.sendStatus(401);next()});
 // A new person while the limited beta is full (YEET_BETA_USER_CAP, identity-store.mjs): 403 BETA_FULL, no account;
 // the sign-in server then shows the "beta is full" page. Every other refusal is the bare 403 it always was.
-app.post('/identity/resolve',(q,r)=>{if(q.role!=='as')return r.sendStatus(403);const out=resolveSignUp(q.body),id=out.id;if(out.refused==='BETA_FULL'){console.log(JSON.stringify({event:'signup_beta_full'}));return r.status(403).json({error:'BETA_FULL'})}if(!id||read('policy.json')[id]?.suspended)return r.sendStatus(403);if(p2On())xpSafe('sign_in',()=>xpRuntime().signIn(id));r.json({id})});
+app.post('/identity/resolve',(q,r)=>{if(q.role!=='as')return r.sendStatus(403);const out=resolveSignUp(q.body),id=out.id;setAccount(id);if(out.refused==='BETA_FULL'){log.warn('signup_beta_full',{});return r.status(403).json({error:'BETA_FULL'})}if(!id||read('policy.json')[id]?.suspended)return r.sendStatus(403);if(p2On())xpSafe('sign_in',()=>xpRuntime().signIn(id));r.json({id})});
 // The limited beta, for the sign-in page (as.mjs /account/identity-config): signup false while the beta is full, so
 // the page asks Privy to sign in existing users only and creates nobody there.
 app.get('/signup',(q,r)=>{if(q.role!=='as')return r.sendStatus(403);r.json({signup:!betaFull()})});
@@ -92,12 +98,12 @@ app.get('/signup',(q,r)=>{if(q.role!=='as')return r.sendStatus(403);r.json({sign
 // The answer is the same whether the address was new or already listed. No email is sent.
 app.post('/waitlist',(q,r)=>{
  if(q.role!=='as')return r.sendStatus(403);
- try{const out=joinWaitlist({email:q.body?.email,source:q.body?.source});console.log(JSON.stringify({event:'waitlist_joined',source:q.body.source,fresh:out.fresh}));r.json({ok:true})}
- catch(e){if(e instanceof WaitlistError)return r.status(400).json({error:e.code});console.error(JSON.stringify({event:'waitlist_failed',error:String(e?.message??e).slice(0,200)}));r.sendStatus(503)}
+ try{const out=joinWaitlist({email:q.body?.email,source:q.body?.source});log.warn('waitlist_joined',{source:q.body.source,fresh:out.fresh});r.json({ok:true})}
+ catch(e){if(e instanceof WaitlistError){inputRejected(q,'waitlist');return r.status(400).json({error:e.code})}log.error('waitlist_failed',{error:String(e?.message??e).slice(0,200)});r.sendStatus(503)}
 });
 // The signing page (as/sign-page.mjs): the sign-in server verified a Privy access token and asks which account that
 // identity is ALREADY linked to. Unlike /identity/resolve this never creates an account and awards nothing.
-app.post('/identity/lookup',(q,r)=>{if(q.role!=='as')return r.sendStatus(403);const id=lookupIdentity(q.body);if(!id)return r.sendStatus(404);if(read('policy.json')[id]?.suspended)return r.sendStatus(403);r.json({id})});
+app.post('/identity/lookup',(q,r)=>{if(q.role!=='as')return r.sendStatus(403);const id=lookupIdentity(q.body);setAccount(id);if(!id)return r.sendStatus(404);if(read('policy.json')[id]?.suspended)return r.sendStatus(403);r.json({id})});
 app.post('/policy',(q,r)=>{if(q.role!=='operator')return r.sendStatus(403);const {account,client,suspended,disconnect,reconnect}=q.body;if(!user(account))return r.sendStatus(400);const p=read('policy.json');const row=p[account]||{clients:{}};if(typeof suspended==='boolean')row.suspended=suspended;if(disconnect||reconnect){if(typeof client!=='string'||!client)return r.sendStatus(400);row.clients[client]=!!disconnect}p[account]=row;write('policy.json',p);r.json({ok:true})});
 app.get('/policy',(q,r)=>{if(q.role!=='as')return r.sendStatus(403);const subject=q.headers['x-yeet-subject'];const exists=!!user(subject);r.json({...read('policy.json')[subject],exists,eligible:exists})});
 // Operator trades (ops/first-trade.mjs): the operator starts a trade for one account from the box, without ChatGPT,
@@ -115,17 +121,17 @@ function operatorTrade(op,fn){
   if(!user(accountId))return r.sendStatus(400);
   if(read('policy.json')[accountId]?.suspended)return r.sendStatus(403);
   const ctx={accountId,clientId:OPERATOR_CLIENT};
-  console.log(JSON.stringify({event:'operator_trade',op,account:accountId,proposal:body.proposal_id??null,trade:body.trade_id??null}));
+  log.warn('operator_trade',{op,account:accountId,proposal:body.proposal_id??null,trade:body.trade_id??null});
   try{
    const e=await tradeEngine();
    // Reads (trading, status) stay open so a trade can be followed after trading is turned off again.
    if((op==='propose'||op==='execute')&&!e.limits.liveAccounts?.includes(accountId))return r.status(403).json(failure('TRADING_PAUSED'));
    let args=body;
-   if(OPERATOR_INPUT[op]){const a=inputs[OPERATOR_INPUT[op]].safeParse(body);if(!a.success)return r.status(400).json(failure('INVALID_ARGUMENT'));args=a.data}
+   if(OPERATOR_INPUT[op]){const a=inputs[OPERATOR_INPUT[op]].safeParse(body);if(!a.success){inputRejected(q,OPERATOR_INPUT[op],a.error);return r.status(400).json(failure('INVALID_ARGUMENT'))}args=a.data}
    r.json(await fn(e,ctx,args));
   }catch(e){
-   if(e?.name==='TradeError'){console.error(JSON.stringify({event:'operator_trade_refused',op,code:e.code,detail:String(e.detail??'').slice(0,200)}));return r.status(CODE_STATUS[e.code]??409).json(failure(e.code))}
-   console.error(JSON.stringify({event:'operator_trade_failed',op,error:String(e?.message??e).slice(0,200)}));
+   if(e?.name==='TradeError'){log.warn('operator_trade_refused',{op,code:e.code,detail:String(e.detail??'').slice(0,200)});return r.status(CODE_STATUS[e.code]??409).json(failure(e.code))}
+   log.error('operator_trade_failed',{op,error:String(e?.message??e).slice(0,200)});
    unavailable(r);
   }
  };
@@ -148,7 +154,7 @@ app.post('/operator/trades/cancel',operatorTrade('cancel',async(e,ctx,a)=>{
  if(typeof a.trade_id!=='string'||!/^t_[a-z0-9]{20}$/.test(a.trade_id))throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});
  if(a.reason!==undefined&&typeof a.reason!=='string')throw Object.assign(Error('INVALID_ARGUMENT'),{name:'TradeError',code:'INVALID_ARGUMENT'});
  const out=await e.cancel(ctx,a.trade_id,{reason:a.reason});
- console.log(JSON.stringify({event:'operator_trade_cancel',trade:a.trade_id,cancelled:out.cancelled,status:out.status,reason:out.reason??null}));
+ log.warn('operator_trade_cancel',{trade:a.trade_id,cancelled:out.cancelled,status:out.status,reason:out.reason??null});
  return out;
 }));
 app.post('/operator/trades/status',operatorTrade('status',(e,ctx,a)=>{
@@ -194,9 +200,9 @@ app.use((q,r,next)=>{if(q.role==='mcp'){const needed=routeScope(q.method,q.path)
 if(AGENT_ON){
  mountAgentRoutes(app,{agents:agentService,terms:subject=>termsOf(subject)});
  mountAgentPageRoutes(app,{agents:agentService,refusal:(e,q,r)=>{
-  if(e?.name==='TradeError'){console.error(JSON.stringify({event:'sign_page_refused',route:q.route?.path,code:e.code,detail:String(e.detail??'').slice(0,200)}));
+  if(e?.name==='TradeError'){log.warn('sign_page_refused',{route:q.route?.path,code:e.code,detail:String(e.detail??'').slice(0,200)});
    return r.status(CODE_STATUS[e.code]??409).json(typeof e.userMessage==='string'?{...failure(e.code),message:e.userMessage}:failure(e.code))}
-  console.error(JSON.stringify({event:'sign_page_failed',route:q.route?.path,error:String(e?.message??e).slice(0,200)}));unavailable(r);
+  log.error('sign_page_failed',{route:q.route?.path,error:String(e?.message??e).slice(0,200)});unavailable(r);
  }});
 }
 // ---- The YEET terms (terms.mjs, terms-store.mjs, docs/TERMS-IN-CHAT.md). Until the person accepted the CURRENT version,
@@ -253,13 +259,13 @@ const TERMS_LINK='terms-link';
 app.post('/terms/accept',async(q,r)=>{
  if(q.role!=='mcp'&&q.role!=='as')return r.sendStatus(403);
  const b=q.body??{};
- if(typeof b.version!=='string'||!Array.isArray(b.confirmed)||b.confirmed.length>12||b.confirmed.some(x=>typeof x!=='string'))return r.status(400).json(failure('INVALID_ARGUMENT'));
+ if(typeof b.version!=='string'||!Array.isArray(b.confirmed)||b.confirmed.length>12||b.confirmed.some(x=>typeof x!=='string')){inputRejected(q,'yeet_accept_terms');return r.status(400).json(failure('INVALID_ARGUMENT'))}
  const viaLink=q.role==='as'&&b.via==='link';
- if(viaLink&&(typeof b.token_id!=='string'||!/^[A-Za-z0-9_-]{16,32}$/.test(b.token_id)))return r.status(400).json(failure('INVALID_ARGUMENT'));
+ if(viaLink&&(typeof b.token_id!=='string'||!/^[A-Za-z0-9_-]{16,32}$/.test(b.token_id))){inputRejected(q,'terms_page');return r.status(400).json(failure('INVALID_ARGUMENT'))}
  const source=q.role==='as'?(viaLink?TERMS_LINK:'page'):'chat';
  const check=checkAcceptance({version:b.version,confirmed:viaLink?b.confirmed.filter(id=>REQUIRED_IDS.includes(id)):b.confirmed});
  if(!check.ok){
-  console.log(JSON.stringify({event:'terms_refused',account:q.subject,version:String(b.version).slice(0,20),reason:check.reason,missing:check.missing,source}));
+  log.warn('terms_refused',{account:q.subject,version:String(b.version).slice(0,20),reason:check.reason,missing:check.missing,source});
   return r.status(403).json({...failure('TERMS_REQUIRED'),terms:termsOf(q.subject),reason:check.reason,missing:check.missing});
  }
  // The link path: the token id and the acceptance go in together or not at all (terms-store.mjs acceptViaLink).
@@ -267,7 +273,7 @@ app.post('/terms/accept',async(q,r)=>{
  if(viaLink){
   const out=acceptViaLink({accountId:q.subject,tokenId:b.token_id,version:TERMS_VERSION,statements:check.confirmed});
   if(out.used){
-   console.log(JSON.stringify({event:'terms_link_reused',account:q.subject}));
+   log.warn('terms_link_reused',{account:q.subject});
    return r.status(409).json({error:'LINK_USED',terms:termsOf(q.subject)});
   }
   ({record,fresh}=out);
@@ -275,12 +281,12 @@ app.post('/terms/accept',async(q,r)=>{
   const session=source==='chat'&&typeof b.session==='string'?b.session.slice(0,200):null;
   ({record,fresh}=recordAcceptance({accountId:q.subject,version:TERMS_VERSION,statements:check.confirmed,source,clientId:q.role==='mcp'?q.principal.client:'terms-page',session}));
  }
- console.log(JSON.stringify({event:'terms_accepted',account:q.subject,version:record.version,statements:record.statements,accepted_at:record.accepted_at,source:record.source,client:record.client_id,session:record.session,fresh}));
+ log.warn('terms_accepted',{account:q.subject,version:record.version,statements:record.statements,accepted_at:record.accepted_at,source:record.source,client:record.client_id,session:record.session,fresh});
  const terms=withTermsLink(termsObject(record),q.subject);
  if(q.role==='as')return r.json({terms});
  // The overview, so the conversation continues; null when it cannot be read just now (the acceptance stands).
  let view=null;
- try{view=await overviewFor(await tradeEngine(),{accountId:q.subject,clientId:q.principal.client})}catch(e){console.error(JSON.stringify({event:'terms_overview_failed',error:String(e?.message??e).slice(0,200)}))}
+ try{view=await overviewFor(await tradeEngine(),{accountId:q.subject,clientId:q.principal.client})}catch(e){log.error('terms_overview_failed',{error:String(e?.message??e).slice(0,200)})}
  // The first thing after the terms: the name, then what to do next (overview.mjs welcomeSuggestions).
  if(view)view={...view,suggestions:welcomeSuggestions({named:!!usernameOf(q.subject),checkinOpen:view.checkin_open===true})};
  r.json({terms,overview:view});
@@ -290,9 +296,9 @@ app.get('/referral',(q,r)=>{if(q.role!=='mcp')return r.sendStatus(403);r.json(re
 app.post('/referral',(q,r)=>{
  if(q.role!=='mcp')return r.sendStatus(403);
  const b=q.body??{},code=b.code===undefined?null:referralCode(b.code),skip=b.skip===true;
- if((b.code!==undefined&&!code)||(!code&&!skip)||(code&&skip))return r.status(400).json(failure('INVALID_ARGUMENT'));
+ if((b.code!==undefined&&!code)||(!code&&!skip)||(code&&skip)){inputRejected(q,'apply_referral');return r.status(400).json(failure('INVALID_ARGUMENT'))}
  const out=decideReferral(q.subject,{code,skip});
- console.log(JSON.stringify({event:'referral_decided',account:q.subject,status:out.status,code:out.code}));
+ log.info('referral_decided',{account:q.subject,status:out.status,code:out.code});
  r.json(out);
 });
 // Wallet setup at sign-in (trade/wallet-ensure.mjs): only the sign-in server asks, after it verified the Privy identity.
@@ -306,7 +312,7 @@ app.post('/wallets/ensure',async(q,r)=>{
  catch(e){const code=typeof e?.code==='string'?e.code:'WALLET_SETUP_FAILED';r.status(502).json({code,chain:e?.chain??null,privy_status:e?.status??null,message:walletSetupMessage(code)})}
 });
 // yeet_coins: the catalogue with live prices (coins.mjs, market.mjs). A price that cannot be read is null, never an error.
-app.get('/coins',async(_q,r)=>{try{r.json(await coins())}catch(e){console.error(JSON.stringify({event:'coins_failed',error:String(e?.message??e).slice(0,200)}));unavailable(r)}});
+app.get('/coins',async(_q,r)=>{try{r.json(await coins())}catch(e){log.error('coins_failed',{error:String(e?.message??e).slice(0,200)});unavailable(r)}});
 // yeet_coin: one coin. What the person holds of it comes from the portfolio read when that answers within 2.5 s;
 // otherwise the coin is shown without a holding. An unknown symbol is the contract's COIN_NOT_SUPPORTED.
 const HOLDING_MS=1500;
@@ -325,7 +331,7 @@ app.get('/coins/:symbol',async(q,r)=>{
   const view=symbol?await coin(symbol,{holding:await holdingOf({accountId:q.subject,clientId:q.principal.client},symbol)}):null;
   if(!view)return r.status(409).json(failure('COIN_NOT_SUPPORTED'));
   r.json(view);
- }catch(e){console.error(JSON.stringify({event:'coin_failed',error:String(e?.message??e).slice(0,200)}));unavailable(r)}
+ }catch(e){log.error('coin_failed',{error:String(e?.message??e).slice(0,200)});unavailable(r)}
 });
 // Trade engine (lane B). Only the connector reaches these routes; each answer is the tool's structuredContent, plus
 // `confirm` for the card-only `_meta` where the contract has one. A refusal is the contract `failure` shape.
@@ -336,11 +342,11 @@ function trade(tool,fn){
   if(q.role!=='mcp')return r.sendStatus(403);
   const ctx={accountId:q.subject,clientId:q.principal.client};
   const args=tool?inputs[tool].safeParse(q.method==='GET'?{}:q.body??{}):{success:true,data:{}};
-  if(!args.success)return r.status(400).json(failure('INVALID_ARGUMENT'));
+  if(!args.success){inputRejected(q,tool,args.error);return r.status(400).json(failure('INVALID_ARGUMENT'))}
   try{r.json(await fn(await tradeEngine(),ctx,args.data,q))}
   catch(e){
-   if(e?.name==='TradeError'){console.error(JSON.stringify({event:'trade_refused',route:q.route?.path,code:e.code,detail:String(e.detail??'').slice(0,200)}));return r.status(CODE_STATUS[e.code]??409).json(failureWithFundUrl(withUserMessage(failure(e.code),e),e.code==='BALANCE_LOW'?await fundLink(ctx.accountId):undefined))}
-   console.error(JSON.stringify({event:'trade_route_failed',route:q.route?.path,error:String(e?.message??e).slice(0,200)}));
+   if(e?.name==='TradeError'){log.warn('trade_refused',{route:q.route?.path,code:e.code,detail:String(e.detail??'').slice(0,200)});return r.status(CODE_STATUS[e.code]??409).json(failureWithFundUrl(withUserMessage(failure(e.code),e),e.code==='BALANCE_LOW'?await fundLink(ctx.accountId):undefined))}
+   log.error('trade_route_failed',{route:q.route?.path,error:String(e?.message??e).slice(0,200)});
    unavailable(r);
   }
  };
@@ -421,11 +427,11 @@ const PAGE_CLIENT='sign-page',TRADE_ID=/^t_[a-z0-9]{20}$/;
 function pageTrade(fn){
  return async(q,r)=>{
   if(q.role!=='as')return r.sendStatus(403);
-  if(!TRADE_ID.test(q.params.id))return r.status(400).json(failure('INVALID_ARGUMENT'));
+  if(!TRADE_ID.test(q.params.id)){inputRejected(q,'sign_page');return r.status(400).json(failure('INVALID_ARGUMENT'))}
   try{r.json(await fn(await tradeEngine(),{accountId:q.subject,clientId:PAGE_CLIENT},q))}
   catch(e){
-   if(e?.name==='TradeError'){console.error(JSON.stringify({event:'sign_page_refused',route:q.route?.path,code:e.code,detail:String(e.detail??'').slice(0,200)}));return r.status(CODE_STATUS[e.code]??409).json(withUserMessage(failure(e.code),e))}
-   console.error(JSON.stringify({event:'sign_page_failed',route:q.route?.path,error:String(e?.message??e).slice(0,200)}));
+   if(e?.name==='TradeError'){log.warn('sign_page_refused',{route:q.route?.path,code:e.code,detail:String(e.detail??'').slice(0,200)});return r.status(CODE_STATUS[e.code]??409).json(withUserMessage(failure(e.code),e))}
+   log.error('sign_page_failed',{route:q.route?.path,error:String(e?.message??e).slice(0,200)});
    unavailable(r);
   }
  };
@@ -441,6 +447,7 @@ app.post('/sign/account/login-refresh',(q,r)=>{
  if(q.role!=='as')return r.sendStatus(403);
  const did=didFor(q.subject);
  if(did)accountLogin?.forget(did);
+ log.warn('device_login_linked',{account:q.subject});
  r.json({ok:true});
 });
 /** The funding page's account check (as/fund-page.mjs POST /fund/api/check): the Privy user id linked to the account
@@ -451,7 +458,7 @@ app.get('/account/wallets',async(q,r)=>{
   const user=didFor(q.subject),w=await (await tradeEngine()).wallets.require(q.subject);
   if(!user||typeof w?.base?.address!=='string')return unavailable(r);
   r.json({user,addresses:{base:w.base.address,solana:typeof w.solana?.address==='string'?w.solana.address:null}});
- }catch(e){console.error(JSON.stringify({event:'account_wallets_failed',error:String(e?.code??e?.message??e).slice(0,120)}));unavailable(r)}
+ }catch(e){log.error('account_wallets_failed',{error:String(e?.code??e?.message??e).slice(0,120)});unavailable(r)}
 });
 // Leaderboard and daily spin (P2): answered only with YEET_P2=1, otherwise a typed retryable failure.
 function xpRoute(tool,fn){
@@ -459,12 +466,12 @@ function xpRoute(tool,fn){
   if(q.role!=='mcp')return r.sendStatus(403);
   if(!p2On())return unavailable(r);
   const args=inputs[tool].safeParse(q.method==='GET'?{...q.params}:q.body??{});
-  if(!args.success)return r.status(400).json(failure('INVALID_ARGUMENT'));
+  if(!args.success){inputRejected(q,tool,args.error);return r.status(400).json(failure('INVALID_ARGUMENT'))}
   try{r.json(await fn(xpRuntime(),q.subject,args.data))}
   catch(e){
    // A typed refusal (the lucky wheel: someone else's or an expired lucky_id) is the caller's mistake, not an outage.
-   if(e?.name==='TradeError'&&e.code==='INVALID_ARGUMENT')return r.status(400).json(failure('INVALID_ARGUMENT'));
-   console.error(JSON.stringify({event:'xp_route_failed',route:q.route?.path,error:String(e?.message??e).slice(0,200)}));unavailable(r);
+   if(e?.name==='TradeError'&&e.code==='INVALID_ARGUMENT'){inputRejected(q,tool);return r.status(400).json(failure('INVALID_ARGUMENT'))}
+   log.error('xp_route_failed',{route:q.route?.path,error:String(e?.message??e).slice(0,200)});unavailable(r);
   }
  };
 }
@@ -489,7 +496,7 @@ app.post('/username',(q,r)=>{
  try{const username=setUsername(q.subject,q.body?.username);r.json({username})}
  catch(e){
   if(e?.name==='UsernameError')return r.status(e.code==='USERNAME_TAKEN'?409:400).json(usernameFailure(e.code));
-  console.error(JSON.stringify({event:'username_failed',error:String(e?.message??e).slice(0,200)}));unavailable(r);
+  log.error('username_failed',{error:String(e?.message??e).slice(0,200)});unavailable(r);
  }
 });
 app.use((_e,_q,r,_n)=>r.status(400).json({error:'invalid request'}));

@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { checkUsername, UsernameError } from "./username.mjs";
+import { log, emailDomain } from "#shared/log.mjs";
 let db;
 export const validAccount = (id) =>
   typeof id === "string" && /^yeet-privy-[a-zA-Z0-9_-]{1,80}$/.test(id);
@@ -83,10 +84,12 @@ export function resolveSignUp(value, { now = Date.now() } = {}) {
     const cap = betaCap();
     if (cap !== null && n >= cap) {
       conn.exec("COMMIT");
+      log.warn("account_cap_reached", { cap: "beta", accounts: n });
       return { refused: "BETA_FULL" };
     }
     if (n >= maxAccounts()) {
       conn.exec("COMMIT");
+      log.warn("account_cap_reached", { cap: "max", accounts: n });
       return { refused: "MAX_ACCOUNTS" };
     }
     const id = `yeet-privy-${randomBytes(16).toString("base64url")}`;
@@ -95,6 +98,10 @@ export function resolveSignUp(value, { now = Date.now() } = {}) {
       .prepare("INSERT INTO identity_links VALUES(?,?,?,?)")
       .run(value.provider, value.app_id, value.did, id);
     conn.exec("COMMIT");
+    // The email DOMAIN only, and only when the identity carries one (a verified Privy identity is provider, app and
+    // DID: no email reaches the server at sign-up; the sign-up email step links it inside Privy).
+    const domain = emailDomain(value.email);
+    log.warn("account_created", { account: id, provider: value.provider, accounts: n + 1, ...(domain ? { email_domain: domain } : {}) });
     return { id };
   } catch (e) {
     conn.exec("ROLLBACK");
